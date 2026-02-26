@@ -235,22 +235,20 @@ export default function PlayView() {
         const { team_id } = payload as { team_id: string | null }
         setCurrentTurnTeamId(team_id)
       })
-      .on('broadcast', { event: 'game_state_change' }, async ({ payload }) => {
-        const { status, fj_category } = payload as { status: string; fj_category?: string }
+      .on('broadcast', { event: 'game_state_change' }, ({ payload }) => {
+        const { status, fj_category, active_team_ids } = payload as {
+          status: string; fj_category?: string; active_team_ids?: string[]
+        }
         const r = roomRef.current
         if (!r) return
-        const updated = { ...r, status: status as Room['status'] }
-        setRoom(updated)
+        setRoom({ ...r, status: status as Room['status'] })
         if (status === 'round_2') { loadBoard(r.id, 2); return }
         if (status === 'final_jeopardy') {
           setFjCategoryName(fj_category ?? 'Final Jeopardy')
-          // Re-fetch my team to check is_active
           const myId = myTeamRef.current?.id
           if (!myId) return
-          const { data: t } = await supabase.from('teams').select().eq('id', myId).single()
-          if (!t) return
-          setMyTeam(t)
-          setFjSubPhase(t.is_active ? 'wager' : 'done')
+          const isActive = active_team_ids ? active_team_ids.includes(myId) : true
+          setFjSubPhase(isActive ? 'wager' : 'done')
         }
       })
       .on('broadcast', { event: 'fj_question_revealed' }, async ({ payload }) => {
@@ -297,6 +295,19 @@ export default function PlayView() {
       if (data) setTeamNames(new Map(data.map(t => [t.id, t.name])))
     })
   }, [phase, room?.id, room?.status, loadBoard])
+
+  // Fallback: if room transitions to final_jeopardy via postgres_changes and fjSubPhase not yet set
+  useEffect(() => {
+    if (room?.status !== 'final_jeopardy' || fjSubPhase !== null) return
+    const myId = myTeam?.id
+    if (!myId) return
+    // Fetch latest team record to check is_active
+    supabase.from('teams').select().eq('id', myId).single().then(({ data: t }) => {
+      if (!t) return
+      setMyTeam(t)
+      setFjSubPhase(prev => prev ?? (t.is_active ? 'wager' : 'done'))
+    })
+  }, [room?.status, fjSubPhase, myTeam?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-clear correct/wrong feedback after 2.5 s so the board becomes visible
   useEffect(() => {

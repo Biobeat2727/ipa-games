@@ -414,15 +414,13 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     broadcastRef.current?.send({
       type: 'broadcast',
       event: 'game_state_change',
-      payload: { status: 'final_jeopardy', fj_category: catName },
+      payload: { status: 'final_jeopardy', fj_category: catName, active_team_ids: [...top3ids] },
     })
   }
 
   async function revealFJQuestion() {
     if (!fjQuestion) return
     const startTs = Date.now()
-    await supabase.from('rooms').update({ current_question_id: fjQuestion.id }).eq('id', roomId)
-    setRoom(prev => ({ ...prev, current_question_id: fjQuestion.id }))
     setFjPhase('question')
     setFjTimerStart(startTs)
     broadcastRef.current?.send({
