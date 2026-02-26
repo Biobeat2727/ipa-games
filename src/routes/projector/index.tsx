@@ -135,6 +135,15 @@ export default function ProjectorView() {
               feedbackTimeoutRef.current = setTimeout(() => setFeedbackTeam(null), 2500)
             }
           }
+          // Clear the active question immediately when it's answered.
+          // Don't wait for the question_deactivated broadcast or the rooms postgres_changes —
+          // both can be delayed or missed. This event fires from the same DB write as the
+          // score update, so it's always received when scores update.
+          if (q.is_answered) {
+            setRoom(prev => prev?.current_question_id === q.id
+              ? { ...prev, current_question_id: null }
+              : prev)
+          }
           setCategories(prev => prev.map(cat => ({
             ...cat,
             questions: cat.questions.map(old => old.id === q.id ? q : old),
