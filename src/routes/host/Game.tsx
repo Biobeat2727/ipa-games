@@ -259,11 +259,6 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     clearJudging()
     assignTurn(buzz.team_id)
     deactivateQuestion()
-
-    // Auto-advance when all round 1 questions are done
-    const r1Done = room.status === 'round_1' &&
-      nextCategories.filter(c => c.round === 1).every(cat => cat.questions.every(q => q.is_answered))
-    if (r1Done) transitionToRound2()
   }
 
   async function handleWrong(buzz: Buzz) {
@@ -315,20 +310,17 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     if (questionDone) {
       assignTurn(null)
       deactivateQuestion()
-
-      // Auto-advance when all round 1 questions are done
-      const r1Done = room.status === 'round_1' &&
-        nextCategories.filter(c => c.round === 1).every(cat => cat.questions.every(q => q.is_answered))
-      if (r1Done) transitionToRound2()
     }
   }
 
   async function transitionToRound2() {
+    // Capture turn assignment before the async gap so it doesn't go stale
+    const firstTeamId = currentTurnTeamId
     const { error } = await supabase
       .from('rooms').update({ status: 'round_2' }).eq('id', roomId)
     if (!error) {
       setRoom(prev => ({ ...prev, status: 'round_2' }))
-      assignTurn(null)
+      assignTurn(firstTeamId)
       broadcastRef.current?.send({
         type: 'broadcast',
         event: 'game_state_change',
@@ -352,9 +344,12 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     return teams.find(t => t.id === teamId)?.name ?? 'Unknown'
   }
 
-  const sortedTeams = [...teams].sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0))
-  const round1Cats  = categories.filter(c => c.round === 1)
-  const round2Cats  = categories.filter(c => c.round === 2)
+  const sortedTeams    = [...teams].sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0))
+  const round1Cats     = categories.filter(c => c.round === 1)
+  const round2Cats     = categories.filter(c => c.round === 2)
+  const round1Complete = room.status === 'round_1' &&
+    round1Cats.length > 0 &&
+    round1Cats.every(cat => cat.questions.every(q => q.is_answered))
 
   const timerLow = timerSeconds <= 10
 
@@ -464,10 +459,50 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
               </button>
             </div>
           ) : (
+            round1Complete ? (
+            // ── Start Round 2 ────────────────────────────
+            <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8">
+              <div className="text-center">
+                <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">Round 1 Complete</p>
+                <p className="text-2xl font-black text-white">Ready for Round 2?</p>
+                <p className="text-gray-500 text-sm mt-2">Assign first pick, then start when you're ready</p>
+              </div>
+
+              <div className="w-full space-y-2">
+                <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">First pick</p>
+                {sortedTeams.map(team => (
+                  <button
+                    key={team.id}
+                    onClick={() => setCurrentTurnTeamId(
+                      team.id === currentTurnTeamId ? null : team.id
+                    )}
+                    className={`w-full px-4 py-3 rounded-xl text-sm font-bold transition-colors flex items-center justify-between ${
+                      team.id === currentTurnTeamId
+                        ? 'bg-yellow-400 text-gray-950'
+                        : 'bg-gray-800 hover:bg-gray-700 text-white'
+                    }`}
+                  >
+                    <span>{team.name}</span>
+                    <span className="font-mono text-xs opacity-70">
+                      {scores.get(team.id) ?? 0}
+                    </span>
+                  </button>
+                ))}
+              </div>
+
+              <button
+                onClick={transitionToRound2}
+                className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+              >
+                Start Round 2 →
+              </button>
+            </div>
+          ) : (
             <div className="flex-1 flex flex-col items-center justify-center gap-2">
               <p className="text-gray-700 text-sm">No active question</p>
               <p className="text-gray-800 text-xs">Select one from the list on the left</p>
             </div>
+          )
           )
         ) : (
           <>
