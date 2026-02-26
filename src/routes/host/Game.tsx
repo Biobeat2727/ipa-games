@@ -240,7 +240,10 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     broadcastRef.current?.send({
       type: 'broadcast',
       event: 'score_update',
-      payload: { teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })) },
+      payload: {
+        teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
+        current_question_id: null,
+      },
     })
 
     clearJudging()
@@ -265,17 +268,22 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     // without waiting for postgres_changes to round-trip
     setBuzzes(prev => prev.map(b => b.id === buzz.id ? { ...b, status: 'wrong' } : b))
 
+    // Compute remaining before broadcast so we can embed question state in the payload
+    const remainingPending = buzzes.filter(b => b.status === 'pending' && b.id !== buzz.id)
+    const questionDone = remainingPending.length === 0
+
     broadcastRef.current?.send({
       type: 'broadcast',
       event: 'score_update',
-      payload: { teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })) },
+      payload: {
+        teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
+        ...(questionDone ? { current_question_id: null } : {}),
+      },
     })
 
     clearJudging()
 
-    // If no more pending buzzes, the question is over with no winner
-    const remainingPending = buzzes.filter(b => b.status === 'pending' && b.id !== buzz.id)
-    if (remainingPending.length === 0) {
+    if (questionDone) {
       assignTurn(null)
       deactivateQuestion()
     }

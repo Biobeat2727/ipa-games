@@ -179,8 +179,15 @@ export default function ProjectorView() {
         setTimerPayload(payload as TimerPayload)
       })
       .on('broadcast', { event: 'score_update' }, ({ payload }) => {
-        const data = payload as { teams: Array<{ id: string; score: number }> }
+        const data = payload as { teams: Array<{ id: string; score: number }>; current_question_id?: string | null }
         setScores(new Map(data.teams.map(t => [t.id, t.score])))
+        // When the host embeds current_question_id in the score update, apply it immediately.
+        // This uses the already-reliable score_update channel instead of the fragile
+        // question_deactivated broadcast or rooms postgres_changes.
+        if ('current_question_id' in data) {
+          setRoom(prev => prev ? { ...prev, current_question_id: data.current_question_id ?? null } : prev)
+          if (!data.current_question_id) setTimerPayload(null)
+        }
       })
       .on('broadcast', { event: 'turn_change' }, ({ payload }) => {
         const { team_id } = payload as { team_id: string | null }
@@ -245,8 +252,11 @@ export default function ProjectorView() {
 
   // ── Derived ───────────────────────────────────────────────
 
+  // Also guard against stale room.current_question_id: if the question was already marked
+  // answered locally (via postgres_changes), don't treat it as active even if the room
+  // row hasn't updated yet.
   const activeQuestion = categories.flatMap(c => c.questions)
-    .find(q => q.id === room?.current_question_id) ?? null
+    .find(q => q.id === room?.current_question_id && !q.is_answered) ?? null
 
   const sortedTeams   = [...teams].sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0))
   const pendingBuzzes = buzzes.filter(b => b.status === 'pending')
