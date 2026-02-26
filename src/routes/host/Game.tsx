@@ -59,18 +59,29 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
 
   // Broadcast channel
   useEffect(() => {
+    let autoAssigned = false
     const ch = supabase.channel(`room:${initialRoom.code}`)
       .on('broadcast', { event: 'question_preview' }, ({ payload }) => {
         const p = payload as { questionId: string; categoryName: string; pointValue: number | null }
         setPreviewInfo(p)
       })
-      .on('broadcast', { event: 'question_activated' }, () => {
+      .on('broadcast', { event: 'question_activated' }, ({ payload }) => {
+        const { question_id } = payload as { question_id: string }
         setPreviewInfo(null)
+        setRoom(prev => ({ ...prev, current_question_id: question_id }))
       })
-    ch.subscribe()
+    ch.subscribe((status) => {
+      // Auto-assign first turn when the game starts
+      if (status === 'SUBSCRIBED' && !autoAssigned && teams.length > 0) {
+        autoAssigned = true
+        const firstTeamId = teams[0].id
+        setCurrentTurnTeamId(firstTeamId)
+        ch.send({ type: 'broadcast', event: 'turn_change', payload: { team_id: firstTeamId } })
+      }
+    })
     broadcastRef.current = ch
     return () => { supabase.removeChannel(ch); broadcastRef.current = null }
-  }, [initialRoom.code])
+  }, [initialRoom.code]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Subscribe to room + question + team score changes
   useEffect(() => {
@@ -251,6 +262,13 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     })
 
     clearJudging()
+
+    // If no more pending buzzes, the question is over with no winner
+    const remainingPending = buzzes.filter(b => b.status === 'pending' && b.id !== buzz.id)
+    if (remainingPending.length === 0) {
+      assignTurn(null)
+      deactivateQuestion()
+    }
   }
 
   // ── Derived ───────────────────────────────────────────────
