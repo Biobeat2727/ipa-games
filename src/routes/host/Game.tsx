@@ -30,7 +30,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const [timerSeconds, setTimerSeconds]       = useState(RESPONSE_SECONDS)
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
   const [previewInfo, setPreviewInfo] = useState<{
-    questionId: string; categoryName: string; pointValue: number | null
+    questionId: string; categoryName: string; pointValue: number | null; startTs: number
   } | null>(null)
 
   const broadcastRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
@@ -62,7 +62,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     let autoAssigned = false
     const ch = supabase.channel(`room:${initialRoom.code}`)
       .on('broadcast', { event: 'question_preview' }, ({ payload }) => {
-        const p = payload as { questionId: string; categoryName: string; pointValue: number | null }
+        const p = payload as { questionId: string; categoryName: string; pointValue: number | null; startTs: number }
         setPreviewInfo(p)
       })
       .on('broadcast', { event: 'question_activated' }, ({ payload }) => {
@@ -82,6 +82,16 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     broadcastRef.current = ch
     return () => { supabase.removeChannel(ch); broadcastRef.current = null }
   }, [initialRoom.code]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Host-side fallback: activate question after the 10-second preview countdown.
+  // This fires if the player's DB update or broadcast was missed by the host.
+  // activateQuestion is idempotent — double-writing the same question_id is harmless.
+  useEffect(() => {
+    if (!previewInfo) return
+    const delay = Math.max(0, previewInfo.startTs + 10_000 - Date.now())
+    const id = setTimeout(() => activateQuestion(previewInfo.questionId), delay)
+    return () => clearTimeout(id)
+  }, [previewInfo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Subscribe to room + question + team score changes
   useEffect(() => {

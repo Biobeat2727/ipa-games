@@ -343,7 +343,9 @@ Add a service worker for offline caching of the app shell. This ensures slow bar
 - `/projector` full flow: code entry → lobby (room code + team list) → Jeopardy grid (correct columns/rows, greyed when answered) → active question (big text) → buzz queue → judging (team name + countdown) → correct feedback flash → finished/winner screen; score strip at bottom throughout; fully responsive with clamp() font sizes
 - Real-time sync: postgres_changes subscriptions on rooms, teams, questions, buzzes; broadcast channel (`room:{code}`) for timer_start (includes team_name) and score_update events
 - Session persistence: localStorage resume for both host and player across refreshes
-- Bug fixes: wrong answers deduct points + broadcast, Correct button no longer disabled without typed response, judging state clears when question deactivated, content.ts validates JSON before deleting, final_jeopardy is optional in JSON
+- Turn management (partial): host auto-assigns first turn to first team at game start; turn passes to winning team after a correct answer; host can manually reassign via "give" button; all clients receive `turn_change` broadcast; turn is cleared after all buzzes exhausted
+- Question selection flow: player whose turn it is picks from the board → 10-second `question_preview` countdown on all screens → question activates on all screens simultaneously; host has its own 10-second fallback activation so it never misses a question even if a broadcast is dropped
+- Bug fixes: wrong answers deduct points + broadcast; judging state clears when question deactivated; content.ts validates JSON before deleting; final_jeopardy is optional in JSON; host `question_activated` handler now updates `room.current_question_id` directly (previously relied only on slow postgres_changes); all buzzes wrong → question auto-deactivates and turn is cleared
 
 ### Key files
 - `src/lib/supabase.ts` — typed Supabase client
@@ -365,7 +367,6 @@ Add a service worker for offline caching of the app shell. This ensures slow bar
 ### What is NOT yet built
 - Round 2 → Final Jeopardy transition (is_active flag, top-3 cutoff)
 - Final Jeopardy wagering flow
-- Turn management (which team chooses the next question)
 - Manual score adjustment on host
 - Vercel deployment
 
@@ -373,7 +374,7 @@ Add a service worker for offline caching of the app shell. This ensures slow bar
 
 ## Notes for Later
 
-- **Turn management** — no system yet for which team picks the next question; currently host just activates any question freely
+- **Turn persistence** — `currentTurnTeamId` lives only in broadcast state; a page refresh on the host resets it to null. Could persist in a `rooms` column if needed.
 - **Round 2 → Final Jeopardy transition** — need to rank teams after R2, set is_active=false for non-top-3, show cutoff screen
 - **Final Jeopardy** — wager input → lock → answer reveal → response → host judging → winner screen
 - **Manual score adjustment** — host should be able to edit a team's score directly (disputes)
