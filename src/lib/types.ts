@@ -10,7 +10,7 @@ export type WagerStatus = 'pending' | 'correct' | 'wrong'
 // Row types (mirror the DB schema exactly)
 // ============================================================
 
-export interface Room {
+export type Room = {
   id: string
   code: string
   host_id: string
@@ -19,7 +19,7 @@ export interface Room {
   created_at: string
 }
 
-export interface Team {
+export type Team = {
   id: string
   room_id: string
   name: string
@@ -28,7 +28,7 @@ export interface Team {
   created_at: string
 }
 
-export interface Player {
+export type Player = {
   id: string
   team_id: string
   nickname: string | null
@@ -36,14 +36,14 @@ export interface Player {
   created_at: string
 }
 
-export interface Category {
+export type Category = {
   id: string
   room_id: string
   name: string
   round: number // 1, 2, or 3 (3 = Final Jeopardy)
 }
 
-export interface Question {
+export type Question = {
   id: string
   category_id: string
   answer: string
@@ -53,7 +53,7 @@ export interface Question {
   answered_by_team_id: string | null
 }
 
-export interface QuestionPublic {
+export type QuestionPublic = {
   id: string
   category_id: string
   answer: string
@@ -62,7 +62,7 @@ export interface QuestionPublic {
   answered_by_team_id: string | null
 }
 
-export interface Buzz {
+export type Buzz = {
   id: string
   question_id: string
   team_id: string
@@ -72,7 +72,7 @@ export interface Buzz {
   status: BuzzStatus
 }
 
-export interface Wager {
+export type Wager = {
   id: string
   team_id: string
   room_id: string
@@ -91,19 +91,19 @@ export type Database = {
     Tables: {
       rooms: {
         Row: Room
-        Insert: Omit<Room, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Insert: Omit<Room, 'id' | 'created_at' | 'current_question_id'> & { id?: string; created_at?: string; current_question_id?: string | null }
         Update: Partial<Omit<Room, 'id'>>
         Relationships: []
       }
       teams: {
         Row: Team
-        Insert: Omit<Team, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Insert: Omit<Team, 'id' | 'created_at' | 'score' | 'is_active'> & { id?: string; created_at?: string; score?: number; is_active?: boolean }
         Update: Partial<Omit<Team, 'id'>>
         Relationships: []
       }
       players: {
         Row: Player
-        Insert: Omit<Player, 'id' | 'created_at'> & { id?: string; created_at?: string }
+        Insert: Omit<Player, 'id' | 'created_at' | 'nickname'> & { id?: string; created_at?: string; nickname?: string | null }
         Update: Partial<Omit<Player, 'id'>>
         Relationships: []
       }
@@ -115,19 +115,19 @@ export type Database = {
       }
       questions: {
         Row: Question
-        Insert: Omit<Question, 'id'> & { id?: string }
+        Insert: Omit<Question, 'id' | 'is_answered' | 'answered_by_team_id'> & { id?: string; is_answered?: boolean; answered_by_team_id?: string | null }
         Update: Partial<Omit<Question, 'id'>>
         Relationships: []
       }
       buzzes: {
         Row: Buzz
-        Insert: Omit<Buzz, 'id' | 'buzzed_at'> & { id?: string; buzzed_at?: string }
+        Insert: Omit<Buzz, 'id' | 'buzzed_at' | 'response' | 'response_submitted_at'> & { id?: string; buzzed_at?: string; response?: string | null; response_submitted_at?: string | null }
         Update: Partial<Omit<Buzz, 'id'>>
         Relationships: []
       }
       wagers: {
         Row: Wager
-        Insert: Omit<Wager, 'id'> & { id?: string }
+        Insert: Omit<Wager, 'id' | 'response' | 'submitted_at'> & { id?: string; response?: string | null; submitted_at?: string | null }
         Update: Partial<Omit<Wager, 'id'>>
         Relationships: []
       }
@@ -138,12 +138,12 @@ export type Database = {
         Relationships: []
       }
     }
-    Functions: Record<string, never>
+    Functions: Record<never, never>
     Enums: {
       room_status: RoomStatus
       buzz_status: BuzzStatus
       wager_status: WagerStatus
     }
-    CompositeTypes: Record<string, never>
+    CompositeTypes: Record<never, never>
   }
 }
