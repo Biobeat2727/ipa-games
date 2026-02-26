@@ -93,47 +93,57 @@ export type Database = {
         Row: Room
         Insert: Omit<Room, 'id' | 'created_at'> & { id?: string; created_at?: string }
         Update: Partial<Omit<Room, 'id'>>
+        Relationships: []
       }
       teams: {
         Row: Team
         Insert: Omit<Team, 'id' | 'created_at'> & { id?: string; created_at?: string }
         Update: Partial<Omit<Team, 'id'>>
+        Relationships: []
       }
       players: {
         Row: Player
         Insert: Omit<Player, 'id' | 'created_at'> & { id?: string; created_at?: string }
         Update: Partial<Omit<Player, 'id'>>
+        Relationships: []
       }
       categories: {
         Row: Category
         Insert: Omit<Category, 'id'> & { id?: string }
         Update: Partial<Omit<Category, 'id'>>
+        Relationships: []
       }
       questions: {
         Row: Question
         Insert: Omit<Question, 'id'> & { id?: string }
         Update: Partial<Omit<Question, 'id'>>
+        Relationships: []
       }
       buzzes: {
         Row: Buzz
         Insert: Omit<Buzz, 'id' | 'buzzed_at'> & { id?: string; buzzed_at?: string }
         Update: Partial<Omit<Buzz, 'id'>>
+        Relationships: []
       }
       wagers: {
         Row: Wager
         Insert: Omit<Wager, 'id'> & { id?: string }
         Update: Partial<Omit<Wager, 'id'>>
+        Relationships: []
       }
     }
     Views: {
       questions_public: {
         Row: QuestionPublic
+        Relationships: []
       }
     }
+    Functions: Record<string, never>
     Enums: {
       room_status: RoomStatus
       buzz_status: BuzzStatus
       wager_status: WagerStatus
     }
+    CompositeTypes: Record<string, never>
   }
 }
