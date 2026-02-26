@@ -218,6 +218,14 @@ export default function PlayView() {
         const { team_id } = payload as { team_id: string | null }
         setCurrentTurnTeamId(team_id)
       })
+      .on('broadcast', { event: 'game_state_change' }, ({ payload }) => {
+        const { status } = payload as { status: string }
+        const r = roomRef.current
+        if (!r) return
+        const updated = { ...r, status: status as Room['status'] }
+        setRoom(updated)
+        if (status === 'round_2') loadBoard(r.id, 2)
+      })
       .subscribe()
 
     broadcastRef.current = ch
