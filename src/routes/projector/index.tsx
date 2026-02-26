@@ -33,6 +33,16 @@ export default function ProjectorView() {
   const [previewCountdown, setPreviewCountdown]   = useState<number | null>(null)
   const [error, setError]               = useState('')
 
+  // Final Jeopardy state
+  const [fjCategoryName, setFjCategoryName]   = useState('')
+  const [fjQuestion, setFjQuestion]           = useState<{ answer: string } | null>(null)
+  const [fjWagerStatus, setFjWagerStatus]     = useState<Set<string>>(new Set())
+  const [fjTimerStart, setFjTimerStart]       = useState<number | null>(null)
+  const [fjTimeRemaining, setFjTimeRemaining] = useState<number | null>(null)
+  const [fjReveal, setFjReveal]               = useState<{
+    teamName: string; response: string | null; result?: 'correct' | 'wrong'; wager?: number; newScore?: number
+  } | null>(null)
+
   // Refs — give stable callbacks access to latest values without re-creating them
   const roomRef            = useRef<Room | null>(null)
   const teamsRef           = useRef<Team[]>([])
@@ -215,9 +225,43 @@ export default function ProjectorView() {
         setCurrentTurnTeamId(team_id)
       })
       // Fired by the host when the game starts — transition from lobby to board
-      .on('broadcast', { event: 'game_state_change' }, () => resyncAll())
+      .on('broadcast', { event: 'game_state_change' }, ({ payload }) => {
+        const { fj_category } = payload as { fj_category?: string }
+        if (fj_category) setFjCategoryName(fj_category)
+        resyncAll()
+      })
       // Fired by players when they join — keeps lobby team list in sync
       .on('broadcast', { event: 'team_joined' }, () => refetchTeams())
+      .on('broadcast', { event: 'fj_wager_locked' }, ({ payload }) => {
+        const { team_id } = payload as { team_id: string }
+        setFjWagerStatus(prev => new Set([...prev, team_id]))
+      })
+      .on('broadcast', { event: 'fj_question_revealed' }, async ({ payload }) => {
+        const { question_id, start_ts } = payload as { question_id: string; start_ts: number }
+        const { data: q } = await supabase.from('questions_public').select().eq('id', question_id).single()
+        if (q) setFjQuestion({ answer: q.answer })
+        setFjTimerStart(start_ts)
+        setFjTimeRemaining(90)
+      })
+      .on('broadcast', { event: 'fj_timer_expired' }, () => {
+        setFjTimeRemaining(0)
+      })
+      .on('broadcast', { event: 'fj_answer_reveal' }, ({ payload }) => {
+        const { team_name, response } = payload as { team_name: string; response: string | null }
+        setFjReveal({ teamName: team_name, response })
+      })
+      .on('broadcast', { event: 'fj_answer_judged' }, ({ payload }) => {
+        const { team_id, status, wager, new_score } = payload as {
+          team_id: string; status: 'correct' | 'wrong'; wager: number; new_score: number
+        }
+        setFjReveal(prev => prev ? { ...prev, result: status, wager, newScore: new_score } : prev)
+        setScores(prev => new Map([...prev, [team_id, new_score]]))
+      })
+      .on('broadcast', { event: 'game_over' }, ({ payload }) => {
+        const { scores: s } = payload as { scores: Array<{ id: string; score: number }> }
+        setScores(new Map(s.map(t => [t.id, t.score])))
+        setRoom(prev => prev ? { ...prev, status: 'finished' } : prev)
+      })
       .subscribe(status => {
         // On (re)connect, re-sync all state so nothing is missed
         if (status === 'SUBSCRIBED') resyncAll()
@@ -261,6 +305,20 @@ export default function ProjectorView() {
     const id = setInterval(tick, 500)
     return () => clearInterval(id)
   }, [timerPayload])
+
+  // ── FJ countdown ──────────────────────────────────────────
+
+  useEffect(() => {
+    if (fjTimerStart === null) return
+    const tick = () => {
+      const remaining = Math.max(0, Math.floor((fjTimerStart + 90_000 - Date.now()) / 1000))
+      setFjTimeRemaining(remaining)
+      if (remaining === 0) clearInterval(id)
+    }
+    tick()
+    const id = setInterval(tick, 500)
+    return () => clearInterval(id)
+  }, [fjTimerStart])
 
   // ── Preview countdown ─────────────────────────────────────
 
@@ -373,21 +431,163 @@ export default function ProjectorView() {
     )
   }
 
-  // Game over
+  // ── Final Jeopardy answer reveal ─────────────────────────
+  if (room.status === 'final_jeopardy' && fjReveal) {
+    const { teamName: rName, response, result, wager, newScore } = fjReveal
+    return (
+      <div className={`min-h-screen text-white flex flex-col items-center justify-center p-12 text-center ${
+        result === 'correct' ? 'bg-green-950' : result === 'wrong' ? 'bg-red-950' : 'bg-gray-950'
+      }`}>
+        <p className="text-gray-500 uppercase tracking-widest mb-4"
+          style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
+          {fjCategoryName}
+        </p>
+        <p className="font-black text-yellow-400 leading-none mb-6"
+          style={{ fontSize: 'clamp(3rem, 10vw, 8rem)' }}>
+          {rName}
+        </p>
+        <div className="bg-gray-900/60 border border-gray-700 rounded-3xl px-12 py-8 max-w-4xl mb-6">
+          <p className={`font-bold leading-snug ${response ? 'text-white' : 'text-gray-600 italic'}`}
+            style={{ fontSize: 'clamp(1.5rem, 4vw, 3.5rem)' }}>
+            {response ?? 'No response'}
+          </p>
+        </div>
+        {result && (
+          <div className={`mt-4 ${result === 'correct' ? 'text-green-400' : 'text-red-400'}`}>
+            <p className="font-black" style={{ fontSize: 'clamp(2rem, 6vw, 5rem)' }}>
+              {result === 'correct' ? `✓ +${wager}` : `✗ −${wager}`}
+            </p>
+            <p className="font-mono font-bold mt-1" style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)' }}>
+              {newScore}
+            </p>
+          </div>
+        )}
+        {/* Score strip */}
+        <div className="fixed bottom-0 left-0 right-0 bg-gray-900/90 border-t border-gray-800 py-3 px-10 flex justify-center gap-12">
+          {sortedTeams.map(team => (
+            <div key={team.id} className="text-center">
+              <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1.1rem)' }}>
+                {team.name}
+              </p>
+              <p className={`font-mono font-black tabular-nums ${
+                (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
+              }`} style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>
+                {scores.get(team.id) ?? team.score}
+              </p>
+            </div>
+          ))}
+        </div>
+      </div>
+    )
+  }
+
+  // ── Final Jeopardy wager / question screens ───────────────
+  if (room.status === 'final_jeopardy') {
+    const fjTeams = teams.filter(t => t.is_active)
+
+    // Question revealed + timer running
+    if (fjQuestion) {
+      const dur  = 90
+      const rem  = fjTimeRemaining ?? dur
+      const pct  = (rem / dur) * 100
+      const low  = rem <= 15
+      return (
+        <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
+          {/* Timer bar */}
+          <div className="h-3 bg-gray-900 w-full shrink-0">
+            <div
+              className={`h-full transition-all duration-500 ${low ? 'bg-red-500' : 'bg-yellow-400'}`}
+              style={{ width: `${pct}%` }}
+            />
+          </div>
+          <div className="flex-1 flex flex-col items-center justify-center px-16 text-center">
+            <p className="text-blue-400 uppercase tracking-[0.3em] mb-6"
+              style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
+              Final Jeopardy — {fjCategoryName}
+            </p>
+            <p className="font-black text-white leading-tight mb-10 max-w-5xl"
+              style={{ fontSize: 'clamp(2rem, 5.5vw, 5rem)' }}>
+              {fjQuestion.answer}
+            </p>
+            <p className={`font-mono font-black tabular-nums leading-none ${low ? 'text-red-400' : 'text-gray-400'}`}
+              style={{ fontSize: 'clamp(5rem, 15vw, 12rem)' }}>
+              {rem}
+            </p>
+          </div>
+          {/* Score strip */}
+          <div className="shrink-0 bg-gray-900 border-t border-gray-800 py-3 px-10 flex justify-center gap-12">
+            {fjTeams.map(team => (
+              <div key={team.id} className="text-center">
+                <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1.1rem)' }}>
+                  {team.name}
+                </p>
+                <p className={`font-mono font-black tabular-nums ${
+                  (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
+                }`} style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>
+                  {scores.get(team.id) ?? team.score}
+                </p>
+              </div>
+            ))}
+          </div>
+        </div>
+      )
+    }
+
+    // Wager collection phase
+    return (
+      <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-12 text-center">
+        <p className="text-blue-400 uppercase tracking-[0.4em] mb-4"
+          style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
+          Final Jeopardy
+        </p>
+        <p className="font-black text-white leading-none mb-12"
+          style={{ fontSize: 'clamp(3rem, 12vw, 9rem)' }}>
+          {fjCategoryName}
+        </p>
+        <div className="flex flex-wrap justify-center gap-6">
+          {fjTeams.map(team => {
+            const wagered = fjWagerStatus.has(team.id)
+            return (
+              <div key={team.id} className={`rounded-2xl px-8 py-5 flex items-center gap-4 ${
+                wagered ? 'bg-green-900/40 border-2 border-green-500/60' : 'bg-gray-900 border border-gray-700'
+              }`}>
+                <span className={`w-3 h-3 rounded-full shrink-0 ${wagered ? 'bg-green-400' : 'bg-gray-600 animate-pulse'}`} />
+                <p className="font-bold" style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>{team.name}</p>
+                <p className={`text-sm font-semibold ${wagered ? 'text-green-400' : 'text-gray-600'}`}>
+                  {wagered ? 'Ready' : 'Wagering…'}
+                </p>
+              </div>
+            )
+          })}
+        </div>
+      </div>
+    )
+  }
+
+  // Game over — full-screen winner celebration
   if (room.status === 'finished') {
-    const winner = sortedTeams[0]
+    const finalSorted = [...teams].sort(
+      (a, b) => (scores.get(b.id) ?? b.score) - (scores.get(a.id) ?? a.score)
+    )
+    const winner = finalSorted[0]
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8 text-center">
         <p className="text-gray-500 uppercase tracking-widest mb-4" style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)' }}>
-          Winner
+          🏆 Winner 🏆
         </p>
-        <p className="font-black text-yellow-400 leading-none mb-10"
+        <p className="font-black text-yellow-400 leading-none mb-2"
           style={{ fontSize: 'clamp(3.5rem, 14vw, 10rem)' }}>
           {winner?.name ?? '—'}
         </p>
+        <p className="font-mono font-black text-yellow-300 mb-12"
+          style={{ fontSize: 'clamp(2rem, 6vw, 5rem)' }}>
+          {scores.get(winner?.id ?? '') ?? winner?.score ?? 0} pts
+        </p>
         <div className="space-y-3 w-full max-w-2xl">
-          {sortedTeams.map((team, i) => (
-            <div key={team.id} className="flex items-center gap-4 bg-gray-900 border border-gray-800 rounded-2xl px-8 py-5">
+          {finalSorted.map((team, i) => (
+            <div key={team.id} className={`flex items-center gap-4 rounded-2xl px-8 py-5 ${
+              i === 0 ? 'bg-yellow-400/10 border-2 border-yellow-400/60' : 'bg-gray-900 border border-gray-800'
+            }`}>
               <span className="text-gray-600 font-mono w-10 shrink-0 text-right"
                 style={{ fontSize: 'clamp(1.25rem, 3vw, 2rem)' }}>
                 {i + 1}

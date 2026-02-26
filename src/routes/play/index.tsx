@@ -8,7 +8,7 @@ import {
   setRoomCode,
   setTeamId,
 } from '../../lib/session'
-import type { Buzz, Player, QuestionPublic, Room, Team } from '../../lib/types'
+import type { Buzz, Player, QuestionPublic, Room, Team, Wager } from '../../lib/types'
 
 type Phase = 'enter_code' | 'select_team' | 'lobby' | 'game'
 
@@ -58,6 +58,23 @@ export default function PlayView() {
   const [teamNames, setTeamNames]             = useState<Map<string, string>>(new Map())
   const [previewInfo, setPreviewInfo]         = useState<PreviewInfo | null>(null)
   const [previewCountdown, setPreviewCountdown] = useState<number | null>(null)
+
+  // Final Jeopardy state
+  type FjSubPhase = 'wager' | 'wager_locked' | 'question' | 'reviewing' | 'done' | null
+  const [fjSubPhase, setFjSubPhase]           = useState<FjSubPhase>(null)
+  const [fjCategoryName, setFjCategoryName]   = useState('')
+  const [fjWagerInput, setFjWagerInput]       = useState('')
+  const [fjWagerId, setFjWagerId]             = useState<string | null>(null)
+  const [fjQuestion, setFjQuestion]           = useState<QuestionPublic | null>(null)
+  const [fjResponse, setFjResponse]           = useState('')
+  const [fjResponseSubmitted, setFjResponseSubmitted] = useState(false)
+  const [fjTimerStart, setFjTimerStart]       = useState<number | null>(null)
+  const [fjTimeRemaining, setFjTimeRemaining] = useState<number | null>(null)
+  const [fjFinalScores, setFjFinalScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
+  const fjResponseRef = useRef('')
+  const fjWagerIdRef  = useRef<string | null>(null)
+  useEffect(() => { fjResponseRef.current = fjResponse }, [fjResponse])
+  useEffect(() => { fjWagerIdRef.current = fjWagerId }, [fjWagerId])
 
   // Refs to avoid stale closures in async/broadcast callbacks
   const responseSubmittedRef = useRef(false)
@@ -218,13 +235,52 @@ export default function PlayView() {
         const { team_id } = payload as { team_id: string | null }
         setCurrentTurnTeamId(team_id)
       })
-      .on('broadcast', { event: 'game_state_change' }, ({ payload }) => {
-        const { status } = payload as { status: string }
+      .on('broadcast', { event: 'game_state_change' }, async ({ payload }) => {
+        const { status, fj_category } = payload as { status: string; fj_category?: string }
         const r = roomRef.current
         if (!r) return
         const updated = { ...r, status: status as Room['status'] }
         setRoom(updated)
-        if (status === 'round_2') loadBoard(r.id, 2)
+        if (status === 'round_2') { loadBoard(r.id, 2); return }
+        if (status === 'final_jeopardy') {
+          setFjCategoryName(fj_category ?? 'Final Jeopardy')
+          // Re-fetch my team to check is_active
+          const myId = myTeamRef.current?.id
+          if (!myId) return
+          const { data: t } = await supabase.from('teams').select().eq('id', myId).single()
+          if (!t) return
+          setMyTeam(t)
+          setFjSubPhase(t.is_active ? 'wager' : 'done')
+        }
+      })
+      .on('broadcast', { event: 'fj_question_revealed' }, async ({ payload }) => {
+        const { question_id, start_ts, duration } = payload as { question_id: string; start_ts: number; duration: number }
+        const { data: q } = await supabase.from('questions_public').select().eq('id', question_id).single()
+        setFjQuestion(q ?? null)
+        setFjTimerStart(start_ts)
+        setFjTimeRemaining(duration)
+        setFjSubPhase('question')
+      })
+      .on('broadcast', { event: 'fj_timer_expired' }, () => {
+        // Auto-submit whatever the player has typed
+        const wagerId = fjWagerIdRef.current
+        const resp    = fjResponseRef.current.trim()
+        if (wagerId) {
+          supabase.from('wagers').update({
+            response: resp || null,
+            submitted_at: new Date().toISOString(),
+          }).eq('id', wagerId).then(() => {})
+        }
+        setFjResponseSubmitted(true)
+        setFjSubPhase('reviewing')
+      })
+      .on('broadcast', { event: 'game_over' }, ({ payload }) => {
+        const { scores: s } = payload as { scores: Array<{ id: string; name: string; score: number }> }
+        setFjFinalScores(s)
+        const mine = s.find(t => t.id === myTeamRef.current?.id)
+        if (mine) setMyScore(mine.score)
+        setRoom(prev => prev ? { ...prev, status: 'finished' } : prev)
+        setFjSubPhase('done')
       })
       .subscribe()
 
@@ -308,6 +364,21 @@ export default function PlayView() {
     const id = setInterval(tick, 500)
     return () => clearInterval(id)
   }, [timerPayload])
+
+  // FJ 90-second countdown
+  useEffect(() => {
+    if (fjSubPhase !== 'question' || fjTimerStart === null) return
+    const tick = () => {
+      const remaining = Math.max(0, Math.floor(
+        (fjTimerStart + 90_000 - Date.now()) / 1000
+      ))
+      setFjTimeRemaining(remaining)
+      if (remaining === 0) clearInterval(id)
+    }
+    tick()
+    const id = setInterval(tick, 500)
+    return () => clearInterval(id)
+  }, [fjSubPhase, fjTimerStart])
 
   // Subscribe to my buzz status changes (for correct/wrong feedback)
   useEffect(() => {
@@ -434,6 +505,30 @@ export default function PlayView() {
       event: 'question_preview',
       payload: preview,
     })
+  }
+
+  async function handleSubmitWager() {
+    if (!myTeam || !room) return
+    const amount = Math.max(0, Math.min(Math.max(0, myScore), parseInt(fjWagerInput) || 0))
+    const { data: wager, error: err } = await supabase
+      .from('wagers').insert({ team_id: myTeam.id, room_id: room.id, amount, status: 'pending' })
+      .select().single()
+    if (!wager || err) return
+    setFjWagerId(wager.id)
+    setFjSubPhase('wager_locked')
+    broadcastRef.current?.send({
+      type: 'broadcast', event: 'fj_wager_locked', payload: { team_id: myTeam.id },
+    })
+  }
+
+  async function handleSubmitFJResponse() {
+    const wagerId = fjWagerId
+    if (!wagerId || !fjResponse.trim()) return
+    await supabase.from('wagers').update({
+      response: fjResponse.trim(),
+      submitted_at: new Date().toISOString(),
+    }).eq('id', wagerId)
+    setFjResponseSubmitted(true)
   }
 
   // ── Screens ───────────────────────────────────────────────
@@ -563,6 +658,149 @@ export default function PlayView() {
       {myScore} pts
     </div>
   )
+
+  // ── Final Jeopardy screens ────────────────────────────────
+
+  if (fjSubPhase === 'wager') {
+    const maxWager = Math.max(0, myScore)
+    const wagerVal = Math.max(0, Math.min(maxWager, parseInt(fjWagerInput) || 0))
+    const valid    = fjWagerInput !== '' && wagerVal >= 0
+    return (
+      <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <p className="text-blue-400 text-xs uppercase tracking-widest mb-2">Final Jeopardy</p>
+        <p className="text-3xl font-black text-white mb-1">{fjCategoryName}</p>
+        <p className="text-gray-400 text-sm mb-8">Enter your wager (max: {maxWager} pts)</p>
+        <div className="w-full max-w-xs space-y-4">
+          <input
+            type="number"
+            inputMode="numeric"
+            min={0}
+            max={maxWager}
+            placeholder="0"
+            value={fjWagerInput}
+            onChange={e => setFjWagerInput(e.target.value)}
+            className="w-full bg-gray-800 text-white text-center text-5xl font-mono font-black rounded-2xl px-4 py-5 outline-none focus:ring-2 focus:ring-yellow-400"
+          />
+          {fjWagerInput !== '' && wagerVal !== parseInt(fjWagerInput) && (
+            <p className="text-yellow-400 text-xs">Capped at {maxWager}</p>
+          )}
+          <button
+            onClick={handleSubmitWager}
+            disabled={!valid}
+            className="w-full py-4 rounded-2xl text-lg font-black bg-yellow-400 text-gray-950 disabled:opacity-30"
+          >
+            Lock In Wager: {wagerVal} pts
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  if (fjSubPhase === 'wager_locked') {
+    return (
+      <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-3 h-3 rounded-full bg-green-400 mb-6 animate-pulse" />
+        <p className="text-2xl font-black text-white mb-2">Wager locked in</p>
+        <p className="text-gray-400 text-sm">Waiting for other teams…</p>
+        <p className="text-blue-400 text-xs uppercase tracking-widest mt-10">{fjCategoryName}</p>
+      </div>
+    )
+  }
+
+  if (fjSubPhase === 'question' && fjQuestion) {
+    const dur       = 90
+    const remaining = fjTimeRemaining ?? dur
+    const pct       = (remaining / dur) * 100
+    const low       = remaining <= 15
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+        {/* Timer bar */}
+        <div className="h-2 bg-gray-900 w-full shrink-0">
+          <div
+            className={`h-full transition-all duration-500 ${low ? 'bg-red-500' : 'bg-yellow-400'}`}
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+        <div className="flex-1 flex flex-col p-5 max-w-sm mx-auto w-full">
+          <div className="flex items-center justify-between mb-4 pt-3">
+            <p className="text-blue-400 text-xs uppercase tracking-widest">Final Jeopardy</p>
+            <span className={`font-mono text-3xl font-black tabular-nums ${low ? 'text-red-400' : 'text-white'}`}>
+              {remaining}
+            </span>
+          </div>
+          <div className="bg-gray-900 rounded-2xl p-5 mb-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The Answer</p>
+            <p className="text-xl font-bold leading-snug">{fjQuestion.answer}</p>
+          </div>
+          {fjResponseSubmitted ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
+              <div className="w-3 h-3 rounded-full bg-yellow-400 animate-pulse" />
+              <p className="text-white font-black text-xl">Response submitted</p>
+              <div className="bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 max-w-xs">
+                <p className="text-gray-300 italic">"{fjResponse}"</p>
+              </div>
+            </div>
+          ) : (
+            <>
+              <textarea
+                autoFocus
+                placeholder="Type your response…"
+                value={fjResponse}
+                onChange={e => setFjResponse(e.target.value)}
+                rows={3}
+                className="w-full bg-gray-800 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-yellow-400 resize-none text-lg mb-4"
+              />
+              <button
+                onClick={handleSubmitFJResponse}
+                disabled={!fjResponse.trim()}
+                className="w-full py-4 rounded-2xl font-black text-lg bg-yellow-400 text-gray-950 disabled:opacity-30"
+              >
+                Submit Response
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  if (fjSubPhase === 'reviewing') {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-3 h-3 rounded-full bg-gray-600 mb-6 animate-pulse" />
+        <p className="text-2xl font-black text-white mb-2">Time's up!</p>
+        <p className="text-gray-500 text-sm">The host is reviewing answers…</p>
+      </div>
+    )
+  }
+
+  if (fjSubPhase === 'done') {
+    const winner = [...fjFinalScores].sort((a, b) => b.score - a.score)[0]
+    const myEntry = fjFinalScores.find(t => t.id === myTeam?.id)
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <p className="text-gray-500 text-xs uppercase tracking-widest mb-2">Game Over</p>
+        <p className="text-4xl font-black text-yellow-400 mb-8">{winner?.name ?? '?'} wins!</p>
+        {fjFinalScores.length > 0 && (
+          <div className="w-full max-w-xs space-y-2 mb-8">
+            {[...fjFinalScores].sort((a, b) => b.score - a.score).map((t, i) => (
+              <div key={t.id} className={`flex items-center gap-3 rounded-xl px-4 py-3 ${t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'bg-gray-900'}`}>
+                <span className="text-gray-600 font-mono w-5 text-center text-sm">{i + 1}</span>
+                <span className="flex-1 font-semibold text-left">{t.name}</span>
+                <span className={`font-mono font-black text-sm ${t.score < 0 ? 'text-red-400' : 'text-yellow-400'}`}>{t.score}</span>
+              </div>
+            ))}
+          </div>
+        )}
+        {myEntry && (
+          <p className="text-gray-400 text-sm">Your final score: <span className="text-white font-black">{myEntry.score}</span></p>
+        )}
+        <button onClick={handleLeave} className="mt-6 text-xs text-gray-700 hover:text-gray-500 transition-colors">
+          Leave
+        </button>
+      </div>
+    )
+  }
 
   // ── Check buzzResult FIRST so feedback persists after question is cleared ──
 

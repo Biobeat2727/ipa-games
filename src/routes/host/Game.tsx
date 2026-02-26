@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { clearHostSession } from '../../lib/session'
-import type { Buzz, Question, Room, Team } from '../../lib/types'
+import type { Buzz, Question, Room, Team, Wager } from '../../lib/types'
 
 const RESPONSE_SECONDS = 30
 
@@ -34,6 +34,19 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   } | null>(null)
 
   const broadcastRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+
+  // ── Final Jeopardy state ──────────────────────────────────
+  const [fjPhase, setFjPhase]               = useState<'wager' | 'question' | 'review' | 'done' | null>(null)
+  const [fjCategoryName, setFjCategoryName] = useState('')
+  const [fjQuestion, setFjQuestion]         = useState<Question | null>(null)
+  const [fjActiveTeamIds, setFjActiveTeamIds] = useState<Set<string>>(new Set())
+  const [fjWagerStatus, setFjWagerStatus]   = useState<Map<string, boolean>>(new Map())
+  const [fjWagers, setFjWagers]             = useState<Wager[]>([])
+  const [fjRevealOrder, setFjRevealOrder]   = useState<string[]>([])
+  const [fjReviewIdx, setFjReviewIdx]       = useState(0)
+  const [fjTimerStart, setFjTimerStart]     = useState<number | null>(null)
+  const [fjTimerSeconds, setFjTimerSeconds] = useState(90)
+  const [fjTimerExpired, setFjTimerExpired] = useState(false)
 
   // ── Setup ────────────────────────────────────────────────
 
@@ -69,6 +82,10 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         const { question_id } = payload as { question_id: string }
         setPreviewInfo(null)
         setRoom(prev => ({ ...prev, current_question_id: question_id }))
+      })
+      .on('broadcast', { event: 'fj_wager_locked' }, ({ payload }) => {
+        const { team_id } = payload as { team_id: string }
+        setFjWagerStatus(prev => new Map([...prev, [team_id, true]]))
       })
     ch.subscribe((status) => {
       // Auto-assign first turn when the game starts
@@ -147,6 +164,57 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [room.current_question_id, fetchBuzzes])
+
+  // FJ wager subscription — keep fjWagers in sync while collecting / while question is live
+  useEffect(() => {
+    if (fjPhase !== 'wager' && fjPhase !== 'question') return
+    const fetchWagers = async () => {
+      const { data } = await supabase.from('wagers').select().eq('room_id', roomId)
+      setFjWagers(data ?? [])
+    }
+    const ch = supabase.channel(`host-fj-wagers-${roomId}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'wagers', filter: `room_id=eq.${roomId}` },
+        fetchWagers)
+      .subscribe(async () => { await fetchWagers() })
+    return () => { supabase.removeChannel(ch) }
+  }, [fjPhase, roomId])
+
+  // FJ 90-second answer timer
+  useEffect(() => {
+    if (fjPhase !== 'question' || fjTimerStart === null) return
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - fjTimerStart) / 1000)
+      const remaining = Math.max(0, 90 - elapsed)
+      setFjTimerSeconds(remaining)
+      if (remaining === 0) setFjTimerExpired(true)
+    }
+    tick()
+    const id = setInterval(tick, 500)
+    return () => clearInterval(id)
+  }, [fjPhase, fjTimerStart])
+
+  // FJ timer expiry → build reveal order (lowest→highest score) and enter review
+  useEffect(() => {
+    if (!fjTimerExpired || fjPhase !== 'question') return
+    setFjTimerExpired(false)
+    broadcastRef.current?.send({ type: 'broadcast', event: 'fj_timer_expired', payload: {} })
+    const order = teams
+      .filter(t => fjActiveTeamIds.has(t.id))
+      .sort((a, b) => (scores.get(a.id) ?? 0) - (scores.get(b.id) ?? 0))
+      .map(t => t.id)
+    setFjRevealOrder(order)
+    setFjReviewIdx(0)
+    setFjPhase('review')
+    if (order.length > 0) {
+      const wager = fjWagers.find(w => w.team_id === order[0])
+      broadcastRef.current?.send({
+        type: 'broadcast',
+        event: 'fj_answer_reveal',
+        payload: { team_id: order[0], team_name: teamName(order[0]), response: wager?.response ?? null },
+      })
+    }
+  }, [fjTimerExpired]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Judge timer countdown
   useEffect(() => {
@@ -313,6 +381,131 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     }
   }
 
+  // ── Final Jeopardy actions ────────────────────────────────
+
+  async function startFinalJeopardy() {
+    // Rank teams by current live score; top 3 advance
+    const ranked = [...teams].sort((a, b) => (scores.get(b.id) ?? b.score) - (scores.get(a.id) ?? a.score))
+    const top3ids = new Set(ranked.slice(0, 3).map(t => t.id))
+    const eliminated = ranked.slice(3)
+
+    // Load FJ category + question before touching DB
+    const { data: fjCat } = await supabase
+      .from('categories').select().eq('room_id', roomId).eq('round', 3).single()
+    const catName = fjCat?.name ?? 'Final Jeopardy'
+    let loadedQuestion: Question | null = null
+    if (fjCat) {
+      const { data: q } = await supabase.from('questions').select().eq('category_id', fjCat.id).single()
+      loadedQuestion = q ?? null
+    }
+
+    if (eliminated.length > 0) {
+      await Promise.all(eliminated.map(t =>
+        supabase.from('teams').update({ is_active: false }).eq('id', t.id)
+      ))
+    }
+    await supabase.from('rooms').update({ status: 'final_jeopardy' }).eq('id', roomId)
+
+    setRoom(prev => ({ ...prev, status: 'final_jeopardy' }))
+    setFjActiveTeamIds(top3ids)
+    setFjCategoryName(catName)
+    setFjQuestion(loadedQuestion)
+    setFjPhase('wager')
+    broadcastRef.current?.send({
+      type: 'broadcast',
+      event: 'game_state_change',
+      payload: { status: 'final_jeopardy', fj_category: catName },
+    })
+  }
+
+  async function revealFJQuestion() {
+    if (!fjQuestion) return
+    const startTs = Date.now()
+    await supabase.from('rooms').update({ current_question_id: fjQuestion.id }).eq('id', roomId)
+    setRoom(prev => ({ ...prev, current_question_id: fjQuestion.id }))
+    setFjPhase('question')
+    setFjTimerStart(startTs)
+    broadcastRef.current?.send({
+      type: 'broadcast',
+      event: 'fj_question_revealed',
+      payload: { question_id: fjQuestion.id, start_ts: startTs, duration: 90 },
+    })
+  }
+
+  async function handleFJCorrect(wager: Wager) {
+    const revealOrder  = fjRevealOrder
+    const wagerList    = fjWagers
+    const reviewIdx    = fjReviewIdx
+    const currentScore = scores.get(wager.team_id) ?? 0
+    const newScore     = currentScore + wager.amount
+
+    await Promise.all([
+      supabase.from('wagers').update({ status: 'correct' }).eq('id', wager.id),
+      supabase.from('teams').update({ score: newScore }).eq('id', wager.team_id),
+    ])
+    const updatedScores = new Map([...scores, [wager.team_id, newScore]])
+    setScores(updatedScores)
+    broadcastRef.current?.send({
+      type: 'broadcast', event: 'fj_answer_judged',
+      payload: { team_id: wager.team_id, status: 'correct', wager: wager.amount, new_score: newScore },
+    })
+
+    const nextIdx = reviewIdx + 1
+    if (nextIdx >= revealOrder.length) {
+      finishGame(updatedScores)
+    } else {
+      setFjReviewIdx(nextIdx)
+      const nextId = revealOrder[nextIdx]
+      const nextWager = wagerList.find(w => w.team_id === nextId)
+      broadcastRef.current?.send({
+        type: 'broadcast', event: 'fj_answer_reveal',
+        payload: { team_id: nextId, team_name: teamName(nextId), response: nextWager?.response ?? null },
+      })
+    }
+  }
+
+  async function handleFJWrong(wager: Wager) {
+    const revealOrder  = fjRevealOrder
+    const wagerList    = fjWagers
+    const reviewIdx    = fjReviewIdx
+    const currentScore = scores.get(wager.team_id) ?? 0
+    const newScore     = currentScore - wager.amount
+
+    await Promise.all([
+      supabase.from('wagers').update({ status: 'wrong' }).eq('id', wager.id),
+      supabase.from('teams').update({ score: newScore }).eq('id', wager.team_id),
+    ])
+    const updatedScores = new Map([...scores, [wager.team_id, newScore]])
+    setScores(updatedScores)
+    broadcastRef.current?.send({
+      type: 'broadcast', event: 'fj_answer_judged',
+      payload: { team_id: wager.team_id, status: 'wrong', wager: wager.amount, new_score: newScore },
+    })
+
+    const nextIdx = reviewIdx + 1
+    if (nextIdx >= revealOrder.length) {
+      finishGame(updatedScores)
+    } else {
+      setFjReviewIdx(nextIdx)
+      const nextId = revealOrder[nextIdx]
+      const nextWager = wagerList.find(w => w.team_id === nextId)
+      broadcastRef.current?.send({
+        type: 'broadcast', event: 'fj_answer_reveal',
+        payload: { team_id: nextId, team_name: teamName(nextId), response: nextWager?.response ?? null },
+      })
+    }
+  }
+
+  async function finishGame(finalScores: Map<string, number>) {
+    await supabase.from('rooms').update({ status: 'finished', current_question_id: null }).eq('id', roomId)
+    setRoom(prev => ({ ...prev, status: 'finished', current_question_id: null }))
+    setFjPhase('done')
+    broadcastRef.current?.send({
+      type: 'broadcast', event: 'game_over',
+      payload: { scores: teams.map(t => ({ id: t.id, name: t.name, score: finalScores.get(t.id) ?? t.score })) },
+    })
+  }
+
   async function transitionToRound2() {
     // Capture turn assignment before the async gap so it doesn't go stale
     const firstTeamId = currentTurnTeamId
@@ -350,6 +543,9 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const round1Complete = room.status === 'round_1' &&
     round1Cats.length > 0 &&
     round1Cats.every(cat => cat.questions.every(q => q.is_answered))
+  const round2Complete = room.status === 'round_2' &&
+    round2Cats.length > 0 &&
+    round2Cats.every(cat => cat.questions.every(q => q.is_answered))
 
   const timerLow = timerSeconds <= 10
 
@@ -439,9 +635,151 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         </div>
       </div>
 
-      {/* ── Right: active question + judging ─────────────── */}
+      {/* ── Right: active question / judging / FJ ────────── */}
       <div className="w-7/12 p-5 flex flex-col gap-4 overflow-y-auto">
-        {!activeQuestion ? (
+        {fjPhase ? (
+
+          fjPhase === 'wager' ? (
+            <div className="flex-1 flex flex-col gap-4">
+              <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                <p className="text-xs text-yellow-400 uppercase tracking-widest font-semibold mb-1">Final Jeopardy</p>
+                <p className="text-2xl font-black text-white mb-1">{fjCategoryName}</p>
+                <p className="text-gray-500 text-sm">Collecting wagers — reveal the question when all teams are ready</p>
+              </div>
+              <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 flex-1">
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-4">Wager Status</p>
+                <div className="space-y-3">
+                  {teams.filter(t => fjActiveTeamIds.has(t.id)).map(team => {
+                    const wagered = fjWagerStatus.get(team.id) ?? false
+                    return (
+                      <div key={team.id} className="flex items-center gap-3">
+                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${wagered ? 'bg-green-400' : 'bg-gray-600 animate-pulse'}`} />
+                        <span className="flex-1 font-semibold">{team.name}</span>
+                        <span className="font-mono text-sm text-yellow-400">{scores.get(team.id) ?? 0}</span>
+                        <span className={`text-xs font-semibold ${wagered ? 'text-green-400' : 'text-gray-600'}`}>
+                          {wagered ? 'Ready' : 'Waiting…'}
+                        </span>
+                      </div>
+                    )
+                  })}
+                </div>
+              </div>
+              <button
+                onClick={revealFJQuestion}
+                disabled={!fjQuestion}
+                className="py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 disabled:opacity-30 transition-colors"
+              >
+                {fjWagerStatus.size >= fjActiveTeamIds.size && fjActiveTeamIds.size > 0
+                  ? 'Reveal Question →' : 'Reveal Anyway →'}
+              </button>
+            </div>
+
+          ) : fjPhase === 'question' ? (
+            <div className="flex-1 flex flex-col gap-4">
+              <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
+                <div className="flex items-center justify-between mb-3">
+                  <p className="text-xs text-gray-500 uppercase tracking-widest">Final Jeopardy — Answering</p>
+                  <span className={`font-mono text-4xl font-black tabular-nums ${fjTimerSeconds <= 15 ? 'text-red-400' : 'text-yellow-400'}`}>
+                    {fjTimerSeconds}
+                  </span>
+                </div>
+                <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+                  <div
+                    className={`h-full rounded-full transition-all duration-500 ${fjTimerSeconds <= 15 ? 'bg-red-500' : 'bg-yellow-400'}`}
+                    style={{ width: `${(fjTimerSeconds / 90) * 100}%` }}
+                  />
+                </div>
+              </div>
+              {fjQuestion && (
+                <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 flex-1">
+                  <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The Answer</p>
+                  <p className="text-lg font-bold leading-snug mb-4">{fjQuestion.answer}</p>
+                  <div className="border-t border-gray-800 pt-3">
+                    <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">Expected Response</p>
+                    <p className="text-green-400 font-semibold">{fjQuestion.correct_question}</p>
+                  </div>
+                </div>
+              )}
+              <button
+                onClick={() => setFjTimerExpired(true)}
+                className="py-3 rounded-xl text-sm font-bold text-gray-500 hover:text-red-400 border border-gray-800 hover:border-red-800 transition-colors"
+              >
+                End Timer Early
+              </button>
+            </div>
+
+          ) : fjPhase === 'review' ? (() => {
+            const reviewTeamId = fjRevealOrder[fjReviewIdx]
+            const reviewWager  = fjWagers.find(w => w.team_id === reviewTeamId)
+            if (!reviewTeamId || !reviewWager) return (
+              <div className="flex-1 flex items-center justify-center">
+                <p className="text-gray-600">Loading review…</p>
+              </div>
+            )
+            return (
+              <div className="flex-1 flex flex-col gap-4">
+                <div className="bg-gray-900 rounded-xl px-4 py-3 border border-gray-800 flex items-center justify-between">
+                  <p className="text-xs text-gray-500 uppercase tracking-widest">
+                    Team {fjReviewIdx + 1} of {fjRevealOrder.length}
+                  </p>
+                  <span className="text-xs text-gray-600 font-mono">wager: {reviewWager.amount}</span>
+                </div>
+                <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 flex-1 flex flex-col">
+                  <p className="text-2xl font-black mb-1">{teamName(reviewTeamId)}</p>
+                  <p className="text-xs text-yellow-400 font-mono mb-4">Wagered {reviewWager.amount} pts</p>
+                  <div className="flex-1 bg-gray-800 rounded-xl p-4 min-h-16">
+                    {reviewWager.response
+                      ? <p className="text-white text-lg">{reviewWager.response}</p>
+                      : <p className="text-gray-600 text-sm italic">No response submitted</p>}
+                  </div>
+                </div>
+                {fjQuestion && (
+                  <div className="bg-gray-950 rounded-xl px-4 py-2 border border-gray-800">
+                    <p className="text-xs text-gray-600 uppercase tracking-wider">Expected</p>
+                    <p className="text-green-400 text-sm font-semibold">{fjQuestion.correct_question}</p>
+                  </div>
+                )}
+                <div className="grid grid-cols-2 gap-3">
+                  <button
+                    onClick={() => handleFJWrong(reviewWager)}
+                    className="py-5 rounded-2xl font-black text-xl bg-red-700 hover:bg-red-600 active:bg-red-800 transition-colors"
+                  >
+                    ✗ Wrong −{reviewWager.amount}
+                  </button>
+                  <button
+                    onClick={() => handleFJCorrect(reviewWager)}
+                    className="py-5 rounded-2xl font-black text-xl bg-green-600 hover:bg-green-500 active:bg-green-700 transition-colors"
+                  >
+                    ✓ Correct +{reviewWager.amount}
+                  </button>
+                </div>
+              </div>
+            )
+          })() : (
+            <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8">
+              <p className="text-xs text-gray-500 uppercase tracking-widest">Game Over</p>
+              <p className="text-3xl font-black text-yellow-400">{sortedTeams[0]?.name} wins!</p>
+              <div className="w-full space-y-2">
+                {sortedTeams.map((team, i) => (
+                  <div key={team.id} className="flex items-center gap-3 bg-gray-900 rounded-xl px-4 py-3">
+                    <span className="text-gray-600 w-6 text-center font-mono text-sm">{i + 1}</span>
+                    <span className="flex-1 font-semibold">{team.name}</span>
+                    <span className={`font-mono font-black text-sm ${(scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'}`}>
+                      {scores.get(team.id) ?? 0}
+                    </span>
+                  </div>
+                ))}
+              </div>
+              <button
+                onClick={() => { clearHostSession(); window.location.reload() }}
+                className="w-full py-3 rounded-xl text-sm font-bold bg-gray-800 text-white hover:bg-gray-700 transition-colors"
+              >
+                New Game
+              </button>
+            </div>
+          )
+
+        ) : !activeQuestion ? (
           previewInfo ? (
             // ── Category preview ────────────────────────
             <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
@@ -458,8 +796,42 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                 Activate Now
               </button>
             </div>
-          ) : (
-            round1Complete ? (
+          ) : round2Complete ? (
+            // ── Start Final Jeopardy ──────────────────────
+            <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8">
+              <div className="text-center">
+                <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">Round 2 Complete</p>
+                <p className="text-2xl font-black text-white">Ready for Final Jeopardy?</p>
+                <p className="text-gray-500 text-sm mt-2">Top 3 teams advance</p>
+              </div>
+              <div className="w-full space-y-2">
+                <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">Advancing</p>
+                {sortedTeams.slice(0, 3).map(team => (
+                  <div key={team.id} className="px-4 py-3 rounded-xl bg-yellow-400/10 border border-yellow-400/30 flex items-center justify-between">
+                    <span className="font-bold text-white">{team.name}</span>
+                    <span className="font-mono text-yellow-400 text-sm">{scores.get(team.id) ?? 0}</span>
+                  </div>
+                ))}
+                {sortedTeams.length > 3 && (
+                  <>
+                    <p className="text-xs text-gray-600 uppercase tracking-wider mt-3 mb-1">Eliminated</p>
+                    {sortedTeams.slice(3).map(team => (
+                      <div key={team.id} className="px-4 py-3 rounded-xl bg-gray-900 flex items-center justify-between opacity-50">
+                        <span className="text-gray-400">{team.name}</span>
+                        <span className="font-mono text-gray-600 text-sm">{scores.get(team.id) ?? 0}</span>
+                      </div>
+                    ))}
+                  </>
+                )}
+              </div>
+              <button
+                onClick={startFinalJeopardy}
+                className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+              >
+                Start Final Jeopardy →
+              </button>
+            </div>
+          ) : round1Complete ? (
             // ── Start Round 2 ────────────────────────────
             <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8">
               <div className="text-center">
