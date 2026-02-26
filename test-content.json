@@ -1,0 +1,79 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "categories": [
+        {
+          "name": "US Geography",
+          "questions": [
+            { "point_value": 100, "answer": "This is the capital of the United States", "correct_question": "What is Washington D.C.?" },
+            { "point_value": 200, "answer": "The longest river in the United States", "correct_question": "What is the Missouri River?" },
+            { "point_value": 300, "answer": "This state has the most coastline of any US state", "correct_question": "What is Alaska?" },
+            { "point_value": 400, "answer": "The only US state that borders only one other state", "correct_question": "What is Maine?" },
+            { "point_value": 500, "answer": "This is the smallest US state by area", "correct_question": "What is Rhode Island?" }
+          ]
+        },
+        {
+          "name": "Pop Music",
+          "questions": [
+            { "point_value": 100, "answer": "This artist released the album Thriller in 1982", "correct_question": "Who is Michael Jackson?" },
+            { "point_value": 200, "answer": "She performed Crazy in Love and Single Ladies", "correct_question": "Who is Beyonce?" },
+            { "point_value": 300, "answer": "This band sang Bohemian Rhapsody", "correct_question": "Who is Queen?" },
+            { "point_value": 400, "answer": "The Beatles were from this English city", "correct_question": "What is Liverpool?" },
+            { "point_value": 500, "answer": "This artist holds the record for most Grammy wins ever", "correct_question": "Who is Beyonce?" }
+          ]
+        },
+        {
+          "name": "Science",
+          "questions": [
+            { "point_value": 100, "answer": "The closest star to Earth", "correct_question": "What is the Sun?" },
+            { "point_value": 200, "answer": "The chemical symbol for gold", "correct_question": "What is Au?" },
+            { "point_value": 300, "answer": "This planet has the most moons in our solar system", "correct_question": "What is Saturn?" },
+            { "point_value": 400, "answer": "The speed of light in miles per second, approximately", "correct_question": "What is 186,000 miles per second?" },
+            { "point_value": 500, "answer": "This element has atomic number 79", "correct_question": "What is gold?" }
+          ]
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "categories": [
+        {
+          "name": "Movies",
+          "questions": [
+            { "point_value": 100, "answer": "This 1997 film featured Leonardo DiCaprio on a sinking ship", "correct_question": "What is Titanic?" },
+            { "point_value": 200, "answer": "The lion cub who becomes king in a 1994 Disney film", "correct_question": "Who is Simba?" },
+            { "point_value": 300, "answer": "This director made Jurassic Park, Schindlers List, and Saving Private Ryan", "correct_question": "Who is Steven Spielberg?" },
+            { "point_value": 400, "answer": "The only film to win all five major Academy Awards", "correct_question": "What is It Happened One Night?" },
+            { "point_value": 500, "answer": "This actress played Clarice Starling in Silence of the Lambs", "correct_question": "Who is Jodie Foster?" }
+          ]
+        },
+        {
+          "name": "Food and Drink",
+          "questions": [
+            { "point_value": 100, "answer": "This Italian dish is made with raw eggs, cheese, guanciale, and black pepper", "correct_question": "What is carbonara?" },
+            { "point_value": 200, "answer": "The country of origin for sushi", "correct_question": "What is Japan?" },
+            { "point_value": 300, "answer": "This spice is more expensive by weight than gold", "correct_question": "What is saffron?" },
+            { "point_value": 400, "answer": "The main non-vinegar ingredient in traditional Worcestershire sauce", "correct_question": "What is fermented anchovies?" },
+            { "point_value": 500, "answer": "This French chef is credited with founding classical French cuisine", "correct_question": "Who is Auguste Escoffier?" }
+          ]
+        },
+        {
+          "name": "History",
+          "questions": [
+            { "point_value": 100, "answer": "The year the Berlin Wall fell", "correct_question": "What is 1989?" },
+            { "point_value": 200, "answer": "This empire was ruled by Julius Caesar", "correct_question": "What is the Roman Empire?" },
+            { "point_value": 300, "answer": "The first country to give women the right to vote nationally", "correct_question": "What is New Zealand?" },
+            { "point_value": 400, "answer": "This US president served the shortest term in office", "correct_question": "Who is William Henry Harrison?" },
+            { "point_value": 500, "answer": "The name of the ship Charles Darwin sailed on during his voyage of discovery", "correct_question": "What is the HMS Beagle?" }
+          ]
+        }
+      ]
+    }
+  ],
+  "final_jeopardy": {
+    "category": "World Capitals",
+    "answer": "This city is both the smallest capital city by population and the capital of a G7 nation",
+    "correct_question": "What is Ottawa?"
+  }
+}
