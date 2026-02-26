@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { generateRoomCode } from '../../lib/roomCode'
 import { clearHostSession, getHostId, getRoomCode, setHostId, setRoomCode } from '../../lib/session'
@@ -14,6 +14,9 @@ export default function HostView() {
   const [room, setRoom]     = useState<Room | null>(null)
   const [teams, setTeams]   = useState<Team[]>([])
   const [error, setError]   = useState('')
+
+  // Ref to the lobby broadcast channel so handleStartGame can fire game_state_change
+  const lobbyBroadcastRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   // Content import state
   const [summary, setSummary]         = useState<ContentSummary | null>(null)
@@ -101,9 +104,12 @@ export default function HostView() {
       .on('broadcast', { event: 'team_joined' }, () => fetchTeams(roomId))
       .subscribe()
 
+    lobbyBroadcastRef.current = bcCh
+
     return () => {
       supabase.removeChannel(pgCh)
       supabase.removeChannel(bcCh)
+      lobbyBroadcastRef.current = null
     }
   }, [room?.id, room?.code, phase, fetchTeams])
 
@@ -126,6 +132,12 @@ export default function HostView() {
     const { error: err } = await supabase
       .from('rooms').update({ status: 'round_1' }).eq('id', room.id)
     if (!err) {
+      // Broadcast immediately so projector/players don't have to wait for postgres_changes
+      lobbyBroadcastRef.current?.send({
+        type: 'broadcast',
+        event: 'game_state_change',
+        payload: { status: 'round_1' },
+      })
       setRoom(prev => prev ? { ...prev, status: 'round_1' } : prev)
       setPhase('game')
     }

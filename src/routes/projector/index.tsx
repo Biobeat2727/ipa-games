@@ -188,19 +188,34 @@ export default function ProjectorView() {
         setTimerPayload(payload as TimerPayload)
       })
       .on('broadcast', { event: 'score_update' }, ({ payload }) => {
-        const data = payload as { teams: Array<{ id: string; score: number }>; current_question_id?: string | null }
+        const data = payload as {
+          teams: Array<{ id: string; score: number }>
+          current_question_id?: string | null
+          answered_question_id?: string
+        }
         setScores(new Map(data.teams.map(t => [t.id, t.score])))
-        // If the host embedded current_question_id in the payload, apply it immediately.
-        // This is the most reliable path since score_update always arrives.
+        // Apply question state from the host payload — most reliable path since
+        // score_update always arrives while postgres_changes can be missed.
         if ('current_question_id' in data) {
           setRoom(prev => prev ? { ...prev, current_question_id: data.current_question_id ?? null } : prev)
           if (!data.current_question_id) setTimerPayload(null)
+        }
+        // Mark the answered question in local categories so the board cell greys out.
+        if (data.answered_question_id) {
+          setCategories(prev => prev.map(cat => ({
+            ...cat,
+            questions: cat.questions.map(q =>
+              q.id === data.answered_question_id ? { ...q, is_answered: true } : q
+            ),
+          })))
         }
       })
       .on('broadcast', { event: 'turn_change' }, ({ payload }) => {
         const { team_id } = payload as { team_id: string | null }
         setCurrentTurnTeamId(team_id)
       })
+      // Fired by the host when the game starts — transition from lobby to board
+      .on('broadcast', { event: 'game_state_change' }, () => resyncAll())
       // Fired by players when they join — keeps lobby team list in sync
       .on('broadcast', { event: 'team_joined' }, () => refetchTeams())
       .subscribe(status => {

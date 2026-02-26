@@ -243,6 +243,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       payload: {
         teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
         current_question_id: null,
+        answered_question_id: activeQuestion.id,
       },
     })
 
