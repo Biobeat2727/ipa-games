@@ -237,13 +237,14 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     const updatedScores = new Map([...scores, [buzz.team_id, newScore]])
     setScores(updatedScores)
 
-    // Update host categories immediately so the question is struck from the list
-    setCategories(prev => prev.map(cat => ({
+    // Compute updated categories inline so we can check round completion immediately
+    const nextCategories = categories.map(cat => ({
       ...cat,
       questions: cat.questions.map(q =>
         q.id === activeQuestion.id ? { ...q, is_answered: true } : q
       ),
-    })))
+    }))
+    setCategories(nextCategories)
 
     broadcastRef.current?.send({
       type: 'broadcast',
@@ -258,6 +259,11 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     clearJudging()
     assignTurn(buzz.team_id)
     deactivateQuestion()
+
+    // Auto-advance when all round 1 questions are done
+    const r1Done = room.status === 'round_1' &&
+      nextCategories.filter(c => c.round === 1).every(cat => cat.questions.every(q => q.is_answered))
+    if (r1Done) transitionToRound2()
   }
 
   async function handleWrong(buzz: Buzz) {
@@ -283,14 +289,16 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     setScores(updatedScores)
     setBuzzes(prev => prev.map(b => b.id === buzz.id ? { ...b, status: 'wrong' } : b))
 
-    // Update host categories immediately — don't wait for postgres_changes
+    // Compute updated categories inline so we can check round completion when questionDone
+    let nextCategories = categories
     if (questionDone) {
-      setCategories(prev => prev.map(cat => ({
+      nextCategories = categories.map(cat => ({
         ...cat,
         questions: cat.questions.map(q =>
           q.id === activeQuestion.id ? { ...q, is_answered: true } : q
         ),
-      })))
+      }))
+      setCategories(nextCategories)
     }
 
     broadcastRef.current?.send({
@@ -307,6 +315,25 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     if (questionDone) {
       assignTurn(null)
       deactivateQuestion()
+
+      // Auto-advance when all round 1 questions are done
+      const r1Done = room.status === 'round_1' &&
+        nextCategories.filter(c => c.round === 1).every(cat => cat.questions.every(q => q.is_answered))
+      if (r1Done) transitionToRound2()
+    }
+  }
+
+  async function transitionToRound2() {
+    const { error } = await supabase
+      .from('rooms').update({ status: 'round_2' }).eq('id', roomId)
+    if (!error) {
+      setRoom(prev => ({ ...prev, status: 'round_2' }))
+      assignTurn(null)
+      broadcastRef.current?.send({
+        type: 'broadcast',
+        event: 'game_state_change',
+        payload: { status: 'round_2' },
+      })
     }
   }
 
