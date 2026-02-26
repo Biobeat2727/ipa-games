@@ -397,10 +397,10 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                             onClick={() => !isAnswered && !isActive && activateQuestion(q.id)}
                             disabled={isAnswered || isActive}
                             className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${
-                              isActive
-                                ? 'bg-yellow-400 text-gray-950 font-bold cursor-default'
-                                : isAnswered
-                                  ? 'bg-gray-900/50 text-gray-700 line-through cursor-default'
+                              isAnswered
+                                ? 'bg-gray-900/50 text-gray-700 line-through cursor-default'
+                                : isActive
+                                  ? 'bg-yellow-400 text-gray-950 font-bold cursor-default'
                                   : 'bg-gray-800 hover:bg-gray-700 text-white'
                             }`}
                           >
