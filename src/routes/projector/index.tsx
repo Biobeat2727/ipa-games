@@ -33,12 +33,17 @@ export default function ProjectorView() {
   const [previewCountdown, setPreviewCountdown]   = useState<number | null>(null)
   const [error, setError]               = useState('')
 
+  // Refs — give stable callbacks access to latest values without re-creating them
+  const roomRef            = useRef<Room | null>(null)
   const teamsRef           = useRef<Team[]>([])
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
+  useEffect(() => { roomRef.current = room },   [room])
   useEffect(() => { teamsRef.current = teams }, [teams])
 
-  // Load categories for the active round
+  // ── Stable data helpers ───────────────────────────────────
+  // These use roomRef so they never go stale inside effect closures.
+
   const loadCategories = useCallback(async (roomId: string, status: string) => {
     const { data: cats } = await supabase
       .from('categories').select('id, name, round')
@@ -59,6 +64,32 @@ export default function ProjectorView() {
         .sort((a, b) => (a.point_value ?? 0) - (b.point_value ?? 0)),
     })))
   }, [])
+
+  const refetchTeams = useCallback(async () => {
+    const roomId = roomRef.current?.id
+    if (!roomId) return
+    const { data } = await supabase
+      .from('teams').select().eq('room_id', roomId).order('score', { ascending: false })
+    const list = data ?? []
+    setTeams(list)
+    setScores(new Map(list.map(t => [t.id, t.score])))
+  }, [])
+
+  const resyncAll = useCallback(async () => {
+    const roomId = roomRef.current?.id
+    if (!roomId) return
+    const { data: freshRoom } = await supabase.from('rooms').select().eq('id', roomId).single()
+    if (!freshRoom) return
+    setRoom(freshRoom)
+    const { data } = await supabase
+      .from('teams').select().eq('room_id', roomId).order('score', { ascending: false })
+    const list = data ?? []
+    setTeams(list)
+    setScores(new Map(list.map(t => [t.id, t.score])))
+    if (['round_1', 'round_2'].includes(freshRoom.status)) {
+      await loadCategories(roomId, freshRoom.status)
+    }
+  }, [loadCategories])
 
   // ── Connect ───────────────────────────────────────────────
 
@@ -88,27 +119,7 @@ export default function ProjectorView() {
 
   useEffect(() => {
     if (!room?.id) return
-
     const roomId = room.id
-
-    const refetchTeams = async () => {
-      const { data } = await supabase
-        .from('teams').select().eq('room_id', roomId).order('score', { ascending: false })
-      const list = data ?? []
-      setTeams(list)
-      setScores(new Map(list.map(t => [t.id, t.score])))
-    }
-
-    const resyncAll = async () => {
-      // Re-fetch full current state so we don't miss anything that happened during connection
-      const { data: freshRoom } = await supabase.from('rooms').select().eq('id', roomId).single()
-      if (!freshRoom) return
-      setRoom(freshRoom)
-      await refetchTeams()
-      if (['round_1', 'round_2'].includes(freshRoom.status)) {
-        await loadCategories(roomId, freshRoom.status)
-      }
-    }
 
     const ch = supabase.channel(`projector-db-${roomId}`)
       .on('postgres_changes',
@@ -135,10 +146,8 @@ export default function ProjectorView() {
               feedbackTimeoutRef.current = setTimeout(() => setFeedbackTeam(null), 2500)
             }
           }
-          // Clear the active question immediately when it's answered.
-          // Don't wait for the question_deactivated broadcast or the rooms postgres_changes —
-          // both can be delayed or missed. This event fires from the same DB write as the
-          // score update, so it's always received when scores update.
+          // Guard: if this question is answered, clear it as the active question even if
+          // the rooms row hasn't propagated yet.
           if (q.is_answered) {
             setRoom(prev => prev?.current_question_id === q.id
               ? { ...prev, current_question_id: null }
@@ -150,14 +159,14 @@ export default function ProjectorView() {
           })))
         })
       .subscribe(status => {
-        // When the subscription is confirmed live, re-sync to catch anything missed during setup
         if (status === 'SUBSCRIBED') resyncAll()
       })
 
     return () => { supabase.removeChannel(ch) }
-  }, [room?.id, loadCategories])
+  }, [room?.id, loadCategories, refetchTeams, resyncAll])
 
-  // Broadcast channel — timer + score updates
+  // ── Broadcast channel ─────────────────────────────────────
+
   useEffect(() => {
     if (!room?.code) return
     const ch = supabase.channel(`room:${room.code}`)
@@ -181,9 +190,8 @@ export default function ProjectorView() {
       .on('broadcast', { event: 'score_update' }, ({ payload }) => {
         const data = payload as { teams: Array<{ id: string; score: number }>; current_question_id?: string | null }
         setScores(new Map(data.teams.map(t => [t.id, t.score])))
-        // When the host embeds current_question_id in the score update, apply it immediately.
-        // This uses the already-reliable score_update channel instead of the fragile
-        // question_deactivated broadcast or rooms postgres_changes.
+        // If the host embedded current_question_id in the payload, apply it immediately.
+        // This is the most reliable path since score_update always arrives.
         if ('current_question_id' in data) {
           setRoom(prev => prev ? { ...prev, current_question_id: data.current_question_id ?? null } : prev)
           if (!data.current_question_id) setTimerPayload(null)
@@ -193,11 +201,17 @@ export default function ProjectorView() {
         const { team_id } = payload as { team_id: string | null }
         setCurrentTurnTeamId(team_id)
       })
-      .subscribe()
+      // Fired by players when they join — keeps lobby team list in sync
+      .on('broadcast', { event: 'team_joined' }, () => refetchTeams())
+      .subscribe(status => {
+        // On (re)connect, re-sync all state so nothing is missed
+        if (status === 'SUBSCRIBED') resyncAll()
+      })
     return () => { supabase.removeChannel(ch) }
-  }, [room?.code])
+  }, [room?.code, refetchTeams, resyncAll])
 
-  // Buzzes for active question
+  // ── Buzzes for active question ────────────────────────────
+
   useEffect(() => {
     const qId = room?.current_question_id
     if (!qId) { setBuzzes([]); setTimerPayload(null); return }
@@ -217,7 +231,8 @@ export default function ProjectorView() {
     return () => { supabase.removeChannel(ch) }
   }, [room?.current_question_id])
 
-  // Timer countdown
+  // ── Timer countdown ───────────────────────────────────────
+
   useEffect(() => {
     if (!timerPayload) { setTimeRemaining(null); return }
     const tick = () => {
@@ -232,7 +247,8 @@ export default function ProjectorView() {
     return () => clearInterval(id)
   }, [timerPayload])
 
-  // Preview countdown
+  // ── Preview countdown ─────────────────────────────────────
+
   useEffect(() => {
     if (!previewInfo) { setPreviewCountdown(null); return }
     const tick = () => {
@@ -245,16 +261,16 @@ export default function ProjectorView() {
     return () => clearInterval(id)
   }, [previewInfo])
 
-  // Cleanup on unmount
+  // ── Cleanup ───────────────────────────────────────────────
+
   useEffect(() => () => {
     if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current)
   }, [])
 
   // ── Derived ───────────────────────────────────────────────
 
-  // Also guard against stale room.current_question_id: if the question was already marked
-  // answered locally (via postgres_changes), don't treat it as active even if the room
-  // row hasn't updated yet.
+  // Guard against stale room.current_question_id: if the question is already marked
+  // answered in local state, treat it as inactive even if the room row hasn't caught up.
   const activeQuestion = categories.flatMap(c => c.questions)
     .find(q => q.id === room?.current_question_id && !q.is_answered) ?? null
 
