@@ -875,7 +875,6 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
               <p className="text-gray-800 text-xs">Select one from the list on the left</p>
             </div>
           )
-          )
         ) : (
           <>
             {/* Question card */}

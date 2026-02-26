@@ -8,7 +8,7 @@ import {
   setRoomCode,
   setTeamId,
 } from '../../lib/session'
-import type { Buzz, Player, QuestionPublic, Room, Team, Wager } from '../../lib/types'
+import type { Buzz, Player, QuestionPublic, Room, Team } from '../../lib/types'
 
 type Phase = 'enter_code' | 'select_team' | 'lobby' | 'game'
 
