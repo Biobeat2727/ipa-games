@@ -237,6 +237,14 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     const updatedScores = new Map([...scores, [buzz.team_id, newScore]])
     setScores(updatedScores)
 
+    // Update host categories immediately so the question is struck from the list
+    setCategories(prev => prev.map(cat => ({
+      ...cat,
+      questions: cat.questions.map(q =>
+        q.id === activeQuestion.id ? { ...q, is_answered: true } : q
+      ),
+    })))
+
     broadcastRef.current?.send({
       type: 'broadcast',
       event: 'score_update',

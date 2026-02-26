@@ -148,19 +148,22 @@ One channel per room: `room:{room_code}`
 
 Every client subscribes on join. Broadcast event types:
 
-| Event | Payload | Effect |
-|---|---|---|
-| `game_state_change` | status | All clients transition screens |
-| `question_activated` | question_id | Answer appears on all devices |
-| `buzz_received` | team_id, queue_position | Updates buzz queue on all screens |
-| `timer_start` | start_timestamp, duration_seconds | Syncs countdown across all devices |
-| `timer_expired` | team_id | Locks out responding team |
-| `score_update` | full scores object | Updates all scoreboards |
-| `turn_change` | team_id | Assigns category selection rights |
-| `final_wager_locked` | team_id | Shows wager status to others |
-| `game_over` | final scores | Triggers winner screen |
+| Event | Payload | Who sends | Effect |
+|---|---|---|---|
+| `game_state_change` | `{ status }` | Host (lobby) | Projector/players call resyncAll → transition to board |
+| `question_preview` | `{ questionId, categoryName, pointValue, startTs }` | Player (turn) | 10-second countdown on all screens |
+| `question_activated` | `{ question_id }` | Player (turn) | Answer appears on all devices |
+| `question_deactivated` | `{}` | Host | Clears active question on all devices |
+| `timer_start` | `{ start_timestamp, duration_seconds, team_id, buzz_id, team_name }` | Host | Syncs judging countdown across all devices |
+| `score_update` | `{ teams, current_question_id?, answered_question_id? }` | Host | Updates scores; if `current_question_id: null` clears active question; if `answered_question_id` greys out board cell |
+| `turn_change` | `{ team_id: string\|null }` | Host | Assigns or clears category selection rights |
+| `team_joined` | `{}` | Player | Host lobby + projector lobby refetch teams |
+| `final_wager_locked` | `{ team_id }` | Host | (not yet built) Shows wager status to others |
+| `game_over` | `{ final scores }` | Host | (not yet built) Triggers winner screen |
 
-Also use Supabase Postgres row-level subscriptions on the `buzzes` table so the host queue auto-reorders as new buzzes arrive.
+Supabase Postgres `postgres_changes` subscriptions are set up on rooms, teams, questions, and buzzes as a secondary fallback. In practice, broadcasts are the reliable primary path — postgres_changes has proven inconsistent on the projector.
+
+The host buzz queue subscribes directly to `postgres_changes` on the `buzzes` table (filtered by active question ID) so the queue auto-updates as new buzzes arrive.
 
 ### Timer Logic (Critical)
 The timer must start on the server, not the client. When a question goes active and the first buzz comes in, the host clicks to open that team's response window. A `timer_start` event is broadcast with a server timestamp and duration. Every client calculates remaining time as:
@@ -326,7 +329,7 @@ Add a service worker for offline caching of the app shell. This ensures slow bar
 4. ✅ Buzz mechanic with server-side timestamping
 5. ✅ Host judging interface
 6. ✅ Projector view
-7. Full round flow end to end
+7. ✅ Full round flow end to end
 8. Final Jeopardy wagering
 9. PWA manifest and service worker
 10. Polish, animations, and mobile UX
@@ -337,15 +340,26 @@ Add a service worker for offline caching of the app shell. This ensures slow bar
 
 ### What is built and working
 - Supabase schema: all tables, enums, RLS policies, server-side buzz timestamp trigger, `questions_public` view
-- `/host` lobby: room auto-creates on load, resumes from localStorage, real-time team list, JSON content import, Start Game button
-- `/host` game screen: question list (R1/R2) with activate/deactivate, live scores, buzz queue ordered by server timestamp, Judge button, judging panel with 30-second timer + color bar, Correct/Wrong buttons
-- `/play` full flow: room code entry → team select/create → lobby waiting → game screens (buzz button, response input with countdown/color bar, stand-by with team name, correct/wrong feedback with colored backgrounds and point changes, score display)
-- `/projector` full flow: code entry → lobby (room code + team list) → Jeopardy grid (correct columns/rows, greyed when answered) → active question (big text) → buzz queue → judging (team name + countdown) → correct feedback flash → finished/winner screen; score strip at bottom throughout; fully responsive with clamp() font sizes
-- Real-time sync: postgres_changes subscriptions on rooms, teams, questions, buzzes; broadcast channel (`room:{code}`) for timer_start (includes team_name) and score_update events
+- `/host` lobby: room auto-creates on load, resumes from localStorage, real-time team list, JSON content import, Start Game button; broadcasts `game_state_change` on start so projector/players transition immediately
+- `/host` game screen: question list (R1/R2) with activate/deactivate, live scores, buzz queue ordered by server timestamp, Judge button, judging panel with 30-second timer + color bar, Correct/Wrong buttons; host can manually reassign turn via "give" button per team
+- `/play` full flow: room code entry → team select/create → lobby waiting → game screens (buzz button, response input with countdown/color bar, stand-by with team name, correct/wrong feedback with colored backgrounds and point changes, score display); board updates immediately from `score_update` broadcast without waiting for a DB reload
+- `/projector` full flow: code entry → lobby (room code + team list, updates live as teams join) → Jeopardy grid (correct columns/rows, greyed when answered) → 10-second category preview countdown → active question (big text) → buzz queue → judging (team name + countdown) → correct feedback flash → finished/winner screen; score strip at bottom throughout; fully responsive with clamp() font sizes
+- **Real-time reliability**: postgres_changes is used as a fallback only; all critical state transitions are driven by broadcast events. `resyncAll()` and `refetchTeams()` are stable `useCallback` hooks (using `roomRef`) shared between both DB and broadcast channels so either channel can trigger a full re-sync
+- **Broadcast events implemented**: `game_state_change`, `question_preview`, `question_activated`, `question_deactivated`, `timer_start`, `score_update` (carries `current_question_id` and `answered_question_id`), `turn_change`, `team_joined`
 - Session persistence: localStorage resume for both host and player across refreshes
-- Turn management (partial): host auto-assigns first turn to first team at game start; turn passes to winning team after a correct answer; host can manually reassign via "give" button; all clients receive `turn_change` broadcast; turn is cleared after all buzzes exhausted
-- Question selection flow: player whose turn it is picks from the board → 10-second `question_preview` countdown on all screens → question activates on all screens simultaneously; host has its own 10-second fallback activation so it never misses a question even if a broadcast is dropped
-- Bug fixes: wrong answers deduct points + broadcast; judging state clears when question deactivated; content.ts validates JSON before deleting; final_jeopardy is optional in JSON; host `question_activated` handler now updates `room.current_question_id` directly (previously relied only on slow postgres_changes); all buzzes wrong → question auto-deactivates and turn is cleared
+- Turn management: host auto-assigns first turn to first team at game start; turn passes to winning team after correct answer; cleared when all buzzes exhausted; host can manually reassign at any time
+- Question selection flow: player whose turn it is picks from the board → 10-second `question_preview` countdown on all screens → question activates simultaneously; host has its own fallback activation timer in case the `question_activated` broadcast is missed
+- Question answered (correct): `is_answered = true` written to DB, `answered_question_id` in `score_update` broadcast → all boards grey the cell out immediately
+- Question answered (no winner): `is_answered = true` written to DB when all buzzes exhausted, same `answered_question_id` broadcast path → all boards grey the cell out immediately; turn clears
+
+### Real-time broadcast payload details
+- `score_update`: `{ teams: [{id, name, score}], current_question_id?: string|null, answered_question_id?: string }`
+  - `current_question_id: null` included when a question ends (correct or all-wrong)
+  - `answered_question_id` included when a question ends; all clients mark that cell answered immediately
+- `game_state_change`: `{ status: string }` — sent by host on game start; projector/players call `resyncAll()`
+- `turn_change`: `{ team_id: string|null }` — null clears the active turn
+- `question_preview`: `{ questionId, categoryName, pointValue, startTs }` — startTs used for clock-sync countdown
+- `timer_start`: `{ start_timestamp, duration_seconds, team_id, buzz_id, team_name }`
 
 ### Key files
 - `src/lib/supabase.ts` — typed Supabase client
@@ -353,31 +367,32 @@ Add a service worker for offline caching of the app shell. This ensures slow bar
 - `src/lib/session.ts` — localStorage helpers (host/player identity)
 - `src/lib/roomCode.ts` — 6-char code generator (excludes ambiguous chars)
 - `src/lib/content.ts` — JSON import + validation (validates before deleting) + ContentSummary
-- `src/routes/host/index.tsx` — host phase orchestration (creating/lobby/game/error)
-- `src/routes/host/Game.tsx` — host game screen (questions, buzz queue, judging, scores)
+- `src/routes/host/index.tsx` — host phase orchestration (creating/lobby/game/error); holds `lobbyBroadcastRef` for sending `game_state_change`
+- `src/routes/host/Game.tsx` — host game screen (questions, buzz queue, judging, scores, turn management)
 - `src/routes/play/index.tsx` — player full flow (all phases in one file)
-- `src/routes/projector/index.tsx` — full projector display (lobby/grid/question/judging/winner)
+- `src/routes/projector/index.tsx` — full projector display; uses `roomRef` + stable callbacks pattern
 - `test-content.json` — sample content for testing (3 categories × 2 rounds + FJ)
 
 ### Supabase setup notes
 - Realtime enabled for: rooms, teams, questions, buzzes, wagers (ALTER PUBLICATION supabase_realtime ADD TABLE ...)
 - `questions_public` view requires: GRANT SELECT ON questions_public TO anon, authenticated
 - All RLS policies are permissive (anon key, trusted host environment)
+- postgres_changes has proven unreliable for the projector in practice — broadcasts are the primary sync mechanism
 
 ### What is NOT yet built
-- Round 2 → Final Jeopardy transition (is_active flag, top-3 cutoff)
-- Final Jeopardy wagering flow
-- Manual score adjustment on host
-- Vercel deployment
+- Round 2 → Final Jeopardy transition (is_active flag, top-3 cutoff, transition screen)
+- Final Jeopardy wagering flow (wager input → lock → answer reveal → response → judging → winner)
+- Manual score adjustment on host (for disputes)
+- PWA manifest and service worker
 
 ---
 
 ## Notes for Later
 
-- **Turn persistence** — `currentTurnTeamId` lives only in broadcast state; a page refresh on the host resets it to null. Could persist in a `rooms` column if needed.
-- **Round 2 → Final Jeopardy transition** — need to rank teams after R2, set is_active=false for non-top-3, show cutoff screen
-- **Final Jeopardy** — wager input → lock → answer reveal → response → host judging → winner screen
-- **Manual score adjustment** — host should be able to edit a team's score directly (disputes)
+- **Turn persistence** — `currentTurnTeamId` lives only in broadcast state; a page refresh on the host resets it to null. Could persist in a `rooms` column if this becomes a problem in practice.
+- **Round 2 → Final Jeopardy transition** — rank teams after R2, set `is_active=false` for non-top-3, show cutoff screen on all devices, host advances when ready
+- **Final Jeopardy** — wager input → lock → answer reveal → response → host judging → winner screen; `wagers` table is already in the schema
+- **Manual score adjustment** — host should be able to edit a team's score directly; the "give" turn button is already wired, just need a score input field
 
 ---
 
