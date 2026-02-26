@@ -262,17 +262,14 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     const remainingPending = buzzes.filter(b => b.status === 'pending' && b.id !== buzz.id)
     const questionDone     = remainingPending.length === 0
 
-    const writes: Promise<unknown>[] = [
+    await Promise.all([
       supabase.from('buzzes').update({ status: 'wrong' }).eq('id', buzz.id),
       supabase.from('teams').update({ score: newScore }).eq('id', buzz.team_id),
-    ]
+    ])
     // When all buzzes are exhausted mark the question answered so every board greys it out
     if (questionDone) {
-      writes.push(
-        supabase.from('questions').update({ is_answered: true }).eq('id', activeQuestion.id)
-      )
+      await supabase.from('questions').update({ is_answered: true }).eq('id', activeQuestion.id)
     }
-    await Promise.all(writes)
 
     const updatedScores = new Map([...scores, [buzz.team_id, newScore]])
     setScores(updatedScores)
