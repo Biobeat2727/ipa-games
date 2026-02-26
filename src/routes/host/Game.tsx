@@ -258,27 +258,42 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     const currentScore = scores.get(buzz.team_id) ?? 0
     const newScore     = currentScore - pointValue
 
-    await Promise.all([
+    // Compute using local state before the DB writes — local buzz state is current
+    const remainingPending = buzzes.filter(b => b.status === 'pending' && b.id !== buzz.id)
+    const questionDone     = remainingPending.length === 0
+
+    const writes: Promise<unknown>[] = [
       supabase.from('buzzes').update({ status: 'wrong' }).eq('id', buzz.id),
       supabase.from('teams').update({ score: newScore }).eq('id', buzz.team_id),
-    ])
+    ]
+    // When all buzzes are exhausted mark the question answered so every board greys it out
+    if (questionDone) {
+      writes.push(
+        supabase.from('questions').update({ is_answered: true }).eq('id', activeQuestion.id)
+      )
+    }
+    await Promise.all(writes)
 
     const updatedScores = new Map([...scores, [buzz.team_id, newScore]])
     setScores(updatedScores)
-    // Update local buzz state immediately so the next pending buzz gets its Judge button
-    // without waiting for postgres_changes to round-trip
     setBuzzes(prev => prev.map(b => b.id === buzz.id ? { ...b, status: 'wrong' } : b))
 
-    // Compute remaining before broadcast so we can embed question state in the payload
-    const remainingPending = buzzes.filter(b => b.status === 'pending' && b.id !== buzz.id)
-    const questionDone = remainingPending.length === 0
+    // Update host categories immediately — don't wait for postgres_changes
+    if (questionDone) {
+      setCategories(prev => prev.map(cat => ({
+        ...cat,
+        questions: cat.questions.map(q =>
+          q.id === activeQuestion.id ? { ...q, is_answered: true } : q
+        ),
+      })))
+    }
 
     broadcastRef.current?.send({
       type: 'broadcast',
       event: 'score_update',
       payload: {
         teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
-        ...(questionDone ? { current_question_id: null } : {}),
+        ...(questionDone ? { current_question_id: null, answered_question_id: activeQuestion.id } : {}),
       },
     })
 

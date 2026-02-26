@@ -198,9 +198,21 @@ export default function PlayView() {
         setTimerPayload(payload as TimerPayload)
       })
       .on('broadcast', { event: 'score_update' }, ({ payload }) => {
-        const data = payload as { teams: Array<{ id: string; score: number }> }
+        const data = payload as {
+          teams: Array<{ id: string; score: number }>
+          answered_question_id?: string
+        }
         const mine = data.teams.find(t => t.id === myTeamRef.current?.id)
         if (mine) setMyScore(mine.score)
+        // Grey out the answered question immediately without waiting for a board reload
+        if (data.answered_question_id) {
+          setBoardCategories(prev => prev.map(cat => ({
+            ...cat,
+            questions: cat.questions.map(q =>
+              q.id === data.answered_question_id ? { ...q, is_answered: true } : q
+            ),
+          })))
+        }
       })
       .on('broadcast', { event: 'turn_change' }, ({ payload }) => {
         const { team_id } = payload as { team_id: string | null }
