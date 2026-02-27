@@ -559,6 +559,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         <div className="shrink-0 bg-gray-900 border-b border-gray-800 px-4 py-3">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Scoreboard</p>
+            <span className="font-mono text-sm font-black text-yellow-400 tracking-widest">{room.code}</span>
             <button
               onClick={() => { clearHostSession(); window.location.reload() }}
               className="text-xs text-gray-600 hover:text-red-400 transition-colors"
