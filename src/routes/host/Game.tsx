@@ -169,9 +169,9 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     return () => { supabase.removeChannel(ch) }
   }, [room.current_question_id, fetchBuzzes])
 
-  // FJ wager subscription — keep fjWagers in sync while collecting / while question is live
+  // FJ wager subscription — keep fjWagers in sync through review so late auto-submits arrive
   useEffect(() => {
-    if (fjPhase !== 'wager' && fjPhase !== 'question') return
+    if (!fjPhase || fjPhase === 'done') return
     const fetchWagers = async () => {
       const { data } = await supabase.from('wagers').select().eq('room_id', roomId)
       setFjWagers(data ?? [])
@@ -182,6 +182,15 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         fetchWagers)
       .subscribe(async () => { await fetchWagers() })
     return () => { supabase.removeChannel(ch) }
+  }, [fjPhase, roomId])
+
+  // Fresh wager fetch when entering review — catches any responses that arrived during the
+  // race between "End Timer Early" and the broadcast reaching players
+  useEffect(() => {
+    if (fjPhase !== 'review') return
+    supabase.from('wagers').select().eq('room_id', roomId).then(({ data }) => {
+      if (data) setFjWagers(data)
+    })
   }, [fjPhase, roomId])
 
   // FJ 90-second answer timer
