@@ -406,6 +406,37 @@ export default function PlayView() {
     return () => { supabase.removeChannel(ch) }
   }, [myBuzzId])
 
+  // Real-time team list updates on the select_team screen
+  useEffect(() => {
+    if (phase !== 'select_team' || !room?.id) return
+    const roomId = room.id
+    const code   = room.code
+
+    const refreshTeams = async () => {
+      const { data } = await supabase
+        .from('teams').select().eq('room_id', roomId).order('created_at', { ascending: true })
+      setTeams(data ?? [])
+    }
+
+    // postgres_changes covers new teams created; broadcast covers instant join events
+    const pgCh = supabase
+      .channel(`play-teams-${roomId}`)
+      .on('postgres_changes',
+        { event: '*', schema: 'public', table: 'teams', filter: `room_id=eq.${roomId}` },
+        refreshTeams)
+      .subscribe()
+
+    const roomCh = supabase
+      .channel(`room:${code}`)
+      .on('broadcast', { event: 'team_joined' }, refreshTeams)
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(pgCh)
+      supabase.removeChannel(roomCh)
+    }
+  }, [phase, room?.id, room?.code])
+
   // Subscribe to teammate joins (lobby only)
   useEffect(() => {
     if (phase !== 'lobby' || !myTeam) return
