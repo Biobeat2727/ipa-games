@@ -578,7 +578,7 @@ export default function PlayView() {
   if (phase === 'enter_code') {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6">
-        <h1 className="text-5xl font-black mb-1 text-yellow-400 tracking-tight">Trivia Night</h1>
+        <h1 className="text-5xl font-black mb-1 text-yellow-400 tracking-tight">Tapped In!</h1>
         <p className="text-gray-500 mb-12 text-sm">Enter the room code from the screen</p>
         <div className="w-full max-w-xs space-y-4">
           <input

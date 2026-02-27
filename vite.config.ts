@@ -10,8 +10,8 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       manifest: {
-        name: 'Trivia Night',
-        short_name: 'Trivia',
+        name: 'Tapped In!',
+        short_name: 'Tapped In',
         start_url: '/play',
         display: 'standalone',
         theme_color: '#1a1a2e',

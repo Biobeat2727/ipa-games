@@ -1,0 +1,79 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "categories": [
+        {
+          "name": "Pop Culture",
+          "questions": [
+            { "point_value": 100, "answer": "This actor played Iron Man in the Marvel Cinematic Universe", "correct_question": "Who is Robert Downey Jr.?" },
+            { "point_value": 200, "answer": "Taylor Swift's 2023 tour, one of the highest-grossing of all time", "correct_question": "What is the Eras Tour?" },
+            { "point_value": 300, "answer": "This HBO series features dragons and the Targaryen family as a prequel to Game of Thrones", "correct_question": "What is House of the Dragon?" },
+            { "point_value": 400, "answer": "Beyoncé's 2016 visual album named after a citrus fruit", "correct_question": "What is Lemonade?" },
+            { "point_value": 500, "answer": "This Netflix show about a group of kids in Hawkins, Indiana ended in 2025", "correct_question": "What is Stranger Things?" }
+          ]
+        },
+        {
+          "name": "Bar Trivia Classics",
+          "questions": [
+            { "point_value": 100, "answer": "The number of stripes on the American flag", "correct_question": "What is 13?" },
+            { "point_value": 200, "answer": "This country invented beer pong", "correct_question": "What is the United States?" },
+            { "point_value": 300, "answer": "The only sport played on the moon", "correct_question": "What is golf?" },
+            { "point_value": 400, "answer": "IKEA is originally from this country", "correct_question": "What is Sweden?" },
+            { "point_value": 500, "answer": "The chemical symbol for the element on which all life on Earth is based", "correct_question": "What is C (carbon)?" }
+          ]
+        },
+        {
+          "name": "Food & Drink",
+          "questions": [
+            { "point_value": 100, "answer": "The main alcohol in a margarita", "correct_question": "What is tequila?" },
+            { "point_value": 200, "answer": "This fast food chain's slogan is 'You deserve a break today'", "correct_question": "What is McDonald's?" },
+            { "point_value": 300, "answer": "A traditional New Orleans sandwich served on French bread with fried seafood", "correct_question": "What is a po'boy?" },
+            { "point_value": 400, "answer": "This Italian cheese is used to make a classic tiramisu", "correct_question": "What is mascarpone?" },
+            { "point_value": 500, "answer": "The country of origin for Guinness stout", "correct_question": "What is Ireland?" }
+          ]
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "categories": [
+        {
+          "name": "Sports",
+          "questions": [
+            { "point_value": 200, "answer": "The NFL team that plays their home games in Kansas City", "correct_question": "Who are the Chiefs?" },
+            { "point_value": 400, "answer": "This golfer holds the record for most major championships with 18", "correct_question": "Who is Jack Nicklaus?" },
+            { "point_value": 600, "answer": "The country that has won the most FIFA World Cups", "correct_question": "What is Brazil?" },
+            { "point_value": 800, "answer": "In basketball, this player was nicknamed 'The Mailman'", "correct_question": "Who is Karl Malone?" },
+            { "point_value": 1000, "answer": "The only boxer to have beaten both Muhammad Ali and Joe Frazier", "correct_question": "Who is George Foreman?" }
+          ]
+        },
+        {
+          "name": "Movies",
+          "questions": [
+            { "point_value": 200, "answer": "The 2019 film in which Joaquin Phoenix plays an iconic DC villain", "correct_question": "What is Joker?" },
+            { "point_value": 400, "answer": "Tom Hanks tells a woman named Jenny he loves her in this 1994 film", "correct_question": "What is Forrest Gump?" },
+            { "point_value": 600, "answer": "The director of Pulp Fiction, Kill Bill, and Django Unchained", "correct_question": "Who is Quentin Tarantino?" },
+            { "point_value": 800, "answer": "This 1980 Kubrick film features the Overlook Hotel and a hedge maze", "correct_question": "What is The Shining?" },
+            { "point_value": 1000, "answer": "The only animated film ever nominated for the Academy Award for Best Picture before a separate animated category existed", "correct_question": "What is Beauty and the Beast?" }
+          ]
+        },
+        {
+          "name": "Music",
+          "questions": [
+            { "point_value": 200, "answer": "This artist released the album 'Back in Black' in 1980", "correct_question": "Who is AC/DC?" },
+            { "point_value": 400, "answer": "The Weeknd's real first name", "correct_question": "What is Abel?" },
+            { "point_value": 600, "answer": "This city is known as the birthplace of jazz", "correct_question": "What is New Orleans?" },
+            { "point_value": 800, "answer": "Freddie Mercury was the lead singer of this band", "correct_question": "Who is Queen?" },
+            { "point_value": 1000, "answer": "This rapper's real name is Aubrey Drake Graham", "correct_question": "Who is Drake?" }
+          ]
+        }
+      ]
+    }
+  ],
+  "final_jeopardy": {
+    "category": "American History",
+    "answer": "The only US president to serve two non-consecutive terms in office",
+    "correct_question": "Who is Grover Cleveland?"
+  }
+}
