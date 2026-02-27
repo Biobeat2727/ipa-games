@@ -48,6 +48,10 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const [fjTimerSeconds, setFjTimerSeconds] = useState(90)
   const [fjTimerExpired, setFjTimerExpired] = useState(false)
 
+  // Score adjustment
+  const [editingScoreTeamId, setEditingScoreTeamId] = useState<string | null>(null)
+  const [editingScoreValue, setEditingScoreValue]   = useState('')
+
   // ── Setup ────────────────────────────────────────────────
 
   useEffect(() => {
@@ -504,6 +508,19 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     })
   }
 
+  async function commitScoreEdit(teamId: string) {
+    const parsed = parseInt(editingScoreValue)
+    setEditingScoreTeamId(null)
+    if (isNaN(parsed)) return
+    await supabase.from('teams').update({ score: parsed }).eq('id', teamId)
+    const updatedScores = new Map([...scores, [teamId, parsed]])
+    setScores(updatedScores)
+    broadcastRef.current?.send({
+      type: 'broadcast', event: 'score_update',
+      payload: { teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })) },
+    })
+  }
+
   async function transitionToRound2() {
     // Capture turn assignment before the async gap so it doesn't go stale
     const firstTeamId = currentTurnTeamId
@@ -574,11 +591,30 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                 <span className={`text-sm flex-1 truncate ${team.id === currentTurnTeamId ? 'text-yellow-400 font-bold' : 'text-gray-300'}`}>
                   {team.name}
                 </span>
-                <span className={`font-mono text-sm font-bold tabular-nums ${
-                  (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
-                }`}>
-                  {scores.get(team.id) ?? 0}
-                </span>
+                {editingScoreTeamId === team.id ? (
+                  <input
+                    autoFocus
+                    type="number"
+                    value={editingScoreValue}
+                    onChange={e => setEditingScoreValue(e.target.value)}
+                    onBlur={() => commitScoreEdit(team.id)}
+                    onKeyDown={e => {
+                      if (e.key === 'Enter') commitScoreEdit(team.id)
+                      if (e.key === 'Escape') setEditingScoreTeamId(null)
+                    }}
+                    className="w-16 bg-gray-800 text-yellow-400 font-mono text-sm font-bold text-right rounded px-1 outline-none focus:ring-1 focus:ring-yellow-400 tabular-nums"
+                  />
+                ) : (
+                  <button
+                    onClick={() => { setEditingScoreTeamId(team.id); setEditingScoreValue(String(scores.get(team.id) ?? 0)) }}
+                    className={`font-mono text-sm font-bold tabular-nums hover:underline ${
+                      (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
+                    }`}
+                    title="Click to adjust score"
+                  >
+                    {scores.get(team.id) ?? 0}
+                  </button>
+                )}
                 <button
                   onClick={() => assignTurn(team.id === currentTurnTeamId ? null : team.id)}
                   className={`text-xs px-1.5 py-0.5 rounded transition-colors shrink-0 ${
