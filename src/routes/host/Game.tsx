@@ -593,7 +593,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
               New Game
             </button>
           </div>
-          <div className="space-y-1">
+          <div className="space-y-1 overflow-y-auto max-h-48">
             {sortedTeams.map((team, i) => (
               <div key={team.id} className="flex items-center gap-2">
                 <span className="text-xs text-gray-700 w-4 text-right shrink-0">{i + 1}</span>
