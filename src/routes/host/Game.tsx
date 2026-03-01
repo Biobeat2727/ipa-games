@@ -47,6 +47,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const [fjTimerStart, setFjTimerStart]     = useState<number | null>(null)
   const [fjTimerSeconds, setFjTimerSeconds] = useState(90)
   const [fjTimerExpired, setFjTimerExpired] = useState(false)
+  const fjActiveTeamIdsRef = useRef<Set<string>>(new Set())
 
   // Score adjustment
   const [editingScoreTeamId, setEditingScoreTeamId] = useState<string | null>(null)
@@ -184,14 +185,8 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     return () => { supabase.removeChannel(ch) }
   }, [fjPhase, roomId])
 
-  // Fresh wager fetch when entering review — catches any responses that arrived during the
-  // race between "End Timer Early" and the broadcast reaching players
-  useEffect(() => {
-    if (fjPhase !== 'review') return
-    supabase.from('wagers').select().eq('room_id', roomId).then(({ data }) => {
-      if (data) setFjWagers(data)
-    })
-  }, [fjPhase, roomId])
+  // Keep fjActiveTeamIdsRef in sync so the timer expiry effect always has fresh values
+  useEffect(() => { fjActiveTeamIdsRef.current = fjActiveTeamIds }, [fjActiveTeamIds])
 
   // FJ 90-second answer timer
   useEffect(() => {
@@ -207,26 +202,43 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     return () => clearInterval(id)
   }, [fjPhase, fjTimerStart])
 
-  // FJ timer expiry → build reveal order (lowest→highest score) and enter review
+  // FJ timer expiry → broadcast, wait for player auto-submits, fresh fetch, build reveal order
   useEffect(() => {
     if (!fjTimerExpired || fjPhase !== 'question') return
     setFjTimerExpired(false)
     broadcastRef.current?.send({ type: 'broadcast', event: 'fj_timer_expired', payload: {} })
-    const order = teams
-      .filter(t => fjActiveTeamIds.has(t.id))
-      .sort((a, b) => (scores.get(a.id) ?? 0) - (scores.get(b.id) ?? 0))
-      .map(t => t.id)
-    setFjRevealOrder(order)
-    setFjReviewIdx(0)
-    setFjPhase('review')
-    if (order.length > 0) {
-      const wager = fjWagers.find(w => w.team_id === order[0])
-      broadcastRef.current?.send({
-        type: 'broadcast',
-        event: 'fj_answer_reveal',
-        payload: { team_id: order[0], team_name: teamName(order[0]), response: wager?.response ?? null },
-      })
-    }
+
+    // Capture synchronously before any awaits
+    const activeIds    = fjActiveTeamIdsRef.current
+    const currentTeams = teams
+    const currentScores = scores
+
+    ;(async () => {
+      // Give players time to receive the broadcast and auto-submit their responses
+      await new Promise(resolve => setTimeout(resolve, 1500))
+
+      // Fresh fetch — don't rely on potentially stale fjWagers state
+      const { data } = await supabase.from('wagers').select().eq('room_id', roomId)
+      const latestWagers = data ?? []
+      setFjWagers(latestWagers)
+
+      const order = currentTeams
+        .filter(t => activeIds.has(t.id))
+        .sort((a, b) => (currentScores.get(a.id) ?? 0) - (currentScores.get(b.id) ?? 0))
+        .map(t => t.id)
+      setFjRevealOrder(order)
+      setFjReviewIdx(0)
+      setFjPhase('review')
+
+      if (order.length > 0) {
+        const wager = latestWagers.find(w => w.team_id === order[0])
+        broadcastRef.current?.send({
+          type: 'broadcast',
+          event: 'fj_answer_reveal',
+          payload: { team_id: order[0], team_name: teamName(order[0]), response: wager?.response ?? null },
+        })
+      }
+    })()
   }, [fjTimerExpired]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Judge timer countdown
