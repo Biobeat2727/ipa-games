@@ -10,10 +10,11 @@ import Game from './Game'
 type Phase = 'creating' | 'lobby' | 'game' | 'error'
 
 export default function HostView() {
-  const [phase, setPhase]   = useState<Phase>('creating')
-  const [room, setRoom]     = useState<Room | null>(null)
-  const [teams, setTeams]   = useState<Team[]>([])
-  const [error, setError]   = useState('')
+  const [phase, setPhase]        = useState<Phase>('creating')
+  const [room, setRoom]          = useState<Room | null>(null)
+  const [teams, setTeams]        = useState<Team[]>([])
+  const [playerCounts, setPlayerCounts] = useState<Map<string, number>>(new Map())
+  const [error, setError]        = useState('')
 
   // Ref to the lobby broadcast channel so handleStartGame can fire game_state_change
   const lobbyBroadcastRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
@@ -26,9 +27,21 @@ export default function HostView() {
   const [importError, setImportError] = useState('')
 
   const fetchTeams = useCallback(async (roomId: string) => {
-    const { data } = await supabase
+    const { data: teamData } = await supabase
       .from('teams').select().eq('room_id', roomId).order('created_at', { ascending: true })
-    setTeams(data ?? [])
+    setTeams(teamData ?? [])
+
+    if (teamData?.length) {
+      const { data: playerData } = await supabase
+        .from('players').select('team_id').in('team_id', teamData.map(t => t.id))
+      const counts = new Map<string, number>()
+      for (const p of playerData ?? []) {
+        counts.set(p.team_id, (counts.get(p.team_id) ?? 0) + 1)
+      }
+      setPlayerCounts(counts)
+    } else {
+      setPlayerCounts(new Map())
+    }
   }, [])
 
   const fetchSummary = useCallback(async (roomId: string) => {
@@ -127,6 +140,16 @@ export default function HostView() {
     }
   }
 
+  async function handleDeleteTeam(teamId: string) {
+    // Delete players first (explicit, safe regardless of cascade config)
+    await supabase.from('players').delete().eq('team_id', teamId)
+    const { error: err } = await supabase.from('teams').delete().eq('id', teamId)
+    if (!err) {
+      setTeams(prev => prev.filter(t => t.id !== teamId))
+      setPlayerCounts(prev => { const m = new Map(prev); m.delete(teamId); return m })
+    }
+  }
+
   async function handleStartGame() {
     if (!room) return
     const { error: err } = await supabase
@@ -178,15 +201,17 @@ export default function HostView() {
     <div className="min-h-screen bg-gray-950 text-white p-6">
       <div className="max-w-xl mx-auto">
 
-        {/* Room code */}
-        <div className="text-center mb-8">
-          <p className="text-gray-500 text-xs uppercase tracking-widest mb-2">Room Code</p>
-          <p className="text-7xl font-mono font-black tracking-widest text-yellow-400 select-all">
+        {/* Header */}
+        <div className="flex items-center justify-between mb-8">
+          <div>
+            <h1 className="text-xl font-bold text-white">Tapped In! — Host</h1>
+            <p className="text-gray-400 text-sm mt-0.5">
+              Players join at <span className="text-white font-medium">tappedin.lol</span>
+            </p>
+          </div>
+          <span className="font-mono text-xs text-gray-600 bg-gray-900 px-2 py-1 rounded select-all">
             {room?.code}
-          </p>
-          <p className="text-gray-500 text-sm mt-3">
-            Players join at <span className="text-white font-medium">[your-url]/play</span>
-          </p>
+          </span>
         </div>
 
         {/* Content */}
@@ -238,12 +263,25 @@ export default function HostView() {
             <p className="text-gray-600 text-sm">Waiting for teams to join…</p>
           ) : (
             <ul className="space-y-2">
-              {teams.map(team => (
-                <li key={team.id} className="flex items-center gap-3">
-                  <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
-                  <span className="font-medium">{team.name}</span>
-                </li>
-              ))}
+              {teams.map(team => {
+                const count = playerCounts.get(team.id) ?? 0
+                return (
+                  <li key={team.id} className="flex items-center gap-3">
+                    <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
+                    <span className="font-medium flex-1">{team.name}</span>
+                    <span className="text-xs text-gray-500">
+                      {count} {count === 1 ? 'player' : 'players'}
+                    </span>
+                    <button
+                      onClick={() => handleDeleteTeam(team.id)}
+                      className="text-gray-600 hover:text-red-400 transition-colors px-1"
+                      title="Remove team"
+                    >
+                      ✕
+                    </button>
+                  </li>
+                )
+              })}
             </ul>
           )}
         </div>
