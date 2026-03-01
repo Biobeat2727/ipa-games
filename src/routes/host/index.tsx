@@ -101,25 +101,44 @@ export default function HostView() {
     const roomId = room.id
     const code = room.code
 
-    // postgres_changes fallback (requires teams table in realtime publication)
+    console.log('[host-lobby] setting up subscriptions — roomId:', roomId, 'code:', code)
+
+    // postgres_changes path — requires teams table in Supabase realtime publication
+    // (Dashboard → Database → Replication → supabase_realtime → add teams table)
     const pgCh = supabase
       .channel(`host-lobby-${roomId}`)
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'teams', filter: `room_id=eq.${roomId}` },
-        () => fetchTeams(roomId))
+        (payload) => {
+          console.log('[host-lobby] postgres_changes fired — event:', payload.eventType, payload)
+          fetchTeams(roomId)
+        })
       .subscribe(status => {
-        if (status === 'SUBSCRIBED') fetchTeams(roomId)
+        console.log('[host-lobby] pgCh status:', status)
+        if (status === 'SUBSCRIBED') {
+          console.log('[host-lobby] postgres_changes ready — doing initial fetch')
+          fetchTeams(roomId)
+        }
+        if (status === 'CHANNEL_ERROR') {
+          console.warn('[host-lobby] postgres_changes CHANNEL_ERROR — teams table likely not in realtime publication')
+        }
       })
 
-    // Broadcast listener — fires immediately when any player creates/joins a team
+    // Broadcast path — player sends team_joined after joining; no table publication needed
     const bcCh = supabase
       .channel(`room:${code}`)
-      .on('broadcast', { event: 'team_joined' }, () => fetchTeams(roomId))
-      .subscribe()
+      .on('broadcast', { event: 'team_joined' }, (msg) => {
+        console.log('[host-lobby] broadcast team_joined received', msg)
+        fetchTeams(roomId)
+      })
+      .subscribe(status => {
+        console.log('[host-lobby] bcCh status:', status)
+      })
 
     lobbyBroadcastRef.current = bcCh
 
     return () => {
+      console.log('[host-lobby] cleaning up subscriptions')
       supabase.removeChannel(pgCh)
       supabase.removeChannel(bcCh)
       lobbyBroadcastRef.current = null

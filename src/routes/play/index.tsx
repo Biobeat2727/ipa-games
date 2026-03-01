@@ -488,8 +488,11 @@ export default function PlayView() {
 
     // Notify host lobby immediately via broadcast (bypasses realtime publication requirement)
     const bc = supabase.channel(`room:${room!.code}`)
+    console.log('[play] creating broadcast channel for team_joined, code:', room!.code)
     bc.subscribe(status => {
+      console.log('[play] broadcast channel status:', status)
       if (status === 'SUBSCRIBED') {
+        console.log('[play] sending team_joined broadcast')
         bc.send({ type: 'broadcast', event: 'team_joined', payload: {} })
         setTimeout(() => supabase.removeChannel(bc), 1000)
       }
