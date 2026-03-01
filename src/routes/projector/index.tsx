@@ -401,17 +401,20 @@ export default function ProjectorView() {
 
   // Lobby
   if (room.status === 'lobby') {
+    const joinUrl = window.location.origin
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8 text-center">
-        <p className="text-gray-500 uppercase tracking-[0.4em] mb-4" style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
+        <p className="text-gray-500 uppercase tracking-[0.4em] mb-6" style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
           Join the game
         </p>
-        <p className="font-mono font-black text-yellow-400 leading-none tracking-widest mb-6"
-          style={{ fontSize: 'clamp(5rem, 22vw, 16rem)' }}>
-          {room.code}
-        </p>
-        <p className="text-gray-500 mb-12" style={{ fontSize: 'clamp(0.9rem, 2.5vw, 1.75rem)' }}>
-          Open <span className="text-white font-semibold">[your-url]/play</span> on your phone
+        <img
+          src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(joinUrl)}&size=300x300`}
+          alt="Scan to join"
+          className="rounded-2xl bg-white p-3 mb-6"
+          style={{ width: 'clamp(140px, 18vw, 280px)', height: 'clamp(140px, 18vw, 280px)' }}
+        />
+        <p className="font-semibold text-white mb-12" style={{ fontSize: 'clamp(1rem, 3vw, 2.25rem)' }}>
+          {joinUrl}
         </p>
         {sortedTeams.length > 0 ? (
           <div className="flex flex-wrap justify-center gap-4 max-w-5xl">

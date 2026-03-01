@@ -3,14 +3,12 @@ import { supabase } from '../../lib/supabase'
 import {
   clearPlayerSession,
   getSessionId,
-  getRoomCode,
   getTeamId,
-  setRoomCode,
   setTeamId,
 } from '../../lib/session'
 import type { Buzz, Player, QuestionPublic, Room, Team } from '../../lib/types'
 
-type Phase = 'enter_code' | 'select_team' | 'lobby' | 'game'
+type Phase = 'loading' | 'no_game' | 'select_team' | 'lobby' | 'game'
 
 interface TimerPayload {
   start_timestamp: number
@@ -30,8 +28,7 @@ interface PreviewInfo {
 }
 
 export default function PlayView() {
-  const [phase, setPhase]             = useState<Phase>('enter_code')
-  const [codeInput, setCodeInput]     = useState('')
+  const [phase, setPhase]             = useState<Phase>('loading')
   const [error, setError]             = useState('')
   const [loading, setLoading]         = useState(false)
   const [room, setRoom]               = useState<Room | null>(null)
@@ -110,26 +107,43 @@ export default function PlayView() {
     setTeammates(data ?? [])
   }, [])
 
-  // Resume session from localStorage on mount
+  // On mount: resume saved session or auto-resolve the single active room
   useEffect(() => {
-    const savedCode   = getRoomCode()
     const savedTeamId = getTeamId()
-    if (!savedCode || !savedTeamId) return
 
-    async function resume() {
-      const [{ data: roomData }, { data: teamData }] = await Promise.all([
-        supabase.from('rooms').select().eq('code', savedCode!).neq('status', 'finished').single(),
-        supabase.from('teams').select().eq('id', savedTeamId!).single(),
-      ])
-      if (!roomData || !teamData) { clearPlayerSession(); return }
+    async function autoResolve() {
+      const cutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
+      const { data } = await supabase
+        .from('rooms')
+        .select()
+        .neq('status', 'finished')
+        .gte('created_at', cutoff)
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (!data) { setPhase('no_game'); return }
+      setRoom(data)
+      const { data: teamData } = await supabase
+        .from('teams').select().eq('room_id', data.id).order('created_at', { ascending: true })
+      setTeams(teamData ?? [])
+      setPhase('select_team')
+    }
 
+    async function resume(teamId: string) {
+      const { data: teamData } = await supabase.from('teams').select().eq('id', teamId).single()
+      if (!teamData) { clearPlayerSession(); return autoResolve() }
+      const { data: roomData } = await supabase
+        .from('rooms').select().eq('id', teamData.room_id).neq('status', 'finished').single()
+      if (!roomData) { clearPlayerSession(); return autoResolve() }
       setRoom(roomData)
       setMyTeam(teamData)
       setMyScore(teamData.score)
-      await fetchTeammates(savedTeamId!)
+      await fetchTeammates(teamId)
       setPhase(roomData.status === 'lobby' ? 'lobby' : 'game')
     }
-    resume()
+
+    if (savedTeamId) resume(savedTeamId)
+    else autoResolve()
   }, [fetchTeammates])
 
   // Subscribe to room updates (once room is known)
@@ -452,29 +466,11 @@ export default function PlayView() {
 
   function handleLeave() {
     clearPlayerSession()
-    setPhase('enter_code')
-    setRoom(null); setMyTeam(null); setTeammates([])
+    setMyTeam(null); setTeammates([])
     setActiveQuestion(null); setHasBuzzed(false)
     setMyBuzzId(null); setTimerPayload(null)
     setBuzzResult(null); setMyScore(0)
-    setCodeInput(''); setError('')
-  }
-
-  async function handleJoinRoom() {
-    const code = codeInput.trim().toUpperCase()
-    if (code.length !== 6) return
-    setLoading(true); setError('')
-
-    const { data, error: err } = await supabase.from('rooms').select().eq('code', code).single()
-    setLoading(false)
-
-    if (!data || err) { setError('Room not found. Check the code and try again.'); return }
-    if (data.status === 'finished') { setError('That game has already ended.'); return }
-
-    setRoomCode(code); setRoom(data)
-    const { data: teamData } = await supabase
-      .from('teams').select().eq('room_id', data.id).order('created_at', { ascending: true })
-    setTeams(teamData ?? [])
+    setError('')
     setPhase('select_team')
   }
 
@@ -575,33 +571,20 @@ export default function PlayView() {
 
   // ── Screens ───────────────────────────────────────────────
 
-  if (phase === 'enter_code') {
+  if (phase === 'loading') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6">
-        <h1 className="text-5xl font-black mb-1 text-yellow-400 tracking-tight">Tapped In!</h1>
-        <p className="text-gray-500 mb-12 text-sm">Enter the room code from the screen</p>
-        <div className="w-full max-w-xs space-y-4">
-          <input
-            type="text"
-            inputMode="text"
-            autoCapitalize="characters"
-            autoComplete="off"
-            placeholder="XXXXXX"
-            maxLength={6}
-            value={codeInput}
-            onChange={e => setCodeInput(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === 'Enter' && handleJoinRoom()}
-            className="w-full bg-gray-800 text-white text-center text-4xl font-mono tracking-[0.3em] uppercase rounded-2xl px-4 py-5 outline-none focus:ring-2 focus:ring-yellow-400"
-          />
-          {error && <p className="text-red-400 text-sm text-center">{error}</p>}
-          <button
-            onClick={handleJoinRoom}
-            disabled={loading || codeInput.length !== 6}
-            className="w-full py-4 rounded-2xl text-lg font-black bg-yellow-400 text-gray-950 disabled:opacity-30 transition-opacity"
-          >
-            {loading ? 'Checking…' : 'Join Game'}
-          </button>
-        </div>
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+        <p className="text-gray-400 text-lg animate-pulse">Finding game…</p>
+      </div>
+    )
+  }
+
+  if (phase === 'no_game') {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <h1 className="text-5xl font-black mb-4 text-yellow-400 tracking-tight">Tapped In!</h1>
+        <p className="text-gray-400">No active game right now.</p>
+        <p className="text-gray-600 text-sm mt-2">Check back when the host starts one.</p>
       </div>
     )
   }
@@ -610,8 +593,7 @@ export default function PlayView() {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col p-6">
         <div className="max-w-sm mx-auto w-full pt-10">
-          <p className="text-center text-gray-500 text-xs uppercase tracking-widest mb-1">Room</p>
-          <p className="text-center text-3xl font-mono font-black text-yellow-400 mb-8">{room?.code}</p>
+          <h1 className="text-center text-4xl font-black text-yellow-400 mb-8">Tapped In!</h1>
           <input
             type="text"
             placeholder="Your nickname (optional)"
@@ -902,7 +884,9 @@ export default function PlayView() {
 
     const isMyTurnNow  = myTeam?.id === currentTurnTeamId
     const turnTeamName = currentTurnTeamId ? teamNames.get(currentTurnTeamId) : null
-    const pointValues  = [100, 200, 300, 400, 500]
+    const pointValues  = [...new Set(
+      boardCategories.flatMap(c => c.questions.map(q => q.point_value ?? 0)).filter(Boolean)
+    )].sort((a, b) => a - b)
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col">
         {scoreChip}
