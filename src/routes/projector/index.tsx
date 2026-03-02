@@ -302,6 +302,11 @@ export default function ProjectorView() {
         setScores(new Map(s.map(t => [t.id, t.score])))
         setRoom(prev => prev ? { ...prev, status: 'finished' } : prev)
       })
+      .on('broadcast', { event: 'lobby_closed' }, () => {
+        setRoom(null)
+        setTeams([]); setCategories([]); setBuzzes([])
+        setPhase('waiting')
+      })
       .subscribe(status => {
         // On (re)connect, re-sync all state so nothing is missed
         if (status === 'SUBSCRIBED') resyncAll()

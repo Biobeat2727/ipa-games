@@ -8,7 +8,7 @@ import {
 } from '../../lib/session'
 import type { Buzz, Player, QuestionPublic, Room, Team } from '../../lib/types'
 
-type Phase = 'checking' | 'waiting' | 'select_team' | 'lobby' | 'game'
+type Phase = 'checking' | 'no_lobby' | 'join_lobby' | 'select_team' | 'lobby' | 'game'
 
 interface TimerPayload {
   start_timestamp: number
@@ -120,12 +120,9 @@ export default function PlayView() {
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (!data) { setPhase('waiting'); return }
+      if (!data) { setPhase('no_lobby'); return }
       setRoom(data)
-      const { data: teamData } = await supabase
-        .from('teams').select().eq('room_id', data.id).order('created_at', { ascending: true })
-      setTeams(teamData ?? [])
-      setPhase('select_team')
+      setPhase('join_lobby')
     }
 
     async function resume(teamId: string) {
@@ -145,9 +142,9 @@ export default function PlayView() {
     else autoResolve()
   }, [fetchTeammates])
 
-  // Poll for an active room while in 'waiting' phase (every 3 seconds)
+  // Poll for an active room while in 'no_lobby' phase (every 3 seconds)
   useEffect(() => {
-    if (phase !== 'waiting') return
+    if (phase !== 'no_lobby') return
     const id = setInterval(async () => {
       const { data } = await supabase
         .from('rooms')
@@ -158,10 +155,7 @@ export default function PlayView() {
         .maybeSingle()
       if (data) {
         setRoom(data)
-        const { data: teamData } = await supabase
-          .from('teams').select().eq('room_id', data.id).order('created_at', { ascending: true })
-        setTeams(teamData ?? [])
-        setPhase('select_team')
+        setPhase('join_lobby')
       }
     }, 3000)
     return () => clearInterval(id)
@@ -183,6 +177,29 @@ export default function PlayView() {
       })
     return () => { supabase.removeChannel(ch) }
   }, [room?.id])
+
+  // Kick: if room becomes 'finished' while player is in a pre-game phase, send them back
+  useEffect(() => {
+    if (room?.status !== 'finished') return
+    if (['join_lobby', 'select_team', 'lobby'].includes(phase)) {
+      clearPlayerSession()
+      setRoom(null); setMyTeam(null); setTeams([])
+      setPhase('no_lobby')
+    }
+  }, [room?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Kick via broadcast: host sends lobby_closed on the room channel
+  useEffect(() => {
+    if (!room?.id || !['join_lobby', 'select_team', 'lobby'].includes(phase)) return
+    const ch = supabase.channel(`play-kick-${room.id}`)
+      .on('broadcast', { event: 'lobby_closed' }, () => {
+        clearPlayerSession()
+        setRoom(null); setMyTeam(null); setTeams([])
+        setPhase('no_lobby')
+      })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [room?.id, phase])
 
   // React to room changes → game state transitions
   useEffect(() => {
@@ -314,6 +331,11 @@ export default function PlayView() {
         if (mine) setMyScore(mine.score)
         setRoom(prev => prev ? { ...prev, status: 'finished' } : prev)
         setFjSubPhase('done')
+      })
+      .on('broadcast', { event: 'lobby_closed' }, () => {
+        clearPlayerSession()
+        setRoom(null); setMyTeam(null)
+        setPhase('no_lobby')
       })
       .subscribe()
 
@@ -463,6 +485,11 @@ export default function PlayView() {
     const roomCh = supabase
       .channel(`room:${roomId}`)
       .on('broadcast', { event: 'team_joined' }, refreshTeams)
+      .on('broadcast', { event: 'lobby_closed' }, () => {
+        clearPlayerSession()
+        setRoom(null); setMyTeam(null); setTeams([])
+        setPhase('no_lobby')
+      })
       .subscribe()
 
     lobbyChannelRef.current = roomCh
@@ -486,6 +513,14 @@ export default function PlayView() {
   }, [phase, myTeam, fetchTeammates])
 
   // ── Actions ───────────────────────────────────────────────
+
+  async function handleJoinLobby() {
+    if (!room) return
+    const { data: teamData } = await supabase
+      .from('teams').select().eq('room_id', room.id).order('created_at', { ascending: true })
+    setTeams(teamData ?? [])
+    setPhase('select_team')
+  }
 
   function handleLeave() {
     clearPlayerSession()
@@ -597,12 +632,32 @@ export default function PlayView() {
     )
   }
 
-  if (phase === 'waiting') {
+  if (phase === 'no_lobby') {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
         <h1 className="text-5xl font-black mb-4 text-yellow-400 tracking-tight">Tapped In!</h1>
-        <p className="text-gray-400 animate-pulse">Waiting for host to start a lobby…</p>
+        <p className="text-gray-400 animate-pulse">Waiting for host to open a lobby…</p>
         <p className="text-gray-600 text-sm mt-2">This page will update automatically.</p>
+      </div>
+    )
+  }
+
+  if (phase === 'join_lobby' && room) {
+    const openedAt = new Date(room.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <h1 className="text-5xl font-black mb-10 text-yellow-400 tracking-tight">Tapped In!</h1>
+        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 w-full max-w-sm mb-6">
+          <p className="text-gray-500 text-xs uppercase tracking-wider mb-3">Game Lobby</p>
+          <p className="text-white font-black text-2xl mb-1">Tonight's Game</p>
+          <p className="text-gray-500 text-sm">Opened at {openedAt}</p>
+        </div>
+        <button
+          onClick={handleJoinLobby}
+          className="w-full max-w-sm py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950"
+        >
+          Join Lobby
+        </button>
       </div>
     )
   }

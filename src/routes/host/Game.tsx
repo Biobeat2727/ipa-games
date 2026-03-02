@@ -609,7 +609,11 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Scoreboard</p>
             <button
-              onClick={() => { clearHostSession(); window.location.reload() }}
+              onClick={async () => {
+                broadcastRef.current?.send({ type: 'broadcast', event: 'lobby_closed', payload: {} })
+                await supabase.from('rooms').update({ status: 'finished' }).neq('status', 'finished')
+                window.location.reload()
+              }}
               className="text-xs text-gray-600 hover:text-red-400 transition-colors"
             >
               New Game

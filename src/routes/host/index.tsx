@@ -176,7 +176,12 @@ export default function HostView() {
     }
   }
 
-  function handleNewGame() {
+  async function handleNewGame() {
+    // Kick all connected players/projectors before clearing state
+    if (room) {
+      lobbyBroadcastRef.current?.send({ type: 'broadcast', event: 'lobby_closed', payload: {} })
+      await supabase.from('rooms').update({ status: 'finished' }).eq('id', room.id)
+    }
     setRoom(null)
     setTeams([])
     setPlayerCounts(new Map())
