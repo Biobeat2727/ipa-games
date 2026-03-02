@@ -84,7 +84,6 @@ export default function HostView() {
     if (!room?.id || phase !== 'lobby') return
 
     const roomId = room.id
-    const code = room.code
 
     // postgres_changes path — requires teams table in Supabase realtime publication
     const pgCh = supabase
@@ -98,7 +97,7 @@ export default function HostView() {
 
     // Broadcast path — player sends team_joined after joining
     const bcCh = supabase
-      .channel(`room:${code}`)
+      .channel(`room:${roomId}`)
       .on('broadcast', { event: 'team_joined' }, () => fetchTeams(roomId))
       .subscribe()
 
@@ -109,7 +108,7 @@ export default function HostView() {
       supabase.removeChannel(bcCh)
       lobbyBroadcastRef.current = null
     }
-  }, [room?.id, room?.code, phase, fetchTeams])
+  }, [room?.id, phase, fetchTeams])
 
   async function handleCreateRoom() {
     setPhase('creating')
@@ -246,9 +245,6 @@ export default function HostView() {
               Players join at <span className="text-white font-medium">tappedin.lol</span>
             </p>
           </div>
-          <span className="font-mono text-xs text-gray-600 bg-gray-900 px-2 py-1 rounded select-all">
-            {room?.code}
-          </span>
         </div>
 
         {/* Content */}

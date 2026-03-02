@@ -218,8 +218,8 @@ export default function ProjectorView() {
   // ── Broadcast channel ─────────────────────────────────────
 
   useEffect(() => {
-    if (!room?.code) return
-    const ch = supabase.channel(`room:${room.code}`)
+    if (!room?.id) return
+    const ch = supabase.channel(`room:${room.id}`)
       .on('broadcast', { event: 'question_preview' }, ({ payload }) => {
         const p = payload as { questionId: string; categoryName: string; pointValue: number | null; startTs: number }
         setPreviewInfo(p)
@@ -307,7 +307,7 @@ export default function ProjectorView() {
         if (status === 'SUBSCRIBED') resyncAll()
       })
     return () => { supabase.removeChannel(ch) }
-  }, [room?.code, refetchTeams, resyncAll])
+  }, [room?.id, refetchTeams, resyncAll])
 
   // ── Buzzes for active question ────────────────────────────
 

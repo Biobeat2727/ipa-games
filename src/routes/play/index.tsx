@@ -228,9 +228,9 @@ export default function PlayView() {
 
   // Subscribe to broadcast channel (game phase) — timer + scores + turn
   useEffect(() => {
-    if (phase !== 'game' || !room?.code) return
+    if (phase !== 'game' || !room?.id) return
 
-    const ch = supabase.channel(`room:${room.code}`)
+    const ch = supabase.channel(`room:${room.id}`)
       .on('broadcast', { event: 'question_preview' }, ({ payload }) => {
         setPreviewInfo(payload as PreviewInfo)
       })
@@ -318,7 +318,7 @@ export default function PlayView() {
 
     broadcastRef.current = ch
     return () => { supabase.removeChannel(ch); broadcastRef.current = null }
-  }, [phase, room?.code, room?.id, loadBoard])
+  }, [phase, room?.id, loadBoard])
 
   // Load board + team names when entering game phase
   useEffect(() => {
@@ -444,7 +444,6 @@ export default function PlayView() {
   useEffect(() => {
     if (phase !== 'select_team' || !room?.id) return
     const roomId = room.id
-    const code   = room.code
 
     const refreshTeams = async () => {
       const { data } = await supabase
@@ -461,7 +460,7 @@ export default function PlayView() {
       .subscribe()
 
     const roomCh = supabase
-      .channel(`room:${code}`)
+      .channel(`room:${roomId}`)
       .on('broadcast', { event: 'team_joined' }, refreshTeams)
       .subscribe()
 
@@ -469,7 +468,7 @@ export default function PlayView() {
       supabase.removeChannel(pgCh)
       supabase.removeChannel(roomCh)
     }
-  }, [phase, room?.id, room?.code])
+  }, [phase, room?.id])
 
   // Subscribe to teammate joins (lobby only)
   useEffect(() => {
@@ -507,7 +506,7 @@ export default function PlayView() {
     await fetchTeammates(team.id)
 
     // Notify host lobby immediately via broadcast (bypasses realtime publication requirement)
-    const bc = supabase.channel(`room:${room!.code}`)
+    const bc = supabase.channel(`room:${room!.id}`)
     bc.subscribe(status => {
       if (status === 'SUBSCRIBED') {
         bc.send({ type: 'broadcast', event: 'team_joined', payload: {} })
