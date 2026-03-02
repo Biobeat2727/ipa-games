@@ -842,16 +842,33 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         ) : !activeQuestion ? (
           previewInfo ? (
             // ── Category preview ────────────────────────
-            <div className="flex-1 flex flex-col items-center justify-center gap-3 text-center p-8">
-              <p className="text-xs text-gray-500 uppercase tracking-widest">Category Reveal</p>
-              <p className="font-black text-white text-3xl leading-tight">{previewInfo.categoryName}</p>
-              {previewInfo.pointValue != null && (
-                <p className="text-yellow-400 font-mono text-xl font-bold">${previewInfo.pointValue}</p>
-              )}
-              <p className="text-gray-600 text-xs mt-2">Read the question, then open the buzzer</p>
+            <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 max-w-2xl mx-auto w-full">
+              <div className="text-center">
+                <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">Category Reveal</p>
+                <p className="font-black text-white text-2xl leading-tight">{previewInfo.categoryName}</p>
+                {previewInfo.pointValue != null && (
+                  <p className="text-yellow-400 font-mono text-lg font-bold">${previewInfo.pointValue}</p>
+                )}
+              </div>
+              {(() => {
+                const q = categories.flatMap(c => c.questions).find(q => q.id === previewInfo.questionId)
+                return q ? (
+                  <div className="w-full space-y-3">
+                    <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
+                      <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">Clue</p>
+                      <p className="text-white text-lg font-semibold leading-snug">{q.answer}</p>
+                    </div>
+                    <div className="bg-green-950 border border-green-800 rounded-xl p-4">
+                      <p className="text-xs text-green-600 uppercase tracking-widest mb-2">Answer</p>
+                      <p className="text-green-300 text-base font-bold">{q.correct_question}</p>
+                    </div>
+                  </div>
+                ) : null
+              })()}
+              <p className="text-gray-600 text-xs">Read the clue aloud, then open the buzzer</p>
               <button
                 onClick={() => activateQuestion(previewInfo.questionId)}
-                className="mt-4 px-6 py-2 rounded-xl text-sm font-bold bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+                className="px-8 py-3 rounded-xl font-bold bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
               >
                 Open Buzzer
               </button>
