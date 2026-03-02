@@ -475,11 +475,13 @@ export default function PlayView() {
   }
 
   async function joinTeam(team: Team) {
+    console.log('[play] joinTeam — team:', team.id, team.name, '| room:', room?.id, '| code:', room?.code)
     setLoading(true); setError('')
     const { data: player, error: err } = await supabase
       .from('players')
       .insert({ team_id: team.id, session_id: getSessionId(), nickname: nickname.trim() || null })
       .select().single()
+    console.log('[play] player insert result — player:', player?.id ?? null, '| error:', err?.message ?? null)
     setLoading(false)
     if (!player || err) { setError('Failed to join team. Try again.'); return }
 
@@ -487,10 +489,10 @@ export default function PlayView() {
     await fetchTeammates(team.id)
 
     // Notify host lobby immediately via broadcast (bypasses realtime publication requirement)
+    console.log('[play] creating broadcast channel for room:', room!.code)
     const bc = supabase.channel(`room:${room!.code}`)
-    console.log('[play] creating broadcast channel for team_joined, code:', room!.code)
     bc.subscribe(status => {
-      console.log('[play] broadcast channel status:', status)
+      console.log('[play] broadcast channel status:', status, '| code:', room?.code)
       if (status === 'SUBSCRIBED') {
         console.log('[play] sending team_joined broadcast')
         bc.send({ type: 'broadcast', event: 'team_joined', payload: {} })
@@ -502,10 +504,15 @@ export default function PlayView() {
   }
 
   async function handleCreateTeam() {
-    if (!newTeamName.trim() || !room) return
+    console.log('[play] handleCreateTeam — name:', newTeamName.trim(), '| room:', room?.id)
+    if (!newTeamName.trim() || !room) {
+      console.warn('[play] handleCreateTeam bailed — name empty:', !newTeamName.trim(), '| room null:', !room)
+      return
+    }
     setLoading(true)
     const { data: team, error: err } = await supabase
       .from('teams').insert({ room_id: room.id, name: newTeamName.trim() }).select().single()
+    console.log('[play] team insert result — team:', team?.id ?? null, '| error:', err?.message ?? null)
     if (!team || err) { setLoading(false); setError('Failed to create team. Try again.'); return }
     await joinTeam(team)
   }
