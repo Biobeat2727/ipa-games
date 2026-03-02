@@ -21,6 +21,7 @@ interface Props {
 export default function Game({ roomId, initialRoom, teams }: Props) {
   const [room, setRoom]             = useState<Room>(initialRoom)
   const [categories, setCategories] = useState<CategoryRow[]>([])
+  const [catIds, setCatIds]         = useState<string[]>([])
   const [buzzes, setBuzzes]         = useState<Buzz[]>([])
   const [scores, setScores]         = useState<Map<string, number>>(
     new Map(teams.map(t => [t.id, t.score]))
@@ -62,8 +63,9 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         .eq('room_id', roomId).order('round').order('name')
       if (!cats) return
 
+      const ids = cats.map(c => c.id)
       const { data: questions } = await supabase
-        .from('questions').select().in('category_id', cats.map(c => c.id))
+        .from('questions').select().in('category_id', ids)
 
       setCategories(cats.map(cat => ({
         ...cat,
@@ -71,6 +73,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
           .filter(q => q.category_id === cat.id)
           .sort((a, b) => (a.point_value ?? 0) - (b.point_value ?? 0)),
       })))
+      setCatIds(ids)
     }
     load()
   }, [roomId])
@@ -115,21 +118,12 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     return () => clearTimeout(id)
   }, [previewInfo]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Subscribe to room + question + team score changes
+  // Subscribe to room + team score changes
   useEffect(() => {
     const ch = supabase.channel(`host-game-${roomId}`)
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
         payload => setRoom(payload.new as Room))
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'questions' },
-        payload => {
-          const q = payload.new as Question
-          setCategories(prev => prev.map(cat => ({
-            ...cat,
-            questions: cat.questions.map(old => old.id === q.id ? q : old),
-          })))
-        })
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'teams', filter: `room_id=eq.${roomId}` },
         payload => {
@@ -138,13 +132,30 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         })
       .subscribe(async status => {
         if (status === 'SUBSCRIBED') {
-          // Re-fetch scores from DB in case any team updates were missed during connection
           const { data } = await supabase.from('teams').select('id, score').eq('room_id', roomId)
           if (data) setScores(new Map(data.map(t => [t.id, t.score])))
         }
       })
     return () => { supabase.removeChannel(ch) }
   }, [roomId])
+
+  // Subscribe to question updates filtered to this room's categories only
+  useEffect(() => {
+    if (catIds.length === 0) return
+    const ch = supabase.channel(`host-questions-${roomId}`)
+      .on('postgres_changes',
+        { event: 'UPDATE', schema: 'public', table: 'questions',
+          filter: `category_id=in.(${catIds.join(',')})` },
+        payload => {
+          const q = payload.new as Question
+          setCategories(prev => prev.map(cat => ({
+            ...cat,
+            questions: cat.questions.map(old => old.id === q.id ? q : old),
+          })))
+        })
+      .subscribe()
+    return () => { supabase.removeChannel(ch) }
+  }, [roomId, catIds])
 
   // Subscribe to buzzes for the active question
   const fetchBuzzes = useCallback(async (questionId: string) => {

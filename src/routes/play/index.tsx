@@ -8,7 +8,7 @@ import {
 } from '../../lib/session'
 import type { Buzz, Player, QuestionPublic, Room, Team } from '../../lib/types'
 
-type Phase = 'loading' | 'no_game' | 'select_team' | 'lobby' | 'game'
+type Phase = 'checking' | 'waiting' | 'select_team' | 'lobby' | 'game'
 
 interface TimerPayload {
   start_timestamp: number
@@ -28,7 +28,7 @@ interface PreviewInfo {
 }
 
 export default function PlayView() {
-  const [phase, setPhase]             = useState<Phase>('loading')
+  const [phase, setPhase]             = useState<Phase>('checking')
   const [error, setError]             = useState('')
   const [loading, setLoading]         = useState(false)
   const [room, setRoom]               = useState<Room | null>(null)
@@ -119,7 +119,7 @@ export default function PlayView() {
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()
-      if (!data) { setPhase('no_game'); return }
+      if (!data) { setPhase('waiting'); return }
       setRoom(data)
       const { data: teamData } = await supabase
         .from('teams').select().eq('room_id', data.id).order('created_at', { ascending: true })
@@ -143,6 +143,28 @@ export default function PlayView() {
     if (savedTeamId) resume(savedTeamId)
     else autoResolve()
   }, [fetchTeammates])
+
+  // Poll for an active room while in 'waiting' phase (every 3 seconds)
+  useEffect(() => {
+    if (phase !== 'waiting') return
+    const id = setInterval(async () => {
+      const { data } = await supabase
+        .from('rooms')
+        .select()
+        .neq('status', 'finished')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (data) {
+        setRoom(data)
+        const { data: teamData } = await supabase
+          .from('teams').select().eq('room_id', data.id).order('created_at', { ascending: true })
+        setTeams(teamData ?? [])
+        setPhase('select_team')
+      }
+    }, 3000)
+    return () => clearInterval(id)
+  }, [phase])
 
   // Subscribe to room updates (once room is known)
   useEffect(() => {
@@ -473,13 +495,11 @@ export default function PlayView() {
   }
 
   async function joinTeam(team: Team) {
-    console.log('[play] joinTeam — team:', team.id, team.name, '| room:', room?.id, '| code:', room?.code)
     setLoading(true); setError('')
     const { data: player, error: err } = await supabase
       .from('players')
       .insert({ team_id: team.id, session_id: getSessionId(), nickname: nickname.trim() || null })
       .select().single()
-    console.log('[play] player insert result — player:', player?.id ?? null, '| error:', err?.message ?? null)
     setLoading(false)
     if (!player || err) { setError('Failed to join team. Try again.'); return }
 
@@ -487,12 +507,9 @@ export default function PlayView() {
     await fetchTeammates(team.id)
 
     // Notify host lobby immediately via broadcast (bypasses realtime publication requirement)
-    console.log('[play] creating broadcast channel for room:', room!.code)
     const bc = supabase.channel(`room:${room!.code}`)
     bc.subscribe(status => {
-      console.log('[play] broadcast channel status:', status, '| code:', room?.code)
       if (status === 'SUBSCRIBED') {
-        console.log('[play] sending team_joined broadcast')
         bc.send({ type: 'broadcast', event: 'team_joined', payload: {} })
         setTimeout(() => supabase.removeChannel(bc), 1000)
       }
@@ -502,15 +519,10 @@ export default function PlayView() {
   }
 
   async function handleCreateTeam() {
-    console.log('[play] handleCreateTeam — name:', newTeamName.trim(), '| room:', room?.id)
-    if (!newTeamName.trim() || !room) {
-      console.warn('[play] handleCreateTeam bailed — name empty:', !newTeamName.trim(), '| room null:', !room)
-      return
-    }
+    if (!newTeamName.trim() || !room) return
     setLoading(true)
     const { data: team, error: err } = await supabase
       .from('teams').insert({ room_id: room.id, name: newTeamName.trim() }).select().single()
-    console.log('[play] team insert result — team:', team?.id ?? null, '| error:', err?.message ?? null)
     if (!team || err) { setLoading(false); setError('Failed to create team. Try again.'); return }
     await joinTeam(team)
   }
@@ -579,7 +591,7 @@ export default function PlayView() {
 
   // ── Screens ───────────────────────────────────────────────
 
-  if (phase === 'loading') {
+  if (phase === 'checking') {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
         <p className="text-gray-400 text-lg animate-pulse">Finding game…</p>
@@ -587,12 +599,12 @@ export default function PlayView() {
     )
   }
 
-  if (phase === 'no_game') {
+  if (phase === 'waiting') {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
         <h1 className="text-5xl font-black mb-4 text-yellow-400 tracking-tight">Tapped In!</h1>
-        <p className="text-gray-400">No active game right now.</p>
-        <p className="text-gray-600 text-sm mt-2">Check back when the host starts one.</p>
+        <p className="text-gray-400 animate-pulse">Waiting for host to start a lobby…</p>
+        <p className="text-gray-600 text-sm mt-2">This page will update automatically.</p>
       </div>
     )
   }

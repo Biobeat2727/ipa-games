@@ -16,8 +16,27 @@ type CategoryRow = {
   questions: Question[]
 }
 
+// Find the most recent active room created today (local midnight cutoff)
+async function findActiveRoom(): Promise<Room | null> {
+  const todayMidnight = new Date()
+  todayMidnight.setHours(0, 0, 0, 0)
+
+  const { data } = await supabase
+    .from('rooms')
+    .select()
+    .neq('status', 'finished')
+    .gte('created_at', todayMidnight.toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  return data ?? null
+}
+
+type Phase = 'checking' | 'waiting' | 'connected'
+
 export default function ProjectorView() {
-  const [codeInput, setCodeInput]       = useState('')
+  const [phase, setPhase]               = useState<Phase>('checking')
   const [room, setRoom]                 = useState<Room | null>(null)
   const [teams, setTeams]               = useState<Team[]>([])
   const [categories, setCategories]     = useState<CategoryRow[]>([])
@@ -31,7 +50,6 @@ export default function ProjectorView() {
     questionId: string; categoryName: string; pointValue: number | null; startTs: number
   } | null>(null)
   const [previewCountdown, setPreviewCountdown]   = useState<number | null>(null)
-  const [error, setError]               = useState('')
 
   // Final Jeopardy state
   const [fjCategoryName, setFjCategoryName]   = useState('')
@@ -101,29 +119,51 @@ export default function ProjectorView() {
     }
   }, [loadCategories])
 
-  // ── Connect ───────────────────────────────────────────────
+  // ── Auto-resolve + polling ────────────────────────────────
 
-  async function handleConnect() {
-    const code = codeInput.trim().toUpperCase()
-    if (code.length !== 6) return
-    setError('')
-
-    const { data: roomData, error: err } = await supabase
-      .from('rooms').select().eq('code', code).single()
-    if (!roomData || err) { setError('Room not found.'); return }
-
-    const { data: teamData } = await supabase
-      .from('teams').select().eq('room_id', roomData.id).order('score', { ascending: false })
-    const list = teamData ?? []
-
-    setRoom(roomData)
-    setTeams(list)
-    setScores(new Map(list.map(t => [t.id, t.score])))
-
-    if (['round_1', 'round_2'].includes(roomData.status)) {
-      await loadCategories(roomData.id, roomData.status)
+  useEffect(() => {
+    async function init() {
+      const found = await findActiveRoom()
+      if (found) {
+        roomRef.current = found
+        setRoom(found)
+        const { data } = await supabase
+          .from('teams').select().eq('room_id', found.id).order('score', { ascending: false })
+        const list = data ?? []
+        setTeams(list)
+        setScores(new Map(list.map(t => [t.id, t.score])))
+        if (['round_1', 'round_2'].includes(found.status)) {
+          await loadCategories(found.id, found.status)
+        }
+        setPhase('connected')
+      } else {
+        setPhase('waiting')
+      }
     }
-  }
+    init()
+  }, [loadCategories])
+
+  // Poll every 3s while waiting for a room to appear
+  useEffect(() => {
+    if (phase !== 'waiting') return
+    const id = setInterval(async () => {
+      const found = await findActiveRoom()
+      if (found) {
+        roomRef.current = found
+        setRoom(found)
+        const { data } = await supabase
+          .from('teams').select().eq('room_id', found.id).order('score', { ascending: false })
+        const list = data ?? []
+        setTeams(list)
+        setScores(new Map(list.map(t => [t.id, t.score])))
+        if (['round_1', 'round_2'].includes(found.status)) {
+          await loadCategories(found.id, found.status)
+        }
+        setPhase('connected')
+      }
+    }, 3000)
+    return () => clearInterval(id)
+  }, [phase, loadCategories])
 
   // ── DB Subscriptions ─────────────────────────────────────
 
@@ -357,33 +397,19 @@ export default function ProjectorView() {
 
   // ── Screens ───────────────────────────────────────────────
 
-  if (!room) {
+  if (phase === 'checking') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8">
-        <h1 className="text-4xl font-black text-yellow-400 mb-2">Projector</h1>
-        <p className="text-gray-500 mb-10 text-sm">Enter the room code to connect</p>
-        <div className="w-full max-w-xs space-y-4">
-          <input
-            type="text"
-            inputMode="text"
-            autoCapitalize="characters"
-            autoComplete="off"
-            placeholder="XXXXXX"
-            maxLength={6}
-            value={codeInput}
-            onChange={e => setCodeInput(e.target.value.toUpperCase())}
-            onKeyDown={e => e.key === 'Enter' && handleConnect()}
-            className="w-full bg-gray-800 text-white text-center text-4xl font-mono tracking-[0.3em] uppercase rounded-2xl px-4 py-5 outline-none focus:ring-2 focus:ring-yellow-400"
-          />
-          {error && <p className="text-red-400 text-sm text-center">{error}</p>}
-          <button
-            onClick={handleConnect}
-            disabled={codeInput.length !== 6}
-            className="w-full py-4 rounded-2xl font-black text-lg bg-yellow-400 text-gray-950 disabled:opacity-30"
-          >
-            Connect
-          </button>
-        </div>
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+        <p className="text-gray-400 text-2xl animate-pulse">Connecting…</p>
+      </div>
+    )
+  }
+
+  if (phase === 'waiting') {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8 text-center">
+        <h1 className="text-5xl font-black text-yellow-400 mb-4">Tapped In!</h1>
+        <p className="text-gray-500 animate-pulse">Waiting for host to create a lobby…</p>
       </div>
     )
   }

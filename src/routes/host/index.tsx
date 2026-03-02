@@ -1,16 +1,32 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { generateRoomCode } from '../../lib/roomCode'
-import { clearHostSession, getHostId, getRoomCode, setHostId, setRoomCode } from '../../lib/session'
 import { getContentSummary, importContent } from '../../lib/content'
 import type { ContentJSON, ContentSummary } from '../../lib/content'
 import type { Room, Team } from '../../lib/types'
 import Game from './Game'
 
-type Phase = 'creating' | 'lobby' | 'game' | 'error'
+type Phase = 'checking' | 'no_room' | 'creating' | 'lobby' | 'game' | 'error'
+
+// Find the most recent active room created today (local midnight cutoff)
+async function findActiveRoom(): Promise<Room | null> {
+  const todayMidnight = new Date()
+  todayMidnight.setHours(0, 0, 0, 0)
+
+  const { data } = await supabase
+    .from('rooms')
+    .select()
+    .neq('status', 'finished')
+    .gte('created_at', todayMidnight.toISOString())
+    .order('created_at', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  return data ?? null
+}
 
 export default function HostView() {
-  const [phase, setPhase]        = useState<Phase>('creating')
+  const [phase, setPhase]        = useState<Phase>('checking')
   const [room, setRoom]          = useState<Room | null>(null)
   const [teams, setTeams]        = useState<Team[]>([])
   const [playerCounts, setPlayerCounts] = useState<Map<string, number>>(new Map())
@@ -48,52 +64,18 @@ export default function HostView() {
     setSummary(await getContentSummary(roomId))
   }, [])
 
-  // On mount: resume existing room or create a new one
+  // On mount: auto-resolve today's active room, or show "Create Lobby" button
   useEffect(() => {
     async function init() {
-      const savedCode   = getRoomCode()
-      const savedHostId = getHostId()
-
-      if (savedCode && savedHostId) {
-        const { data } = await supabase
-          .from('rooms').select()
-          .eq('code', savedCode).eq('host_id', savedHostId)
-          .single()
-
-        if (data) {
-          setRoom(data)
-          await Promise.all([fetchTeams(data.id), fetchSummary(data.id)])
-          setPhase(data.status === 'lobby' ? 'lobby' : 'game')
-          return
-        }
+      const existing = await findActiveRoom()
+      if (existing) {
+        setRoom(existing)
+        await Promise.all([fetchTeams(existing.id), fetchSummary(existing.id)])
+        setPhase(existing.status === 'lobby' ? 'lobby' : 'game')
+      } else {
+        setPhase('no_room')
       }
-
-      await createRoom()
     }
-
-    async function createRoom() {
-      // Retire any lingering active rooms so players always resolve to this new one
-      await supabase.from('rooms').update({ status: 'finished' }).neq('status', 'finished')
-
-      const hostId = crypto.randomUUID()
-      let code = generateRoomCode()
-
-      for (let attempt = 0; attempt < 10; attempt++) {
-        const { data, error: err } = await supabase
-          .from('rooms').insert({ code, host_id: hostId, status: 'lobby' }).select().single()
-
-        if (data) {
-          setHostId(hostId); setRoomCode(code)
-          setRoom(data); setPhase('lobby')
-          return
-        }
-        if (err?.code === '23505') { code = generateRoomCode(); continue }
-        setError(err?.message ?? 'Failed to create room.'); setPhase('error'); return
-      }
-
-      setError('Could not generate a unique room code.'); setPhase('error')
-    }
-
     init()
   }, [fetchTeams, fetchSummary])
 
@@ -104,49 +86,58 @@ export default function HostView() {
     const roomId = room.id
     const code = room.code
 
-    console.log('[host-lobby] setting up subscriptions — roomId:', roomId, 'code:', code)
-
     // postgres_changes path — requires teams table in Supabase realtime publication
-    // (Dashboard → Database → Replication → supabase_realtime → add teams table)
     const pgCh = supabase
       .channel(`host-lobby-${roomId}`)
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'teams', filter: `room_id=eq.${roomId}` },
-        (payload) => {
-          console.log('[host-lobby] postgres_changes fired — event:', payload.eventType, payload)
-          fetchTeams(roomId)
-        })
+        () => fetchTeams(roomId))
       .subscribe(status => {
-        console.log('[host-lobby] pgCh status:', status)
-        if (status === 'SUBSCRIBED') {
-          console.log('[host-lobby] postgres_changes ready — doing initial fetch')
-          fetchTeams(roomId)
-        }
-        if (status === 'CHANNEL_ERROR') {
-          console.warn('[host-lobby] postgres_changes CHANNEL_ERROR — teams table likely not in realtime publication')
-        }
+        if (status === 'SUBSCRIBED') fetchTeams(roomId)
       })
 
-    // Broadcast path — player sends team_joined after joining; no table publication needed
+    // Broadcast path — player sends team_joined after joining
     const bcCh = supabase
       .channel(`room:${code}`)
-      .on('broadcast', { event: 'team_joined' }, (msg) => {
-        console.log('[host-lobby] broadcast team_joined received', msg)
-        fetchTeams(roomId)
-      })
-      .subscribe(status => {
-        console.log('[host-lobby] bcCh status:', status)
-      })
+      .on('broadcast', { event: 'team_joined' }, () => fetchTeams(roomId))
+      .subscribe()
 
     lobbyBroadcastRef.current = bcCh
 
     return () => {
-      console.log('[host-lobby] cleaning up subscriptions')
       supabase.removeChannel(pgCh)
       supabase.removeChannel(bcCh)
       lobbyBroadcastRef.current = null
     }
   }, [room?.id, room?.code, phase, fetchTeams])
+
+  async function handleCreateRoom() {
+    setPhase('creating')
+
+    // Retire any lingering active rooms so players always resolve to this new one
+    await supabase.from('rooms').update({ status: 'finished' }).neq('status', 'finished')
+
+    const hostId = crypto.randomUUID()
+    let code = generateRoomCode()
+
+    for (let attempt = 0; attempt < 10; attempt++) {
+      const { data, error: err } = await supabase
+        .from('rooms').insert({ code, host_id: hostId, status: 'lobby' }).select().single()
+
+      if (data) {
+        setRoom(data)
+        setPhase('lobby')
+        return
+      }
+      if (err?.code === '23505') { code = generateRoomCode(); continue }
+      setError(err?.message ?? 'Failed to create room.')
+      setPhase('error')
+      return
+    }
+
+    setError('Could not generate a unique room code.')
+    setPhase('error')
+  }
 
   async function handleImport() {
     if (!room) return
@@ -163,7 +154,6 @@ export default function HostView() {
   }
 
   async function handleDeleteTeam(teamId: string) {
-    // Delete players first (explicit, safe regardless of cascade config)
     await supabase.from('players').delete().eq('team_id', teamId)
     const { error: err } = await supabase.from('teams').delete().eq('id', teamId)
     if (!err) {
@@ -177,7 +167,6 @@ export default function HostView() {
     const { error: err } = await supabase
       .from('rooms').update({ status: 'round_1' }).eq('id', room.id)
     if (!err) {
-      // Broadcast immediately so projector/players don't have to wait for postgres_changes
       lobbyBroadcastRef.current?.send({
         type: 'broadcast',
         event: 'game_state_change',
@@ -189,11 +178,22 @@ export default function HostView() {
   }
 
   function handleNewGame() {
-    clearHostSession()
-    window.location.reload()
+    setRoom(null)
+    setTeams([])
+    setPlayerCounts(new Map())
+    setSummary(null)
+    setPhase('no_room')
   }
 
   // ── Screens ───────────────────────────────────────────────
+
+  if (phase === 'checking') {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
+        <p className="text-gray-400 text-lg animate-pulse">Checking for active room…</p>
+      </div>
+    )
+  }
 
   if (phase === 'creating') {
     return (
@@ -208,6 +208,21 @@ export default function HostView() {
       <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center gap-4">
         <p className="text-red-400">{error}</p>
         <button onClick={handleNewGame} className="text-yellow-400 underline text-sm">Try again</button>
+      </div>
+    )
+  }
+
+  if (phase === 'no_room') {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center gap-6">
+        <h1 className="text-3xl font-black text-yellow-400">Tapped In!</h1>
+        <p className="text-gray-500 text-sm">No active lobby found for today.</p>
+        <button
+          onClick={handleCreateRoom}
+          className="px-10 py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950"
+        >
+          Create Lobby
+        </button>
       </div>
     )
   }
