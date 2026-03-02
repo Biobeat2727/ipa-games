@@ -54,7 +54,6 @@ export default function PlayView() {
   const [boardCategories, setBoardCategories] = useState<BoardCategory[]>([])
   const [teamNames, setTeamNames]             = useState<Map<string, string>>(new Map())
   const [previewInfo, setPreviewInfo]         = useState<PreviewInfo | null>(null)
-  const [previewCountdown, setPreviewCountdown] = useState<number | null>(null)
 
   // Final Jeopardy state
   type FjSubPhase = 'wager' | 'wager_locked' | 'question' | 'reviewing' | 'done' | null
@@ -372,41 +371,6 @@ export default function PlayView() {
     const id = setTimeout(() => setBuzzResult(null), 2500)
     return () => clearTimeout(id)
   }, [buzzResult])
-
-  // Picking player activates the question after the 10-second preview
-  useEffect(() => {
-    if (!previewInfo) return
-    const delay = Math.max(0, previewInfo.startTs + 10_000 - Date.now())
-    const id = setTimeout(async () => {
-      // Only the team whose turn it is runs the actual activation
-      if (!roomRef.current || myTeamRef.current?.id !== currentTurnTeamIdRef.current) return
-      const { error } = await supabase
-        .from('rooms').update({ current_question_id: previewInfo.questionId }).eq('id', roomRef.current.id)
-      if (!error) {
-        setRoom(prev => prev ? { ...prev, current_question_id: previewInfo.questionId } : prev)
-        broadcastRef.current?.send({
-          type: 'broadcast',
-          event: 'question_activated',
-          payload: { question_id: previewInfo.questionId },
-        })
-        setPreviewInfo(null)
-      }
-    }, delay)
-    return () => clearTimeout(id)
-  }, [previewInfo]) // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Preview countdown display
-  useEffect(() => {
-    if (!previewInfo) { setPreviewCountdown(null); return }
-    const tick = () => {
-      const remaining = Math.max(0, Math.ceil((previewInfo.startTs + 10_000 - Date.now()) / 1000))
-      setPreviewCountdown(remaining)
-      if (remaining === 0) clearInterval(id)
-    }
-    tick()
-    const id = setInterval(tick, 200)
-    return () => clearInterval(id)
-  }, [previewInfo])
 
   // Timer countdown
   useEffect(() => {
@@ -930,9 +894,8 @@ export default function PlayView() {
 
   // No active question — check for preview phase first
   if (!activeQuestion) {
-    // ── Preview: category revealed, countdown to buzz ──
+    // ── Preview: category revealed, waiting for host to open buzzer ──
     if (previewInfo) {
-      const cnt = previewCountdown ?? 10
       return (
         <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center">
           {scoreChip}
@@ -942,15 +905,11 @@ export default function PlayView() {
             {previewInfo.categoryName}
           </p>
           {previewInfo.pointValue != null && (
-            <p className="text-yellow-400 font-mono font-black text-3xl mb-10">
+            <p className="text-yellow-400 font-mono font-black text-3xl mb-8">
               ${previewInfo.pointValue}
             </p>
           )}
-          <p className={`font-mono font-black tabular-nums leading-none animate-pulse ${
-            cnt <= 3 ? 'text-red-400' : 'text-yellow-400'
-          }`} style={{ fontSize: 'clamp(5rem, 20vw, 8rem)' }}>
-            {cnt}
-          </p>
+          <p className="text-gray-500 text-sm animate-pulse">Waiting for host…</p>
         </div>
       )
     }

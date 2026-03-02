@@ -49,7 +49,6 @@ export default function ProjectorView() {
   const [previewInfo, setPreviewInfo]             = useState<{
     questionId: string; categoryName: string; pointValue: number | null; startTs: number
   } | null>(null)
-  const [previewCountdown, setPreviewCountdown]   = useState<number | null>(null)
 
   // Final Jeopardy state
   const [fjCategoryName, setFjCategoryName]   = useState('')
@@ -365,19 +364,6 @@ export default function ProjectorView() {
     return () => clearInterval(id)
   }, [fjTimerStart])
 
-  // ── Preview countdown ─────────────────────────────────────
-
-  useEffect(() => {
-    if (!previewInfo) { setPreviewCountdown(null); return }
-    const tick = () => {
-      const remaining = Math.max(0, Math.ceil((previewInfo.startTs + 10_000 - Date.now()) / 1000))
-      setPreviewCountdown(remaining)
-      if (remaining === 0) clearInterval(id)
-    }
-    tick()
-    const id = setInterval(tick, 200)
-    return () => clearInterval(id)
-  }, [previewInfo])
 
   // ── Cleanup ───────────────────────────────────────────────
 
@@ -644,9 +630,8 @@ export default function ProjectorView() {
     )
   }
 
-  // Category preview (player selected, countdown before buzz opens)
+  // Category preview (player selected, waiting for host to open buzzer)
   if (previewInfo && !activeQuestion) {
-    const cnt = previewCountdown ?? 10
     return (
       <div className="h-screen bg-blue-950 text-white flex flex-col items-center justify-center text-center p-8">
         <p className="text-blue-400 uppercase tracking-[0.3em] mb-8"
@@ -663,10 +648,9 @@ export default function ProjectorView() {
             ${previewInfo.pointValue}
           </p>
         )}
-        <p className={`font-mono font-black tabular-nums leading-none animate-pulse ${
-          cnt <= 3 ? 'text-red-400' : 'text-yellow-300'
-        }`} style={{ fontSize: 'clamp(6rem, 18vw, 14rem)' }}>
-          {cnt}
+        <p className="text-blue-700 uppercase tracking-widest animate-pulse"
+          style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
+          Listening…
         </p>
       </div>
     )

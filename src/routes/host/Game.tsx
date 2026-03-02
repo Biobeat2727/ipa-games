@@ -108,16 +108,6 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     return () => { supabase.removeChannel(ch); broadcastRef.current = null }
   }, [initialRoom.code]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Host-side fallback: activate question after the 10-second preview countdown.
-  // This fires if the player's DB update or broadcast was missed by the host.
-  // activateQuestion is idempotent — double-writing the same question_id is harmless.
-  useEffect(() => {
-    if (!previewInfo) return
-    const delay = Math.max(0, previewInfo.startTs + 10_000 - Date.now())
-    const id = setTimeout(() => activateQuestion(previewInfo.questionId), delay)
-    return () => clearTimeout(id)
-  }, [previewInfo]) // eslint-disable-line react-hooks/exhaustive-deps
-
   // Subscribe to room + team score changes
   useEffect(() => {
     const ch = supabase.channel(`host-game-${roomId}`)
@@ -858,12 +848,12 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
               {previewInfo.pointValue != null && (
                 <p className="text-yellow-400 font-mono text-xl font-bold">${previewInfo.pointValue}</p>
               )}
-              <p className="text-gray-600 text-xs mt-2">Players see a 10-second countdown</p>
+              <p className="text-gray-600 text-xs mt-2">Read the question, then open the buzzer</p>
               <button
                 onClick={() => activateQuestion(previewInfo.questionId)}
                 className="mt-4 px-6 py-2 rounded-xl text-sm font-bold bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
               >
-                Activate Now
+                Open Buzzer
               </button>
             </div>
           ) : round2Complete ? (
