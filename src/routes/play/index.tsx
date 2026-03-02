@@ -293,7 +293,18 @@ export default function PlayView() {
         const r = roomRef.current
         if (!r) return
         setRoom({ ...r, status: status as Room['status'] })
-        if (status === 'round_2') { loadBoard(r.id, 2); return }
+        if (status === 'round_1' || status === 'round_2') {
+          // New round — wipe all mid-game state so no stale preview or question bleeds in
+          setPreviewInfo(null)
+          setActiveQuestion(null)
+          setCurrentTurnTeamId(null)
+          setTimerPayload(null)
+          setHasBuzzed(false)
+          setMyBuzzId(null)
+          setBuzzResult(null)
+          loadBoard(r.id, status === 'round_2' ? 2 : 1)
+          return
+        }
         if (status === 'final_jeopardy') {
           setFjCategoryName(fj_category ?? 'Final Jeopardy')
           const myId = myTeamRef.current?.id
@@ -333,6 +344,8 @@ export default function PlayView() {
       })
       .on('broadcast', { event: 'lobby_closed' }, () => {
         clearPlayerSession()
+        setPreviewInfo(null); setActiveQuestion(null); setCurrentTurnTeamId(null)
+        setTimerPayload(null); setHasBuzzed(false); setMyBuzzId(null); setBuzzResult(null)
         setRoom(null); setMyTeam(null)
         setPhase('no_lobby')
       })

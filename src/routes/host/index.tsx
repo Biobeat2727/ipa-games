@@ -164,7 +164,7 @@ export default function HostView() {
   async function handleStartGame() {
     if (!room) return
     const { error: err } = await supabase
-      .from('rooms').update({ status: 'round_1' }).eq('id', room.id)
+      .from('rooms').update({ status: 'round_1', current_question_id: null }).eq('id', room.id)
     if (!err) {
       lobbyBroadcastRef.current?.send({
         type: 'broadcast',
