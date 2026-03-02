@@ -79,6 +79,7 @@ export default function PlayView() {
   const myTeamRef            = useRef<Team | null>(null)
   const roomRef                = useRef<Room | null>(null)
   const broadcastRef           = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const lobbyChannelRef        = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const currentTurnTeamIdRef   = useRef<string | null>(null)
 
   useEffect(() => { responseSubmittedRef.current = responseSubmitted }, [responseSubmitted])
@@ -464,9 +465,12 @@ export default function PlayView() {
       .on('broadcast', { event: 'team_joined' }, refreshTeams)
       .subscribe()
 
+    lobbyChannelRef.current = roomCh
+
     return () => {
       supabase.removeChannel(pgCh)
       supabase.removeChannel(roomCh)
+      lobbyChannelRef.current = null
     }
   }, [phase, room?.id])
 
@@ -505,14 +509,9 @@ export default function PlayView() {
     setTeamId(team.id); setMyTeam(team); setMyScore(team.score)
     await fetchTeammates(team.id)
 
-    // Notify host lobby immediately via broadcast (bypasses realtime publication requirement)
-    const bc = supabase.channel(`room:${room!.id}`)
-    bc.subscribe(status => {
-      if (status === 'SUBSCRIBED') {
-        bc.send({ type: 'broadcast', event: 'team_joined', payload: {} })
-        setTimeout(() => supabase.removeChannel(bc), 1000)
-      }
-    })
+    // Notify all clients immediately — use the already-subscribed channel so the
+    // send goes out instantly without waiting for a new subscription handshake.
+    lobbyChannelRef.current?.send({ type: 'broadcast', event: 'team_joined', payload: {} })
 
     setPhase('lobby')
   }
