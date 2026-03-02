@@ -414,6 +414,9 @@ export default function ProjectorView() {
     )
   }
 
+  // At this point phase === 'connected' and room is guaranteed non-null
+  if (!room) return null
+
   // Correct feedback flash
   if (feedbackTeam) {
     return (
