@@ -112,12 +112,10 @@ export default function PlayView() {
     const savedTeamId = getTeamId()
 
     async function autoResolve() {
-      const cutoff = new Date(Date.now() - 12 * 60 * 60 * 1000).toISOString()
       const { data } = await supabase
         .from('rooms')
         .select()
         .neq('status', 'finished')
-        .gte('created_at', cutoff)
         .order('created_at', { ascending: false })
         .limit(1)
         .maybeSingle()

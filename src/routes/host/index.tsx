@@ -72,6 +72,9 @@ export default function HostView() {
     }
 
     async function createRoom() {
+      // Retire any lingering active rooms so players always resolve to this new one
+      await supabase.from('rooms').update({ status: 'finished' }).neq('status', 'finished')
+
       const hostId = crypto.randomUUID()
       let code = generateRoomCode()
 
