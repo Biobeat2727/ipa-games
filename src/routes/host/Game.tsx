@@ -37,7 +37,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const broadcastRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
   // ── Final Jeopardy state ──────────────────────────────────
-  const [fjPhase, setFjPhase]               = useState<'wager' | 'question' | 'review' | 'done' | null>(null)
+  const [fjPhase, setFjPhase]               = useState<'starting' | 'wager' | 'question' | 'review' | 'done' | null>(null)
   const [fjCategoryName, setFjCategoryName] = useState('')
   const [fjQuestion, setFjQuestion]         = useState<Question | null>(null)
   const [fjActiveTeamIds, setFjActiveTeamIds] = useState<Set<string>>(new Set())
@@ -436,11 +436,20 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     setFjActiveTeamIds(top3ids)
     setFjCategoryName(catName)
     setFjQuestion(loadedQuestion)
-    setFjPhase('wager')
+    setFjPhase('starting')
     broadcastRef.current?.send({
       type: 'broadcast',
       event: 'game_state_change',
       payload: { status: 'final_jeopardy', fj_category: catName, active_team_ids: [...top3ids] },
+    })
+  }
+
+  function openFJWagering() {
+    setFjPhase('wager')
+    broadcastRef.current?.send({
+      type: 'broadcast',
+      event: 'fj_wager_open',
+      payload: { active_team_ids: [...fjActiveTeamIds] },
     })
   }
 
@@ -699,7 +708,33 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       <div className="w-7/12 p-5 flex flex-col gap-4 overflow-y-auto">
         {fjPhase ? (
 
-          fjPhase === 'wager' ? (
+          fjPhase === 'starting' ? (
+            <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8 text-center">
+              <p className="text-6xl">🍺</p>
+              <div>
+                <p className="text-xs text-yellow-400 uppercase tracking-widest mb-2">Final Tap</p>
+                <p className="text-2xl font-black text-white mb-2">Players see the waiting screen</p>
+                <p className="text-gray-500 text-sm">Open wagering when everyone is ready</p>
+              </div>
+              <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800 w-full">
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Active Teams</p>
+                <div className="space-y-2">
+                  {[...teams].filter(t => fjActiveTeamIds.has(t.id)).map(t => (
+                    <div key={t.id} className="flex items-center justify-between">
+                      <span className="font-semibold text-sm">{t.name}</span>
+                      <span className="font-mono text-yellow-400 text-sm">{scores.get(t.id) ?? 0}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+              <button
+                onClick={openFJWagering}
+                className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+              >
+                Open Wagering →
+              </button>
+            </div>
+          ) : fjPhase === 'wager' ? (
             <div className="flex-1 flex flex-col gap-4">
               <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
                 <p className="text-xs text-yellow-400 uppercase tracking-widest font-semibold mb-1">Final Jeopardy</p>

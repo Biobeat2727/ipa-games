@@ -56,7 +56,7 @@ export default function PlayView() {
   const [previewInfo, setPreviewInfo]         = useState<PreviewInfo | null>(null)
 
   // Final Jeopardy state
-  type FjSubPhase = 'wager' | 'wager_locked' | 'question' | 'reviewing' | 'done' | null
+  type FjSubPhase = 'incoming' | 'wager' | 'wager_locked' | 'question' | 'reviewing' | 'done' | null
   const [fjSubPhase, setFjSubPhase]           = useState<FjSubPhase>(null)
   const [fjCategoryName, setFjCategoryName]   = useState('')
   const [fjWagerInput, setFjWagerInput]       = useState('')
@@ -308,10 +308,7 @@ export default function PlayView() {
         }
         if (status === 'final_jeopardy') {
           setFjCategoryName(fj_category ?? 'Final Jeopardy')
-          const myId = myTeamRef.current?.id
-          if (!myId) return
-          const isActive = active_team_ids ? active_team_ids.includes(myId) : true
-          setFjSubPhase(isActive ? 'wager' : 'done')
+          setFjSubPhase('incoming')
         }
       })
       .on('broadcast', { event: 'fj_question_revealed' }, async ({ payload }) => {
@@ -321,6 +318,13 @@ export default function PlayView() {
         setFjTimerStart(start_ts)
         setFjTimeRemaining(duration)
         setFjSubPhase('question')
+      })
+      .on('broadcast', { event: 'fj_wager_open' }, ({ payload }) => {
+        const { active_team_ids } = payload as { active_team_ids?: string[] }
+        const myId = myTeamRef.current?.id
+        if (!myId) return
+        const isActive = active_team_ids ? active_team_ids.includes(myId) : true
+        setFjSubPhase(isActive ? 'wager' : 'done')
       })
       .on('broadcast', { event: 'fj_timer_expired' }, () => {
         // Auto-submit whatever the player has typed
@@ -375,7 +379,7 @@ export default function PlayView() {
     supabase.from('teams').select().eq('id', myId).single().then(({ data: t }) => {
       if (!t) return
       setMyTeam(t)
-      setFjSubPhase(prev => prev ?? (t.is_active ? 'wager' : 'done'))
+      setFjSubPhase(prev => prev ?? 'incoming')
     })
   }, [room?.status, fjSubPhase, myTeam?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -742,6 +746,24 @@ export default function PlayView() {
   )
 
   // ── Final Jeopardy screens ────────────────────────────────
+
+  if (fjSubPhase === 'incoming') {
+    return (
+      <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <p className="text-6xl mb-6">🍺</p>
+        <p className="text-blue-400 text-xs uppercase tracking-widest mb-3">Final Tap</p>
+        <p className="text-3xl font-black text-white mb-4">Starting Soon!</p>
+        <p className="text-gray-300 text-lg leading-relaxed max-w-xs">
+          Get a drink and discuss with your team!
+        </p>
+        <div className="mt-10 flex gap-1">
+          <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+          <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+          <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+        </div>
+      </div>
+    )
+  }
 
   if (fjSubPhase === 'wager') {
     const maxWager = Math.max(0, myScore)
