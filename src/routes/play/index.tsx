@@ -288,8 +288,8 @@ export default function PlayView() {
         setCurrentTurnTeamId(team_id)
       })
       .on('broadcast', { event: 'game_state_change' }, ({ payload }) => {
-        const { status, fj_category, active_team_ids } = payload as {
-          status: string; fj_category?: string; active_team_ids?: string[]
+        const { status, fj_category } = payload as {
+          status: string; fj_category?: string
         }
         const r = roomRef.current
         if (!r) return
