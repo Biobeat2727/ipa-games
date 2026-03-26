@@ -607,16 +607,27 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         <div className="shrink-0 bg-gray-900 border-b border-gray-800 px-4 py-3">
           <div className="flex items-center justify-between mb-2">
             <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Scoreboard</p>
-            <button
-              onClick={async () => {
-                broadcastRef.current?.send({ type: 'broadcast', event: 'lobby_closed', payload: {} })
-                await supabase.from('rooms').update({ status: 'finished' }).neq('status', 'finished')
-                window.location.reload()
-              }}
-              className="text-xs text-gray-600 hover:text-red-400 transition-colors"
-            >
-              New Game
-            </button>
+            <div className="flex items-center gap-3">
+              {import.meta.env.DEV && !fjPhase && (
+                <button
+                  onClick={startFinalJeopardy}
+                  className="text-xs text-purple-500 hover:text-purple-300 transition-colors"
+                  title="DEV: skip to Final Tap"
+                >
+                  ⚡ FT
+                </button>
+              )}
+              <button
+                onClick={async () => {
+                  broadcastRef.current?.send({ type: 'broadcast', event: 'lobby_closed', payload: {} })
+                  await supabase.from('rooms').update({ status: 'finished' }).neq('status', 'finished')
+                  window.location.reload()
+                }}
+                className="text-xs text-gray-600 hover:text-red-400 transition-colors"
+              >
+                New Game
+              </button>
+            </div>
           </div>
           <div className="space-y-1 overflow-y-auto max-h-48">
             {sortedTeams.map((team, i) => (

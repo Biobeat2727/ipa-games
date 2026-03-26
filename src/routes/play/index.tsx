@@ -753,6 +753,12 @@ export default function PlayView() {
         <p className="text-6xl mb-6">🍺</p>
         <p className="text-blue-400 text-xs uppercase tracking-widest mb-3">Final Tap</p>
         <p className="text-3xl font-black text-white mb-4">Starting Soon!</p>
+        {fjCategoryName && (
+          <div className="mb-4">
+            <p className="text-gray-500 text-xs uppercase tracking-widest mb-1">Category</p>
+            <p className="text-yellow-300 text-2xl font-black">{fjCategoryName}</p>
+          </div>
+        )}
         <p className="text-gray-300 text-lg leading-relaxed max-w-xs">
           Get a drink and discuss with your team!
         </p>
