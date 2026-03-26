@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import confetti from 'canvas-confetti'
 import { supabase } from '../../lib/supabase'
 import {
   clearPlayerSession,
@@ -38,6 +39,7 @@ export default function PlayView() {
   const [nickname, setNickname]       = useState('')
   const [newTeamName, setNewTeamName] = useState('')
   const [showCreate, setShowCreate]   = useState(false)
+  const [showBalloons, setShowBalloons] = useState(false)
 
   // Game state
   const [activeQuestion, setActiveQuestion]   = useState<QuestionPublic | null>(null)
@@ -364,6 +366,15 @@ export default function PlayView() {
     return () => { supabase.removeChannel(ch); broadcastRef.current = null }
   }, [phase, room?.id, loadBoard])
 
+  // Launch balloons + confetti when the team selection screen appears
+  useEffect(() => {
+    if (phase !== 'select_team') { setShowBalloons(false); return }
+    setShowBalloons(true)
+    const opts = { particleCount: 80, spread: 70, startVelocity: 55, colors: ['#facc15','#f472b6','#a78bfa','#34d399','#fb923c'] }
+    confetti({ ...opts, origin: { x: 0.1, y: 1 }, angle: 60 })
+    confetti({ ...opts, origin: { x: 0.9, y: 1 }, angle: 120 })
+  }, [phase])
+
   // Load board + team names when entering game phase
   useEffect(() => {
     if (phase !== 'game' || !room?.id) return
@@ -656,10 +667,32 @@ export default function PlayView() {
   }
 
   if (phase === 'select_team') {
+    const balloons = ['🎈','🎈','🎂','🎈','🎈','🎈','🎂','🎈','🎈','🎈','🎈','🎂','🎈','🎈']
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col p-6">
+        {showBalloons && (
+          <div className="fixed inset-0 pointer-events-none overflow-hidden z-50">
+            {balloons.map((b, i) => (
+              <span
+                key={i}
+                style={{
+                  position: 'absolute',
+                  bottom: '-8%',
+                  left: `${(i * 7) % 94}%`,
+                  fontSize: `${1.4 + (i % 3) * 0.4}rem`,
+                  animation: `balloon-float ${3.5 + (i % 4) * 0.5}s ease-in-out ${(i % 6) * 0.15}s forwards`,
+                }}
+              >
+                {b}
+              </span>
+            ))}
+          </div>
+        )}
         <div className="max-w-sm mx-auto w-full pt-10">
-          <h1 className="text-center text-4xl font-black text-yellow-400 mb-8">Tapped In!</h1>
+          <h1 className="text-center text-4xl font-black text-yellow-400 mb-1">Tapped In!</h1>
+          {/* TEMPORARY — remove after event */}
+          <p className="text-center text-sm font-bold text-pink-400 mb-1">Happy Birthday Edition!</p>
+          <p className="text-center text-xs text-pink-300 mb-8">Happy Birthday Becky and Dani! 🎂</p>
           <input
             type="text"
             placeholder="Your nickname (optional)"
