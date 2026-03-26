@@ -50,7 +50,6 @@ export default function PlayView() {
   const [responseSubmitted, setResponseSubmitted] = useState(false)
   const [buzzResult, setBuzzResult]           = useState<'correct' | 'wrong' | null>(null)
   const [myScore, setMyScore]                 = useState(0)
-  const [myPlayerId, setMyPlayerId]           = useState<string | null>(null)
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
   const [boardCategories, setBoardCategories] = useState<BoardCategory[]>([])
   const [teamNames, setTeamNames]             = useState<Map<string, string>>(new Map())
@@ -132,9 +131,6 @@ export default function PlayView() {
       const { data: roomData } = await supabase
         .from('rooms').select().eq('id', teamData.room_id).neq('status', 'finished').single()
       if (!roomData) { clearPlayerSession(); return autoResolve() }
-      const { data: playerData } = await supabase
-        .from('players').select('id').eq('team_id', teamId).eq('session_id', getSessionId()).maybeSingle()
-      if (playerData) setMyPlayerId(playerData.id)
       setRoom(roomData)
       setMyTeam(teamData)
       setMyScore(teamData.score)
@@ -511,7 +507,7 @@ export default function PlayView() {
   async function handleLeave() {
     await supabase.from('players').delete().eq('session_id', getSessionId())
     clearPlayerSession()
-    setMyTeam(null); setTeammates([]); setMyPlayerId(null)
+    setMyTeam(null); setTeammates([])
     setActiveQuestion(null); setHasBuzzed(false)
     setMyBuzzId(null); setTimerPayload(null)
     setBuzzResult(null); setMyScore(0)
@@ -528,7 +524,7 @@ export default function PlayView() {
     setLoading(false)
     if (!player || err) { setError('Failed to join team. Try again.'); return }
 
-    setTeamId(team.id); setMyTeam(team); setMyScore(team.score); setMyPlayerId(player.id)
+    setTeamId(team.id); setMyTeam(team); setMyScore(team.score)
     await fetchTeammates(team.id)
 
     // Notify all clients immediately — use the already-subscribed channel so the
