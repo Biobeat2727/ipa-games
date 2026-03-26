@@ -57,6 +57,18 @@ React + Vite, TypeScript, Tailwind CSS, Supabase (Postgres + Realtime), Vercel, 
 - `lobby_closed` handler must reset `fjSubPhase` to null or the game-over screen persists after new game starts
 - `game_state_change { status: 'final_jeopardy' }` handler resets all player FJ state before setting `incoming`
 
+## Temporary Event Theming (Birthday Edition — remove after event)
+Four things to remove when done:
+
+1. **Birthday message** — `src/routes/play/index.tsx`, select_team screen. Delete the two `<p>` lines and the comment between the `<h1>` and the nickname `<input>`. Restore `mb-8` on the `<h1>`.
+2. **Balloon animation CSS** — `src/index.css`. Delete the `@keyframes balloon-float { ... }` block.
+3. **Balloons + confetti in play/index.tsx:**
+   - Remove `import confetti from 'canvas-confetti'` at the top
+   - Remove `const [showBalloons, setShowBalloons] = useState(false)` state
+   - Remove the `useEffect` block commented `// Launch balloons + confetti when the team selection screen appears`
+   - Remove the balloon overlay JSX block (the `{showBalloons && (<div ...>)}`) inside the select_team screen
+4. **Uninstall the package:** `npm uninstall canvas-confetti` and `npm uninstall -D @types/canvas-confetti`
+
 ## Known Issues
 - Points not subtracting for wrong answers
 - Projector only updates on first host-chosen question, not player-chosen

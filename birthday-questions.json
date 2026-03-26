@@ -1,0 +1,79 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "categories": [
+        {
+          "name": "Famous Birthdays",
+          "questions": [
+            { "point_value": 100, "answer": "This pop star, born on March 26, shares a birthday with tonight's guest of honor — she's known for hits like 'Poker Face' and 'Bad Romance'", "correct_question": "Who is Lady Gaga?" },
+            { "point_value": 200, "answer": "Abraham Lincoln and Charles Darwin were born on the exact same date in this year", "correct_question": "What is 1809?" },
+            { "point_value": 300, "answer": "This Princess of Wales, born July 1, 1961, became one of the most photographed people in the world", "correct_question": "Who is Princess Diana?" },
+            { "point_value": 400, "answer": "Born on June 14, this US president shares a birthday with the US Army — he often reminded people of that fact", "correct_question": "Who is Donald Trump?" },
+            { "point_value": 500, "answer": "In a strange twist of literary fate, 'Chronicles of Narnia' author C.S. Lewis and 'Brave New World' author Aldous Huxley both died on the same day in 1963 as this US President", "correct_question": "Who is John F. Kennedy?" }
+          ]
+        },
+        {
+          "name": "The Cake is a Lie",
+          "questions": [
+            { "point_value": 100, "answer": "The game where the phrase 'The cake is a lie' originated, set in a testing facility run by a sinister AI named GLaDOS", "correct_question": "What is Portal?" },
+            { "point_value": 200, "answer": "In The Legend of Zelda: Ocarina of Time, Link celebrates a birthday of sorts when he pulls this object from a stone at the Temple of Time", "correct_question": "What is the Master Sword?" },
+            { "point_value": 300, "answer": "This Nintendo character's birthday is celebrated on March 10, and he made his debut in Donkey Kong in 1981", "correct_question": "Who is Mario?" },
+            { "point_value": 400, "answer": "In Minecraft, a cake is actually a craftable food item — this many candles can be placed on top of it", "correct_question": "What is 1?" },
+            { "point_value": 500, "answer": "Samus Aran, the bounty hunter heroine of this Nintendo franchise, celebrates her official birthday on January 26", "correct_question": "What is Metroid?" }
+          ]
+        },
+        {
+          "name": "How Old Is It?",
+          "questions": [
+            { "point_value": 100, "answer": "To legally run for President of the United States, a candidate must be at least this many years old", "correct_question": "What is 35?" },
+            { "point_value": 200, "answer": "If a marriage is celebrating its 'Silver Anniversary,' the couple has been wed for this many years", "correct_question": "What is 25?" },
+            { "point_value": 300, "answer": "This is the tragically young age at which icons like Jimi Hendrix, Janis Joplin, and Kurt Cobain all passed away", "correct_question": "What is 27?" },
+            { "point_value": 400, "answer": "To be considered 'vintage' in the world of fashion or cars, an item generally must be at least this many years old", "correct_question": "What is 20?" },
+            { "point_value": 500, "answer": "A 'Sesquicentennial' celebration marks this many years of an event or institution", "correct_question": "What is 150?" }
+          ]
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "categories": [
+        {
+          "name": "Party Anthems",
+          "questions": [
+            { "point_value": 200, "answer": "This 2014 Mark Ronson and Bruno Mars hit warns you, 'Don't believe me, just watch'", "correct_question": "What is Uptown Funk?" },
+            { "point_value": 400, "answer": "50 Cent told you to go shorty, it's your birthday in this 2003 party anthem", "correct_question": "What is In Da Club?" },
+            { "point_value": 600, "answer": "This 1963 Lesley Gore classic famously claims that since it is 'my party,' I will do this 'if I want to'", "correct_question": "What is Cry?" },
+            { "point_value": 800, "answer": "This 1980 Kool & the Gang classic is the universal go-to for 'good times' and 'laughter too'", "correct_question": "What is Celebration?" },
+            { "point_value": 1000, "answer": "In 2008, P!nk started the festivities by 'comin' out' and 'gettin' this' started", "correct_question": "What is The Party?" }
+          ]
+        },
+        {
+          "name": "Born to Be Famous",
+          "questions": [
+            { "point_value": 200, "answer": "Born October 17, 1972, this Detroit rapper's stage name is a phonetic play on his birth initials, M.M.", "correct_question": "Who is Eminem (Marshall Mathers)?" },
+            { "point_value": 400, "answer": "Born in Pennsylvania in 1989, this singer's birth year serves as the title of the album featuring 'Shake It Off'", "correct_question": "Who is Taylor Swift?" },
+            { "point_value": 600, "answer": "This legendary martial artist and 'Enter the Dragon' star was born in the Hour of the Dragon, in the Year of the Dragon (1940)", "correct_question": "Who is Bruce Lee?" },
+            { "point_value": 800, "answer": "This comedy legend and star of 'The Jerk' was born on August 14, 1945; he is also an accomplished, Grammy-winning banjo player", "correct_question": "Who is Steve Martin?" },
+            { "point_value": 1000, "answer": "Three US presidents were born in October — John Adams, Chester Arthur, and this 26th president known for the teddy bear", "correct_question": "Who is Theodore Roosevelt?" }
+          ]
+        },
+        {
+          "name": "Pot Luck",
+          "questions": [
+            { "point_value": 200, "answer": "The number of candles on a cake for someone turning 'sweet' this age", "correct_question": "What is 16?" },
+            { "point_value": 400, "answer": "In astrology, someone born on July 4th falls under this sign", "correct_question": "What is Cancer?" },
+            { "point_value": 600, "answer": "This country is credited with inventing the birthday cake tradition, including candles, in the 18th century", "correct_question": "What is Germany?" },
+            { "point_value": 800, "answer": "In this 1997 film, Jim Carrey plays a lawyer who is physically unable to lie after his son makes a birthday wish", "correct_question": "What is Liar Liar?" },
+            { "point_value": 1000, "answer": "If you are celebrating your 'Golden' birthday, the age you are turning must match this specific detail of your birth", "correct_question": "What is the day of the month?" }
+          ]
+        }
+      ]
+    }
+  ],
+  "final_jeopardy": {
+    "category": "Birthday Milestones",
+    "answer": "Though the exact date is debated, historians believe this document — considered the birthday of American democracy — was actually signed by most delegates on August 2, 1776, not July 4th",
+    "correct_question": "What is the Declaration of Independence?"
+  }
+}
