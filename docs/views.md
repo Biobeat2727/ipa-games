@@ -21,12 +21,13 @@
 7. **Response submitted** — "Waiting for host…"
 8. **Correct** — green feedback + score animation
 9. **Wrong** — red feedback
-10. **Final Jeopardy: wager** — input + submit (active teams only)
-11. **Final Jeopardy: wager locked** — "Wager locked, waiting for others…"
-12. **Final Jeopardy: question** — clue + 90s timer + response input
-13. **Final Jeopardy: reviewing** — "Response submitted, awaiting results…"
-14. **Eliminated** — "Thanks for playing!" + leaderboard (non-top-3)
-15. **Game over** — final leaderboard + winner
+10. **Final Tap: incoming** — "Starting Soon!" + FJ category name displayed (all active players)
+11. **Final Tap: wager** — wager input + submit (active teams only)
+12. **Final Tap: wager locked** — "Wager locked, waiting for others…"
+13. **Final Tap: question** — clue + 90s timer + response input
+14. **Final Tap: reviewing** — "Response submitted, awaiting results…"
+15. **Eliminated** — "Thanks for playing!" + leaderboard (non-top-3); set to `done` sub-phase
+16. **Game over** — final leaderboard + winner (`fjSubPhase === 'done'`)
 
 ---
 
@@ -53,6 +54,14 @@
 - Right panel: active question area, buzz queue, judging controls
 - Manual score adjust available per team
 - **New Game** button in scoreboard header: kicks all clients, marks all rooms finished, reloads
+- **⚡ FT** button (DEV only, `import.meta.env.DEV`): calls `startFinalJeopardy()` directly; hidden in production
+
+### Host Final Tap screens
+- **starting**: Players see waiting screen. Host sees active team list + "Open Wagering" button.
+- **wager**: Per-team wager status (pulsing grey → solid green when locked). "Reveal Question" button.
+- **question**: Timer + per-team response status (pulsing grey → "locked in" green). "End Timer Early" button. Auto-advances when all teams submit.
+- **review**: One team at a time; shows wager amount + response text + Correct/Wrong buttons. Ordered lowest→highest score.
+- **done**: Winner + ranked leaderboard + New Game button.
 
 ---
 

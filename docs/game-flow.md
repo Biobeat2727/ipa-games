@@ -72,12 +72,50 @@ checking → no_lobby → join_lobby → select_team → lobby → game
 
 ---
 
-## Final Jeopardy
-1. FJ category revealed on all screens
-2. Active teams submit wager → locks in → "Wager locked" state
-3. When all wagers locked → host reveals question (`fj_question_revealed` broadcast with 90s timer)
-4. 90s response timer — auto-submits on expiry
-5. Host reviews each response privately, marks correct/wrong
-   - Correct: wager added to score
-   - Wrong: wager subtracted
-6. `game_over` broadcast → final scores → winner screen on all devices
+## Final Jeopardy (Final Tap)
+
+### Host sub-phases
+| Phase | Description |
+|---|---|
+| `starting` | Players see "Starting Soon" + category name. Host shows "Open Wagering" button. |
+| `wager` | Players can submit wagers. Host shows wager status per team + "Reveal Question" button. |
+| `question` | Question visible. 90s timer. Host sees response submission status per team. |
+| `review` | Host judges each team's response one at a time (lowest score first). |
+| `done` | `game_over` broadcast sent. Winner screen shown everywhere. |
+
+### Player sub-phases
+| Phase | Description |
+|---|---|
+| `incoming` | "Starting Soon" screen with FJ category name shown. |
+| `wager` | Wager input form. |
+| `wager_locked` | "Wager locked, waiting for others…" |
+| `question` | Clue + 90s timer + response input. |
+| `reviewing` | "Response submitted, awaiting results…" |
+| `done` | Final leaderboard + winner. |
+
+### Flow
+1. Host calls `startFinalJeopardy()`:
+   - Deletes all existing wagers for the room (clean slate)
+   - Ranks teams by score; top 3 remain `is_active = true`, rest set `is_active = false`
+   - Loads FJ category (round 3) + question from DB
+   - Sets `rooms.status = 'final_jeopardy'`
+   - Broadcasts `game_state_change { status: 'final_jeopardy', fj_category, active_team_ids }`
+   - Host enters `starting` phase
+2. Players receive broadcast → reset all FJ local state → enter `incoming` phase (shows category)
+3. Host clicks "Open Wagering" → broadcasts `fj_wager_open { active_team_ids }`
+4. Active players enter `wager` phase; eliminated players enter `done`
+5. Players submit wager → wager row created in DB → player enters `wager_locked`
+6. Host clicks "Reveal Question" → broadcasts `fj_question_revealed { question_id, start_ts, duration: 90 }`
+7. Players see question + 90s response timer
+8. Players submit response → `wagers.response` updated in DB
+9. Timer ends (or auto-ends when all teams have responses) → host broadcasts `fj_timer_expired`
+   - If all responses already in DB, skip the 1500ms wait
+   - Players auto-submit remaining responses on `fj_timer_expired`
+   - Host builds reveal order (ascending by score) → enters `review` phase
+10. Host reviews each response, clicks Correct/Wrong → `fj_answer_judged` broadcast
+11. After last team reviewed → `finishGame()` → `game_over` broadcast with final scores
+
+### Auto-end behavior
+- Host watches `fjWagers` (via postgres_changes on `wagers` table)
+- When every active team has a non-null `response`, `fjTimerExpired` is set to trigger review
+- Guard ref `fjExpiryInProgress` prevents double-invocation during the async transition

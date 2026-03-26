@@ -47,12 +47,13 @@ Additional scoped channels:
 
 | Event | Sender | Payload | Effect |
 |---|---|---|---|
+| `fj_wager_open` | Host | `{ active_team_ids: string[] }` | Active players enter wager phase; eliminated players enter done |
 | `fj_wager_locked` | Player | `{ team_id }` | Projector + host update wager status display |
-| `fj_question_revealed` | Host | `{ question_id, start_ts, duration }` | Question shown + 90s timer starts |
-| `fj_timer_expired` | Host | `{}` | Players auto-submit current response |
-| `fj_answer_reveal` | Host | `{ team_name, response }` | Projector shows team's response |
+| `fj_question_revealed` | Host | `{ question_id, start_ts, duration }` | Question shown + 90s timer starts on all screens |
+| `fj_timer_expired` | Host | `{}` | Players auto-submit current response via `wagers` update |
+| `fj_answer_reveal` | Host | `{ team_id, team_name, response }` | Projector shows team's response during review |
 | `fj_answer_judged` | Host | `{ team_id, status, wager, new_score }` | Projector shows result + score change |
-| `game_over` | Host | `{ scores: [{id, score}] }` | All screens show final winner |
+| `game_over` | Host | `{ scores: [{id, name, score}] }` | All screens show final winner + leaderboard |
 
 ---
 

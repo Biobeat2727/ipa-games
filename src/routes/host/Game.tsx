@@ -48,7 +48,8 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const [fjTimerStart, setFjTimerStart]     = useState<number | null>(null)
   const [fjTimerSeconds, setFjTimerSeconds] = useState(90)
   const [fjTimerExpired, setFjTimerExpired] = useState(false)
-  const fjActiveTeamIdsRef = useRef<Set<string>>(new Set())
+  const fjActiveTeamIdsRef   = useRef<Set<string>>(new Set())
+  const fjExpiryInProgress   = useRef(false)
 
   // Score adjustment
   const [editingScoreTeamId, setEditingScoreTeamId] = useState<string | null>(null)
@@ -205,7 +206,8 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
 
   // FJ timer expiry → broadcast, wait for player auto-submits, fresh fetch, build reveal order
   useEffect(() => {
-    if (!fjTimerExpired || fjPhase !== 'question') return
+    if (!fjTimerExpired || fjPhase !== 'question' || fjExpiryInProgress.current) return
+    fjExpiryInProgress.current = true
     setFjTimerExpired(false)
     broadcastRef.current?.send({ type: 'broadcast', event: 'fj_timer_expired', payload: {} })
 
@@ -215,10 +217,16 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     const currentScores = scores
 
     ;(async () => {
-      // Give players time to receive the broadcast and auto-submit their responses
-      await new Promise(resolve => setTimeout(resolve, 1500))
+      // Check if all responses are already in — if so, skip the wait
+      const { data: earlyData } = await supabase.from('wagers').select().eq('room_id', roomId)
+      const earlyWagers = earlyData ?? []
+      const allAlreadyIn = [...activeIds].every(id =>
+        earlyWagers.some(w => w.team_id === id && w.response !== null)
+      )
 
-      // Fresh fetch — don't rely on potentially stale fjWagers state
+      // Only wait when players still need time to receive the broadcast and auto-submit
+      if (!allAlreadyIn) await new Promise(resolve => setTimeout(resolve, 1500))
+
       const { data } = await supabase.from('wagers').select().eq('room_id', roomId)
       const latestWagers = data ?? []
       setFjWagers(latestWagers)
@@ -298,14 +306,19 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     return () => clearInterval(id)
   }, [judgeStartTime])
 
+  // Reset expiry guard when a new question phase begins
+  useEffect(() => {
+    if (fjPhase === 'question') fjExpiryInProgress.current = false
+  }, [fjPhase])
+
   // Auto-end FJ timer once every active team has submitted a response
   useEffect(() => {
-    if (fjPhase !== 'question' || fjActiveTeamIds.size === 0 || fjTimerExpired) return
+    if (fjPhase !== 'question' || fjActiveTeamIds.size === 0 || fjExpiryInProgress.current) return
     const allIn = [...fjActiveTeamIds].every(id =>
       fjWagers.some(w => w.team_id === id && w.response !== null)
     )
     if (allIn) setFjTimerExpired(true)
-  }, [fjWagers, fjPhase, fjActiveTeamIds, fjTimerExpired])
+  }, [fjWagers]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Actions ───────────────────────────────────────────────
 

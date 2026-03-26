@@ -46,6 +46,17 @@ React + Vite, TypeScript, Tailwind CSS, Supabase (Postgres + Realtime), Vercel, 
 - Server-generated timestamps for all buzzes
 - 6-char room codes, exclude ambiguous chars (0, O, 1, I, l)
 
+## Final Jeopardy (Final Tap) — Implementation Notes
+- FJ sub-phases (host): `starting` → `wager` → `question` → `review` → `done`
+- FJ sub-phases (player): `incoming` → `wager` → `wager_locked` → `question` → `reviewing` → `done`
+- `startFinalJeopardy()` deletes all wagers for the room before running (prevents stale data across dev reloads)
+- Host page refresh during FJ: rehydrated from DB in a `useEffect` guarded by `room.status === 'final_jeopardy' && fjPhase === null`. Phase detected from wager rows: no wagers → `starting`, wagers+no responses → `wager`, wagers+responses → `review`
+- `fjExpiryInProgress` ref guards the timer expiry handler against re-entrancy. Auto-end effect only has `[fjWagers]` in deps (not `fjTimerExpired`) to prevent the feedback loop
+- Timer expiry skips the 1500ms wait if all responses are already in the DB
+- DEV-only `⚡ FT` button in host scoreboard header (gated by `import.meta.env.DEV`) calls `startFinalJeopardy()` directly for fast testing
+- `lobby_closed` handler must reset `fjSubPhase` to null or the game-over screen persists after new game starts
+- `game_state_change { status: 'final_jeopardy' }` handler resets all player FJ state before setting `incoming`
+
 ## Known Issues
 - Points not subtracting for wrong answers
 - Projector only updates on first host-chosen question, not player-chosen
