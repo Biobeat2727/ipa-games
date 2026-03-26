@@ -308,6 +308,9 @@ export default function PlayView() {
         }
         if (status === 'final_jeopardy') {
           setFjCategoryName(fj_category ?? 'Final Jeopardy')
+          setFjWagerInput(''); setFjWagerId(null); setFjQuestion(null)
+          setFjResponse(''); setFjResponseSubmitted(false)
+          setFjTimerStart(null); setFjTimeRemaining(null); setFjFinalScores([])
           setFjSubPhase('incoming')
         }
       })
@@ -352,6 +355,7 @@ export default function PlayView() {
         setPreviewInfo(null); setActiveQuestion(null); setCurrentTurnTeamId(null)
         setTimerPayload(null); setHasBuzzed(false); setMyBuzzId(null); setBuzzResult(null)
         setRoom(null); setMyTeam(null)
+        setFjSubPhase(null)
         setPhase('no_lobby')
       })
       .subscribe()

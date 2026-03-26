@@ -242,6 +242,50 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     })()
   }, [fjTimerExpired]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Rehydrate FJ state on host page refresh
+  useEffect(() => {
+    if (room.status !== 'final_jeopardy' || fjPhase !== null) return
+    ;(async () => {
+      const { data: fjCat } = await supabase
+        .from('categories').select().eq('room_id', roomId).eq('round', 3).single()
+      setFjCategoryName(fjCat?.name ?? 'Final Tap')
+      if (fjCat) {
+        const { data: q } = await supabase.from('questions').select().eq('category_id', fjCat.id).single()
+        setFjQuestion(q ?? null)
+      }
+
+      const { data: activeTeams } = await supabase
+        .from('teams').select('id').eq('room_id', roomId).eq('is_active', true)
+      const activeIds = new Set((activeTeams ?? []).map((t: { id: string }) => t.id))
+      setFjActiveTeamIds(activeIds)
+
+      const { data: wagerData } = await supabase.from('wagers').select().eq('room_id', roomId)
+      const wagers = wagerData ?? []
+      setFjWagers(wagers)
+
+      if (wagers.length === 0) {
+        setFjPhase('starting')
+        return
+      }
+      if (!wagers.some(w => w.response !== null)) {
+        setFjPhase('wager')
+        return
+      }
+      // Review phase — reconstruct reveal order (lowest score first, same as timer expiry)
+      const order = teams
+        .filter(t => activeIds.has(t.id))
+        .sort((a, b) => (scores.get(a.id) ?? a.score) - (scores.get(b.id) ?? b.score))
+        .map(t => t.id)
+      setFjRevealOrder(order)
+      const firstPending = order.findIndex(tid => {
+        const w = wagers.find(w => w.team_id === tid)
+        return !w || w.status === 'pending'
+      })
+      setFjReviewIdx(firstPending >= 0 ? firstPending : order.length - 1)
+      setFjPhase('review')
+    })()
+  }, [room.status]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Judge timer countdown
   useEffect(() => {
     if (judgeStartTime === null) { setTimerSeconds(RESPONSE_SECONDS); return }
@@ -253,6 +297,15 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     const id = setInterval(tick, 500)
     return () => clearInterval(id)
   }, [judgeStartTime])
+
+  // Auto-end FJ timer once every active team has submitted a response
+  useEffect(() => {
+    if (fjPhase !== 'question' || fjActiveTeamIds.size === 0 || fjTimerExpired) return
+    const allIn = [...fjActiveTeamIds].every(id =>
+      fjWagers.some(w => w.team_id === id && w.response !== null)
+    )
+    if (allIn) setFjTimerExpired(true)
+  }, [fjWagers, fjPhase, fjActiveTeamIds, fjTimerExpired])
 
   // ── Actions ───────────────────────────────────────────────
 
@@ -410,6 +463,9 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   // ── Final Jeopardy actions ────────────────────────────────
 
   async function startFinalJeopardy() {
+    // Clear any wagers from a previous FJ round
+    await supabase.from('wagers').delete().eq('room_id', roomId)
+
     // Rank teams by current live score; top 3 advance
     const ranked = [...teams].sort((a, b) => (scores.get(b.id) ?? b.score) - (scores.get(a.id) ?? a.score))
     const top3ids = new Set(ranked.slice(0, 3).map(t => t.id))
@@ -794,6 +850,21 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                     className={`h-full rounded-full transition-all duration-500 ${fjTimerSeconds <= 15 ? 'bg-red-500' : 'bg-yellow-400'}`}
                     style={{ width: `${(fjTimerSeconds / 90) * 100}%` }}
                   />
+                </div>
+              </div>
+              <div className="bg-gray-900 rounded-2xl p-4 border border-gray-800">
+                <p className="text-xs text-gray-500 uppercase tracking-wider mb-3">Responses</p>
+                <div className="space-y-2">
+                  {teams.filter(t => fjActiveTeamIds.has(t.id)).map(team => {
+                    const submitted = fjWagers.some(w => w.team_id === team.id && w.response !== null)
+                    return (
+                      <div key={team.id} className="flex items-center gap-3">
+                        <span className={`w-2.5 h-2.5 rounded-full shrink-0 ${submitted ? 'bg-green-400' : 'bg-gray-600 animate-pulse'}`} />
+                        <span className="flex-1 text-sm font-semibold">{team.name}</span>
+                        {submitted && <span className="text-xs text-green-500">locked in</span>}
+                      </div>
+                    )
+                  })}
                 </div>
               </div>
               {fjQuestion && (
