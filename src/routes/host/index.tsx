@@ -85,11 +85,14 @@ export default function HostView() {
 
     const roomId = room.id
 
-    // postgres_changes path — requires teams table in Supabase realtime publication
+    // postgres_changes path — teams table for new teams; players table for join/leave
     const pgCh = supabase
       .channel(`host-lobby-${roomId}`)
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'teams', filter: `room_id=eq.${roomId}` },
+        () => fetchTeams(roomId))
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'players' },
         () => fetchTeams(roomId))
       .subscribe(status => {
         if (status === 'SUBSCRIBED') fetchTeams(roomId)

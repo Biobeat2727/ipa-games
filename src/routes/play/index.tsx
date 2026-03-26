@@ -485,27 +485,18 @@ export default function PlayView() {
 
   // Subscribe to teammate joins/leaves (lobby only)
   useEffect(() => {
-    if (phase !== 'lobby' || !myTeam || !room) return
-    const teamCh = supabase.channel(`play-team-${myTeam.id}`)
+    if (phase !== 'lobby' || !myTeam) return
+    const ch = supabase.channel(`play-team-${myTeam.id}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'players', filter: `team_id=eq.${myTeam.id}` },
         () => fetchTeammates(myTeam.id))
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'players' },
+        () => fetchTeammates(myTeam.id))
       .subscribe()
-    teamChannelRef.current = teamCh
-
-    // Room-level channel so player_left reaches the host (and other teams' players)
-    const roomCh = supabase.channel(`room:${room.id}`)
-      .on('broadcast', { event: 'player_left' }, () => fetchTeammates(myTeam.id))
-      .subscribe()
-    lobbyChannelRef.current = roomCh
-
-    return () => {
-      supabase.removeChannel(teamCh)
-      supabase.removeChannel(roomCh)
-      teamChannelRef.current = null
-      lobbyChannelRef.current = null
-    }
-  }, [phase, myTeam, room, fetchTeammates])
+    teamChannelRef.current = ch
+    return () => { supabase.removeChannel(ch); teamChannelRef.current = null }
+  }, [phase, myTeam, fetchTeammates])
 
   // ── Actions ───────────────────────────────────────────────
 
@@ -518,8 +509,7 @@ export default function PlayView() {
   }
 
   async function handleLeave() {
-    if (myPlayerId) await supabase.from('players').delete().eq('id', myPlayerId)
-    lobbyChannelRef.current?.send({ type: 'broadcast', event: 'player_left', payload: {} })
+    await supabase.from('players').delete().eq('session_id', getSessionId())
     clearPlayerSession()
     setMyTeam(null); setTeammates([]); setMyPlayerId(null)
     setActiveQuestion(null); setHasBuzzed(false)
