@@ -505,7 +505,9 @@ export default function PlayView() {
   }
 
   async function handleLeave() {
-    await supabase.from('players').delete().eq('session_id', getSessionId())
+    const { error: delErr, count } = await supabase
+      .from('players').delete({ count: 'exact' }).eq('session_id', getSessionId())
+    console.log('[handleLeave] delete result — error:', delErr, 'rows deleted:', count)
     clearPlayerSession()
     setMyTeam(null); setTeammates([])
     setActiveQuestion(null); setHasBuzzed(false)
