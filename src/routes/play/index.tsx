@@ -80,6 +80,7 @@ export default function PlayView() {
   const roomRef                = useRef<Room | null>(null)
   const broadcastRef           = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const lobbyChannelRef        = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const teamChannelRef         = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const currentTurnTeamIdRef   = useRef<string | null>(null)
 
   useEffect(() => { responseSubmittedRef.current = responseSubmitted }, [responseSubmitted])
@@ -131,6 +132,9 @@ export default function PlayView() {
       const { data: roomData } = await supabase
         .from('rooms').select().eq('id', teamData.room_id).neq('status', 'finished').single()
       if (!roomData) { clearPlayerSession(); return autoResolve() }
+      const { data: playerData } = await supabase
+        .from('players').select('id').eq('team_id', teamId).eq('session_id', getSessionId()).maybeSingle()
+      if (playerData) setMyPlayerId(playerData.id)
       setRoom(roomData)
       setMyTeam(teamData)
       setMyScore(teamData.score)
@@ -479,18 +483,18 @@ export default function PlayView() {
     }
   }, [phase, room?.id])
 
-  // Subscribe to teammate joins (lobby only)
+  // Subscribe to teammate joins/leaves (lobby only)
   useEffect(() => {
     if (phase !== 'lobby' || !myTeam) return
     const ch = supabase.channel(`play-team-${myTeam.id}`)
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'players', filter: `team_id=eq.${myTeam.id}` },
         () => fetchTeammates(myTeam.id))
-      .on('postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'players', filter: `team_id=eq.${myTeam.id}` },
+      .on('broadcast', { event: 'player_left' },
         () => fetchTeammates(myTeam.id))
       .subscribe()
-    return () => { supabase.removeChannel(ch) }
+    teamChannelRef.current = ch
+    return () => { supabase.removeChannel(ch); teamChannelRef.current = null }
   }, [phase, myTeam, fetchTeammates])
 
   // ── Actions ───────────────────────────────────────────────
@@ -505,6 +509,7 @@ export default function PlayView() {
 
   async function handleLeave() {
     if (myPlayerId) await supabase.from('players').delete().eq('id', myPlayerId)
+    teamChannelRef.current?.send({ type: 'broadcast', event: 'player_left', payload: {} })
     clearPlayerSession()
     setMyTeam(null); setTeammates([]); setMyPlayerId(null)
     setActiveQuestion(null); setHasBuzzed(false)
@@ -656,32 +661,15 @@ export default function PlayView() {
             onChange={e => setNickname(e.target.value)}
             className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 mb-6 outline-none focus:ring-2 focus:ring-yellow-400 text-sm"
           />
-          {teams.length > 0 && (
-            <>
-              <p className="text-gray-400 text-xs uppercase tracking-wider font-semibold mb-3">Join a team</p>
-              <div className="space-y-2 mb-4">
-                {teams.map(team => (
-                  <button
-                    key={team.id}
-                    onClick={() => joinTeam(team)}
-                    disabled={loading}
-                    className="w-full bg-gray-800 hover:bg-gray-700 active:bg-gray-600 rounded-xl px-5 py-4 text-left font-semibold transition-colors"
-                  >
-                    {team.name}
-                  </button>
-                ))}
-              </div>
-            </>
-          )}
           {!showCreate ? (
             <button
               onClick={() => setShowCreate(true)}
-              className="w-full border-2 border-yellow-400 text-yellow-400 rounded-xl px-4 py-3 font-bold"
+              className="w-full border-2 border-yellow-400 text-yellow-400 rounded-xl px-4 py-3 font-bold mb-6"
             >
               + Create New Team
             </button>
           ) : (
-            <div className="space-y-2">
+            <div className="space-y-2 mb-6">
               <input
                 type="text"
                 placeholder="Team name"
@@ -699,6 +687,23 @@ export default function PlayView() {
                 {loading ? 'Creating…' : 'Create & Join'}
               </button>
             </div>
+          )}
+          {teams.length > 0 && (
+            <>
+              <p className="text-yellow-400 text-sm uppercase tracking-wider font-black mb-3">Join a team</p>
+              <div className="space-y-2 mb-4">
+                {teams.map(team => (
+                  <button
+                    key={team.id}
+                    onClick={() => joinTeam(team)}
+                    disabled={loading}
+                    className="w-full bg-gray-800 hover:bg-gray-700 active:bg-gray-600 rounded-xl px-5 py-4 text-left font-semibold transition-colors"
+                  >
+                    {team.name}
+                  </button>
+                ))}
+              </div>
+            </>
           )}
           {error && <p className="text-red-400 text-sm text-center mt-4">{error}</p>}
         </div>
