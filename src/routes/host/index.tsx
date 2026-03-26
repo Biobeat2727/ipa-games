@@ -99,6 +99,7 @@ export default function HostView() {
     const bcCh = supabase
       .channel(`room:${roomId}`)
       .on('broadcast', { event: 'team_joined' }, () => fetchTeams(roomId))
+      .on('broadcast', { event: 'player_left' }, () => fetchTeams(roomId))
       .subscribe()
 
     lobbyBroadcastRef.current = bcCh
