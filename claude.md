@@ -27,6 +27,19 @@ React + Vite, TypeScript, Tailwind CSS, Supabase (Postgres + Realtime), Vercel, 
 - `docs/content-format.md` — JSON import format for trivia content
 - `docs/pwa-networking.md` — PWA config, service worker, hotspot setup
 
+## Supabase RLS
+- **All tables have RLS enabled** — anon key is blocked by default for writes
+- DELETE policies must be explicitly created: `CREATE POLICY "allow_delete" ON <table> FOR DELETE USING (true);`
+- Tables requiring policies: `players`, `teams`, `rooms`, `categories`, `questions`, `buzzes`, `wagers`
+- Silent failure pattern: RLS blocks return `{ data: [], error: null }` with `count: 0` — no error thrown
+- When a DB write seems to do nothing, check RLS first (`SELECT tablename, rowsecurity FROM pg_tables WHERE schemaname = 'public'`)
+- `postgres_changes` DELETE events require the row to actually be deleted — if RLS blocks the delete, no event fires
+
+## Session / Identity
+- `session_id` (`trivia_session_id`) is **permanent** — never cleared, even by `clearPlayerSession()`
+- `clearPlayerSession()` only removes `roomCode` and `teamId` from localStorage
+- Always delete player rows by `session_id`, not by a stored player ID state (state can be null on page refresh)
+
 ## Conventions
 - Dark backgrounds, high-contrast text (readable at 30ft on projector)
 - Buzz button: full-width, impossible to miss

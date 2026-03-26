@@ -550,12 +550,12 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       .from('rooms').update({ status: 'round_2' }).eq('id', roomId)
     if (!error) {
       setRoom(prev => ({ ...prev, status: 'round_2' }))
-      assignTurn(firstTeamId)
       broadcastRef.current?.send({
         type: 'broadcast',
         event: 'game_state_change',
         payload: { status: 'round_2' },
       })
+      assignTurn(firstTeamId)
     }
   }
 
