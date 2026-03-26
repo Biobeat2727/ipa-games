@@ -50,6 +50,7 @@ export default function PlayView() {
   const [responseSubmitted, setResponseSubmitted] = useState(false)
   const [buzzResult, setBuzzResult]           = useState<'correct' | 'wrong' | null>(null)
   const [myScore, setMyScore]                 = useState(0)
+  const [myPlayerId, setMyPlayerId]           = useState<string | null>(null)
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
   const [boardCategories, setBoardCategories] = useState<BoardCategory[]>([])
   const [teamNames, setTeamNames]             = useState<Map<string, string>>(new Map())
@@ -485,6 +486,9 @@ export default function PlayView() {
       .on('postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'players', filter: `team_id=eq.${myTeam.id}` },
         () => fetchTeammates(myTeam.id))
+      .on('postgres_changes',
+        { event: 'DELETE', schema: 'public', table: 'players', filter: `team_id=eq.${myTeam.id}` },
+        () => fetchTeammates(myTeam.id))
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [phase, myTeam, fetchTeammates])
@@ -499,9 +503,10 @@ export default function PlayView() {
     setPhase('select_team')
   }
 
-  function handleLeave() {
+  async function handleLeave() {
+    if (myPlayerId) await supabase.from('players').delete().eq('id', myPlayerId)
     clearPlayerSession()
-    setMyTeam(null); setTeammates([])
+    setMyTeam(null); setTeammates([]); setMyPlayerId(null)
     setActiveQuestion(null); setHasBuzzed(false)
     setMyBuzzId(null); setTimerPayload(null)
     setBuzzResult(null); setMyScore(0)
@@ -518,7 +523,7 @@ export default function PlayView() {
     setLoading(false)
     if (!player || err) { setError('Failed to join team. Try again.'); return }
 
-    setTeamId(team.id); setMyTeam(team); setMyScore(team.score)
+    setTeamId(team.id); setMyTeam(team); setMyScore(team.score); setMyPlayerId(player.id)
     await fetchTeammates(team.id)
 
     // Notify all clients immediately — use the already-subscribed channel so the
@@ -718,8 +723,8 @@ export default function PlayView() {
             </ul>
           </div>
         )}
-        <button onClick={handleLeave} className="mt-8 text-xs text-gray-700 hover:text-gray-500 transition-colors">
-          Leave team
+        <button onClick={handleLeave} className="mt-8 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors">
+          Leave Team
         </button>
       </div>
     )
@@ -869,7 +874,7 @@ export default function PlayView() {
         {myEntry && (
           <p className="text-gray-400 text-sm">Your final score: <span className="text-white font-black">{myEntry.score}</span></p>
         )}
-        <button onClick={handleLeave} className="mt-6 text-xs text-gray-700 hover:text-gray-500 transition-colors">
+        <button onClick={handleLeave} className="mt-6 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors">
           Leave
         </button>
       </div>
@@ -995,8 +1000,8 @@ export default function PlayView() {
         )}
 
         <button onClick={handleLeave}
-          className="shrink-0 py-3 text-xs text-gray-800 hover:text-gray-600 transition-colors text-center w-full">
-          Leave team
+          className="shrink-0 py-3 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors text-center w-full">
+          Leave Team
         </button>
       </div>
     )
