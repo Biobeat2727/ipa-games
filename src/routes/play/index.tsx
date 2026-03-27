@@ -1018,14 +1018,14 @@ export default function PlayView() {
                       key={q.id}
                       onClick={() => isMyTurnNow && !answered && handleSelectQuestion(q.id)}
                       disabled={answered || !isMyTurnNow}
-                      className={`h-12 rounded font-mono font-black transition-colors ${
+                      className={`h-20 rounded font-mono font-black transition-colors ${
                         answered
                           ? 'bg-gray-900/30 text-gray-800 cursor-default'
                           : isMyTurnNow
                             ? 'bg-blue-800 hover:bg-blue-700 active:bg-blue-600 text-yellow-400'
                             : 'bg-blue-900/60 text-blue-400 cursor-default'
                       }`}
-                      style={{ fontSize: 'clamp(0.65rem, 2.5vw, 0.9rem)' }}
+                      style={{ fontSize: 'clamp(1rem, 4vw, 1.4rem)' }}
                     >
                       {answered ? '' : `$${pv}`}
                     </button>
