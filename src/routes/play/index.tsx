@@ -1003,7 +1003,7 @@ export default function PlayView() {
               {boardCategories.map(cat => (
                 <div key={cat.id} className="bg-blue-900 rounded px-1 py-2 text-center">
                   <p className="font-black uppercase leading-tight text-white"
-                    style={{ fontSize: 'clamp(0.5rem, 2.5vw, 0.7rem)' }}>
+                    style={{ fontSize: 'clamp(0.65rem, 3vw, 0.9rem)' }}>
                     {cat.name}
                   </p>
                 </div>
