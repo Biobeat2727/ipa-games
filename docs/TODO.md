@@ -23,3 +23,6 @@
 ## Testing Notes
 - Use `⚡ FT` button in host scoreboard (dev only) to skip directly to Final Tap from any point in the game
 - DEV guard: `import.meta.env.DEV` — button never appears in production builds
+
+
+Fix the issue with refresh allowing players to choose categories when it's not their turn.

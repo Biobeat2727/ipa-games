@@ -39,6 +39,8 @@ export default function PlayView() {
   const [newTeamName, setNewTeamName] = useState('')
   const [showCreate, setShowCreate]   = useState(false)
   const [flippingId, setFlippingId]   = useState<string | null>(null)
+  const [tileOrigin, setTileOrigin]   = useState<{ top: string; right: string; bottom: string; left: string } | null>(null)
+  const [overlayExpanding, setOverlayExpanding] = useState(false)
 
   // Game state
   const [activeQuestion, setActiveQuestion]   = useState<QuestionPublic | null>(null)
@@ -579,7 +581,14 @@ export default function PlayView() {
     setResponseSubmitted(true)
   }
 
-  function handleSelectQuestion(questionId: string) {
+  // Trigger overlay expansion after previewInfo is painted
+  useEffect(() => {
+    if (!previewInfo) { setOverlayExpanding(false); return }
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => setOverlayExpanding(true)))
+    return () => cancelAnimationFrame(id)
+  }, [previewInfo])
+
+  function handleSelectQuestion(questionId: string, el: HTMLElement) {
     // Allow selection when no turn is assigned (Realtime down) or it's explicitly this team's turn
     if (!room || (currentTurnTeamId !== null && myTeam?.id !== currentTurnTeamId)) return
     const cat = boardCategories.find(c => c.questions.some(q => q.id === questionId))
@@ -590,18 +599,25 @@ export default function PlayView() {
       pointValue:   q?.point_value ?? null,
       startTs:      Date.now(),
     }
+    // Capture tile screen position for the expand-from-tile animation
+    const rect = el.getBoundingClientRect()
+    const vw = window.innerWidth, vh = window.innerHeight
+    setTileOrigin({
+      top:    `${(rect.top    / vh * 100).toFixed(2)}%`,
+      right:  `${((1 - rect.right  / vw) * 100).toFixed(2)}%`,
+      bottom: `${((1 - rect.bottom / vh) * 100).toFixed(2)}%`,
+      left:   `${(rect.left   / vw * 100).toFixed(2)}%`,
+    })
     // Broadcast immediately so host gets it without delay
     broadcastRef.current?.send({
       type: 'broadcast',
       event: 'question_preview',
       payload: preview,
     })
-    // Flip the tile, then transition to the waiting screen after animation
+    // Flip the tile, then show overlay
     setFlippingId(questionId)
-    setTimeout(() => {
-      setFlippingId(null)
-      setPreviewInfo(preview)
-    }, 650)
+    setTimeout(() => setPreviewInfo(preview), 600)
+    setTimeout(() => setFlippingId(null), 650)
   }
 
   async function handleSubmitWager() {
@@ -958,29 +974,8 @@ export default function PlayView() {
     )
   }
 
-  // No active question — check for preview phase first
+  // No active question — show board, with preview overlay when a question has been picked
   if (!activeQuestion) {
-    // ── Preview: category revealed, waiting for host to open buzzer ──
-    if (previewInfo) {
-      return (
-        <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center"
-          style={{ animation: 'screen-reveal 0.4s ease-out forwards' }}>
-          {scoreChip}
-          <p className="text-blue-400 text-xs uppercase tracking-widest mb-6">Category</p>
-          <p className="font-black text-white leading-tight mb-3"
-            style={{ fontSize: 'clamp(1.75rem, 7vw, 3rem)' }}>
-            {previewInfo.categoryName}
-          </p>
-          {previewInfo.pointValue != null && (
-            <p className="text-yellow-400 font-mono font-black text-3xl mb-8">
-              ${previewInfo.pointValue}
-            </p>
-          )}
-          <p className="text-gray-500 text-sm animate-pulse">Waiting for host…</p>
-        </div>
-      )
-    }
-
     const isMyTurnNow  = currentTurnTeamId === null || myTeam?.id === currentTurnTeamId
     const turnTeamName = currentTurnTeamId ? teamNames.get(currentTurnTeamId) : null
     const pointValues  = [...new Set(
@@ -1047,7 +1042,7 @@ export default function PlayView() {
                   return (
                     <button
                       key={q.id}
-                      onClick={() => isMyTurnNow && !answered && handleSelectQuestion(q.id)}
+                      onClick={(e) => isMyTurnNow && !answered && handleSelectQuestion(q.id, e.currentTarget)}
                       disabled={answered || !isMyTurnNow}
                       className={`h-20 rounded font-mono font-black transition-colors ${
                         answered
@@ -1075,6 +1070,30 @@ export default function PlayView() {
           className="shrink-0 py-3 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors text-center w-full">
           Leave Team
         </button>
+
+        {/* Preview overlay — expands from tile position to fill screen */}
+        {previewInfo && tileOrigin && (
+          <div className="fixed inset-0 z-50 bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center"
+            style={{
+              clipPath: overlayExpanding
+                ? 'inset(0% 0% 0% 0% round 0px)'
+                : `inset(${tileOrigin.top} ${tileOrigin.right} ${tileOrigin.bottom} ${tileOrigin.left} round 8px)`,
+              transition: overlayExpanding ? 'clip-path 0.45s ease-out' : 'none',
+            }}>
+            {scoreChip}
+            <p className="text-blue-400 text-xs uppercase tracking-widest mb-6">Category</p>
+            <p className="font-black text-white leading-tight mb-3"
+              style={{ fontSize: 'clamp(1.75rem, 7vw, 3rem)' }}>
+              {previewInfo.categoryName}
+            </p>
+            {previewInfo.pointValue != null && (
+              <p className="text-yellow-400 font-mono font-black text-3xl mb-8">
+                ${previewInfo.pointValue}
+              </p>
+            )}
+            <p className="text-gray-500 text-sm animate-pulse">Waiting for host…</p>
+          </div>
+        )}
       </div>
     )
   }

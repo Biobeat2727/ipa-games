@@ -57,17 +57,24 @@ React + Vite, TypeScript, Tailwind CSS, Supabase (Postgres + Realtime), Vercel, 
 - `lobby_closed` handler must reset `fjSubPhase` to null or the game-over screen persists after new game starts
 - `game_state_change { status: 'final_jeopardy' }` handler resets all player FJ state before setting `incoming`
 
-## Temporary Event Theming (Birthday Edition — remove after event)
-Four things to remove when done:
+## Realtime Reliability — Polling Fallbacks (added Mar 27 2026)
+Supabase Realtime had a major outage (17+ incidents in March 2026). Polling fallbacks added as resilience layer — they run alongside Realtime and kick in automatically if WebSocket fails:
+- **Host lobby** (`host/index.tsx`): polls teams every 3s
+- **Player room status** (`play/index.tsx`): polls rooms + team score every 3s — covers game start, current_question_id (buzz button), score updates
+- **Host buzz queue** (`host/Game.tsx`): polls buzzes every 2s when question is active
+- **Player question selection**: allowed when `currentTurnTeamId === null` (turn broadcasts not received)
 
-1. **Birthday message** — `src/routes/play/index.tsx`, select_team screen. Delete the two `<p>` lines and the comment between the `<h1>` and the nickname `<input>`. Restore `mb-8` on the `<h1>`.
-2. **Balloon animation CSS** — `src/index.css`. Delete the `@keyframes balloon-float { ... }` block.
-3. **Balloons + confetti in play/index.tsx:**
-   - Remove `import confetti from 'canvas-confetti'` at the top
-   - Remove `const [showBalloons, setShowBalloons] = useState(false)` state
-   - Remove the `useEffect` block commented `// Launch balloons + confetti when the team selection screen appears`
-   - Remove the balloon overlay JSX block (the `{showBalloons && (<div ...>)}`) inside the select_team screen
-4. **Uninstall the package:** `npm uninstall canvas-confetti` and `npm uninstall -D @types/canvas-confetti`
+**Supabase package pinned:** `"@supabase/supabase-js": "2.97.0"` (exact, no `^`) in package.json. Do not upgrade without testing Realtime first.
+
+**Planned migration:** Replace Supabase broadcast layer with **Ably** for better reliability. Supabase DB stays for all data. Only the `.channel().on('broadcast')` / `.send()` calls change.
+
+## Player Board UI
+- Board grid is fully dynamic: `repeat(${boardCategories.length}, 1fr)` — supports 3 or 4 categories
+- Tile height: `h-20` (80px), font: `clamp(1rem, 4vw, 1.4rem)` — sized for mobile with 4 categories
+- Category headers: `clamp(0.65rem, 3vw, 0.9rem)`
+- **Card flip animation** on question selection: tile flips 3D (600ms) → `clip-path` overlay expands from center to full screen (450ms) → preview screen. CSS keyframes: `card-flip` and `tile-expand` in `src/index.css`
+- `flippingId` state tracks which tile is animating
+- Broadcast fires immediately on tap; `setPreviewInfo` fires at 600ms (after flip); overlay uses `position: fixed; z-index: 50` so board stays mounted beneath
 
 ## Known Issues
 - Points not subtracting for wrong answers
