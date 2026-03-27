@@ -39,7 +39,7 @@ export default function PlayView() {
   const [newTeamName, setNewTeamName] = useState('')
   const [showCreate, setShowCreate]   = useState(false)
   const [flippingId, setFlippingId]   = useState<string | null>(null)
-  const [tileOrigin, setTileOrigin]   = useState<{ top: string; right: string; bottom: string; left: string } | null>(null)
+  const [tileRect, setTileRect]         = useState<DOMRect | null>(null)
   const [overlayExpanding, setOverlayExpanding] = useState(false)
 
   // Game state
@@ -600,14 +600,7 @@ export default function PlayView() {
       startTs:      Date.now(),
     }
     // Capture tile screen position for the expand-from-tile animation
-    const rect = el.getBoundingClientRect()
-    const vw = window.innerWidth, vh = window.innerHeight
-    setTileOrigin({
-      top:    `${(rect.top    / vh * 100).toFixed(2)}%`,
-      right:  `${((1 - rect.right  / vw) * 100).toFixed(2)}%`,
-      bottom: `${((1 - rect.bottom / vh) * 100).toFixed(2)}%`,
-      left:   `${(rect.left   / vw * 100).toFixed(2)}%`,
-    })
+    setTileRect(el.getBoundingClientRect())
     // Broadcast immediately so host gets it without delay
     broadcastRef.current?.send({
       type: 'broadcast',
@@ -1019,22 +1012,47 @@ export default function PlayView() {
                   const isFlipping = flippingId === q.id
                   if (isFlipping) {
                     return (
-                      <div key={q.id} style={{ perspective: '600px' }} className="h-20 rounded overflow-hidden">
+                      <div key={q.id} className="h-20 rounded"
+                        style={{ perspective: '600px', filter: 'drop-shadow(0 6px 20px rgba(0,0,0,0.7))' }}>
                         <div className="relative h-full w-full"
                           style={{ transformStyle: 'preserve-3d', animation: 'card-flip 0.6s ease-in-out forwards' }}>
                           {/* Front — dollar amount */}
-                          <div className="absolute inset-0 rounded bg-blue-800 flex items-center justify-center font-mono font-black text-yellow-400"
-                            style={{ backfaceVisibility: 'hidden', fontSize: 'clamp(1rem, 4vw, 1.4rem)' }}>
+                          <div className="absolute inset-0 rounded flex items-center justify-center font-mono font-black text-yellow-400"
+                            style={{
+                              backfaceVisibility: 'hidden',
+                              fontSize: 'clamp(1rem, 4vw, 1.4rem)',
+                              background: 'linear-gradient(145deg, #2563eb 0%, #1e40af 60%, #1a3899 100%)',
+                              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12)',
+                            }}>
                             ${pv}
                           </div>
                           {/* Back — category reveal */}
-                          <div className="absolute inset-0 rounded bg-blue-950 flex items-center justify-center p-1 text-center"
-                            style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                          <div className="absolute inset-0 rounded flex items-center justify-center p-1 text-center"
+                            style={{
+                              backfaceVisibility: 'hidden',
+                              transform: 'rotateY(180deg)',
+                              background: 'linear-gradient(145deg, #1e3a8a 0%, #172554 60%, #0f1c46 100%)',
+                            }}>
                             <p className="font-black uppercase text-white leading-tight"
                               style={{ fontSize: 'clamp(0.55rem, 2.5vw, 0.75rem)' }}>
                               {cat.name}
                             </p>
                           </div>
+                          {/* Card edges — give the tile visible thickness during flip */}
+                          <div style={{
+                            position: 'absolute', top: 0, left: '100%',
+                            width: '4px', height: '100%',
+                            background: '#0a153a',
+                            transform: 'rotateY(90deg)',
+                            transformOrigin: 'left center',
+                          }} />
+                          <div style={{
+                            position: 'absolute', top: 0, right: '100%',
+                            width: '4px', height: '100%',
+                            background: '#0a153a',
+                            transform: 'rotateY(-90deg)',
+                            transformOrigin: 'right center',
+                          }} />
                         </div>
                       </div>
                     )
@@ -1071,15 +1089,30 @@ export default function PlayView() {
           Leave Team
         </button>
 
-        {/* Preview overlay — expands from tile position to fill screen */}
-        {previewInfo && tileOrigin && (
+        {/* Preview overlay — grows from tile position/size to fill screen */}
+        {previewInfo && tileRect && (
           <div className="fixed inset-0 z-50 bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center"
-            style={{
-              clipPath: overlayExpanding
-                ? 'inset(0% 0% 0% 0% round 0px)'
-                : `inset(${tileOrigin.top} ${tileOrigin.right} ${tileOrigin.bottom} ${tileOrigin.left} round 8px)`,
-              transition: overlayExpanding ? 'clip-path 0.45s ease-out' : 'none',
-            }}>
+            style={(() => {
+              const vw = window.innerWidth, vh = window.innerHeight
+              const scaleX = tileRect.width  / vw
+              const scaleY = tileRect.height / vh
+              const dx = tileRect.left + tileRect.width  / 2 - vw / 2
+              const dy = tileRect.top  + tileRect.height / 2 - vh / 2
+              return {
+                transform: overlayExpanding
+                  ? 'none'
+                  : `translate(${dx}px, ${dy}px) scale(${scaleX}, ${scaleY})`,
+                transition: overlayExpanding
+                  ? 'transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94), border-radius 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+                  : 'none',
+                transformOrigin: 'center center',
+                // Elliptical radius that appears as ~8px on the tile when scaled, transitions to sharp as it fills screen
+                borderRadius: overlayExpanding
+                  ? '0px'
+                  : `${(8 / scaleX).toFixed(1)}px / ${(8 / scaleY).toFixed(1)}px`,
+                overflow: 'hidden',
+              }
+            })()}>
             {scoreChip}
             <p className="text-blue-400 text-xs uppercase tracking-widest mb-6">Category</p>
             <p className="font-black text-white leading-tight mb-3"
