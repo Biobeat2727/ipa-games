@@ -38,6 +38,7 @@ export default function PlayView() {
   const [nickname, setNickname]       = useState('')
   const [newTeamName, setNewTeamName] = useState('')
   const [showCreate, setShowCreate]   = useState(false)
+  const [flippingId, setFlippingId]   = useState<string | null>(null)
 
   // Game state
   const [activeQuestion, setActiveQuestion]   = useState<QuestionPublic | null>(null)
@@ -589,12 +590,18 @@ export default function PlayView() {
       pointValue:   q?.point_value ?? null,
       startTs:      Date.now(),
     }
-    setPreviewInfo(preview)
+    // Broadcast immediately so host gets it without delay
     broadcastRef.current?.send({
       type: 'broadcast',
       event: 'question_preview',
       payload: preview,
     })
+    // Flip the tile, then transition to the waiting screen after animation
+    setFlippingId(questionId)
+    setTimeout(() => {
+      setFlippingId(null)
+      setPreviewInfo(preview)
+    }, 650)
   }
 
   async function handleSubmitWager() {
@@ -956,7 +963,8 @@ export default function PlayView() {
     // ── Preview: category revealed, waiting for host to open buzzer ──
     if (previewInfo) {
       return (
-        <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center"
+          style={{ animation: 'screen-reveal 0.4s ease-out forwards' }}>
           {scoreChip}
           <p className="text-blue-400 text-xs uppercase tracking-widest mb-6">Category</p>
           <p className="font-black text-white leading-tight mb-3"
@@ -1013,6 +1021,29 @@ export default function PlayView() {
                   const q = cat.questions.find(q => q.point_value === pv)
                   if (!q) return <div key={`${cat.id}-${pv}`} className="h-12 rounded bg-gray-900/20" />
                   const answered = q.is_answered
+                  const isFlipping = flippingId === q.id
+                  if (isFlipping) {
+                    return (
+                      <div key={q.id} style={{ perspective: '600px' }} className="h-20 rounded overflow-hidden">
+                        <div className="relative h-full w-full"
+                          style={{ transformStyle: 'preserve-3d', animation: 'card-flip 0.6s ease-in-out forwards' }}>
+                          {/* Front — dollar amount */}
+                          <div className="absolute inset-0 rounded bg-blue-800 flex items-center justify-center font-mono font-black text-yellow-400"
+                            style={{ backfaceVisibility: 'hidden', fontSize: 'clamp(1rem, 4vw, 1.4rem)' }}>
+                            ${pv}
+                          </div>
+                          {/* Back — category reveal */}
+                          <div className="absolute inset-0 rounded bg-blue-950 flex items-center justify-center p-1 text-center"
+                            style={{ backfaceVisibility: 'hidden', transform: 'rotateY(180deg)' }}>
+                            <p className="font-black uppercase text-white leading-tight"
+                              style={{ fontSize: 'clamp(0.55rem, 2.5vw, 0.75rem)' }}>
+                              {cat.name}
+                            </p>
+                          </div>
+                        </div>
+                      </div>
+                    )
+                  }
                   return (
                     <button
                       key={q.id}
