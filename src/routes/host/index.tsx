@@ -90,20 +90,21 @@ export default function HostView() {
       .channel(`host-lobby-${roomId}`)
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'teams', filter: `room_id=eq.${roomId}` },
-        () => fetchTeams(roomId))
+        () => { console.log('[RT] postgres team change fired'); fetchTeams(roomId) })
       .on('postgres_changes',
         { event: 'DELETE', schema: 'public', table: 'players' },
         () => fetchTeams(roomId))
       .subscribe(status => {
+        console.log('[RT] postgres channel status:', status)
         if (status === 'SUBSCRIBED') fetchTeams(roomId)
       })
 
     // Broadcast path — player sends team_joined after joining
     const bcCh = supabase
       .channel(`room:${roomId}`)
-      .on('broadcast', { event: 'team_joined' }, () => fetchTeams(roomId))
+      .on('broadcast', { event: 'team_joined' }, () => { console.log('[RT] team_joined broadcast received'); fetchTeams(roomId) })
       .on('broadcast', { event: 'player_left' }, () => fetchTeams(roomId))
-      .subscribe()
+      .subscribe(status => console.log('[RT] broadcast channel status:', status))
 
     lobbyBroadcastRef.current = bcCh
 
