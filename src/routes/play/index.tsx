@@ -579,7 +579,8 @@ export default function PlayView() {
   }
 
   function handleSelectQuestion(questionId: string) {
-    if (!room || myTeam?.id !== currentTurnTeamId) return
+    // Allow selection when no turn is assigned (Realtime down) or it's explicitly this team's turn
+    if (!room || (currentTurnTeamId !== null && myTeam?.id !== currentTurnTeamId)) return
     const cat = boardCategories.find(c => c.questions.some(q => q.id === questionId))
     const q   = cat?.questions.find(q => q.id === questionId)
     const preview: PreviewInfo = {
@@ -972,7 +973,7 @@ export default function PlayView() {
       )
     }
 
-    const isMyTurnNow  = myTeam?.id === currentTurnTeamId
+    const isMyTurnNow  = currentTurnTeamId === null || myTeam?.id === currentTurnTeamId
     const turnTeamName = currentTurnTeamId ? teamNames.get(currentTurnTeamId) : null
     const pointValues  = [...new Set(
       boardCategories.flatMap(c => c.questions.map(q => q.point_value ?? 0)).filter(Boolean)

@@ -169,7 +169,8 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         { event: '*', schema: 'public', table: 'buzzes', filter: `question_id=eq.${qId}` },
         () => fetchBuzzes(qId))
       .subscribe()
-    return () => { supabase.removeChannel(ch) }
+    const poll = setInterval(() => fetchBuzzes(qId), 2000)
+    return () => { supabase.removeChannel(ch); clearInterval(poll) }
   }, [room.current_question_id, fetchBuzzes])
 
   // FJ wager subscription — keep fjWagers in sync through review so late auto-submits arrive
