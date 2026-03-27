@@ -161,7 +161,7 @@ export default function PlayView() {
     return () => clearInterval(id)
   }, [phase])
 
-  // Subscribe to room updates (once room is known)
+  // Subscribe to room updates (once room is known) + polling fallback
   useEffect(() => {
     if (!room?.id) return
     const roomId = room.id
@@ -175,7 +175,12 @@ export default function PlayView() {
           if (data) setRoom(data)
         }
       })
-    return () => { supabase.removeChannel(ch) }
+    // Polling fallback so room status changes (game start, etc.) work when Realtime is down
+    const poll = setInterval(async () => {
+      const { data } = await supabase.from('rooms').select().eq('id', roomId).single()
+      if (data) setRoom(data)
+    }, 3000)
+    return () => { supabase.removeChannel(ch); clearInterval(poll) }
   }, [room?.id])
 
   // Kick: if room becomes 'finished' while player is in a pre-game phase, send them back
