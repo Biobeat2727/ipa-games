@@ -1246,7 +1246,7 @@ export default function PlayView() {
                   if (!q) return <div key={`${cat.id}-${pv}`} className="h-20 rounded bg-gray-900/20" />
                   const answered   = q.is_answered
                   const isFlipping = flippingId === q.id
-                  const isDouble   = q.is_double_tap && !answered
+                  const _isDouble  = q.is_double_tap && !answered
 
                   if (isFlipping) {
                     return (
