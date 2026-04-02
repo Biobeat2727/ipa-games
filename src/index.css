@@ -5,3 +5,45 @@
   100% { transform: rotateY(180deg); }
 }
 
+@keyframes buzz-ripple {
+  0%   { transform: scale(0); opacity: 0.55; }
+  100% { transform: scale(5); opacity: 0; }
+}
+
+@keyframes score-pulse {
+  0%   { transform: scale(1); }
+  40%  { transform: scale(1.18); }
+  100% { transform: scale(1); }
+}
+
+@keyframes float-up {
+  0%   { opacity: 1;   transform: translateY(0); }
+  100% { opacity: 0;   transform: translateY(-48px); }
+}
+
+@keyframes double-tap-in {
+  0%   { transform: scale(0.5) rotate(-6deg); opacity: 0; }
+  60%  { transform: scale(1.12) rotate(2deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0deg); opacity: 1; }
+}
+
+@keyframes round-splash-in {
+  0%   { transform: scale(0.7); opacity: 0; }
+  60%  { transform: scale(1.08); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+.score-chip-pulse {
+  animation: score-pulse 0.5s ease-out;
+}
+
+/* Play route — landscape orientation warning (shown only on narrow landscape, i.e. phones rotated) */
+.play-landscape-warning {
+  display: none !important;
+}
+
+@media (orientation: landscape) and (max-height: 480px) and (pointer: coarse) {
+  .play-landscape-warning {
+    display: flex !important;
+  }
+}

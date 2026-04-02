@@ -7,6 +7,16 @@ import {
   setTeamId,
 } from '../../lib/session'
 import type { Buzz, Player, QuestionPublic, Room, Team } from '../../lib/types'
+import AnimatedScore from '../../components/AnimatedScore'
+import Confetti from '../../components/Confetti'
+import ScoreOverlay from '../../components/ScoreOverlay'
+import { QUIPS } from '../../lib/quips'
+import {
+  playBuzz,
+  playCorrect,
+  playWrong,
+  playDoubleTap,
+} from '../../lib/sounds'
 
 type Phase = 'checking' | 'no_lobby' | 'join_lobby' | 'select_team' | 'lobby' | 'game'
 
@@ -25,7 +35,37 @@ interface PreviewInfo {
   categoryName: string
   pointValue: number | null
   startTs: number
+  doubleTapWager?: number
 }
+
+// ── Quip cycler component ─────────────────────────────────────
+
+function QuipCycler() {
+  const [idx, setIdx] = useState(() => Math.floor(Math.random() * QUIPS.length))
+  const [visible, setVisible] = useState(true)
+
+  useEffect(() => {
+    const id = setInterval(() => {
+      setVisible(false)
+      setTimeout(() => {
+        setIdx(prev => (prev + 1) % QUIPS.length)
+        setVisible(true)
+      }, 400)
+    }, 4500)
+    return () => clearInterval(id)
+  }, [])
+
+  return (
+    <p
+      className="text-gray-600 text-xs mt-6 max-w-xs text-center px-4 leading-relaxed"
+      style={{ opacity: visible ? 1 : 0, transition: 'opacity 0.4s ease' }}
+    >
+      {QUIPS[idx]}
+    </p>
+  )
+}
+
+// ── Main component ────────────────────────────────────────────
 
 export default function PlayView() {
   const [phase, setPhase]             = useState<Phase>('checking')
@@ -53,10 +93,24 @@ export default function PlayView() {
   const [responseSubmitted, setResponseSubmitted] = useState(false)
   const [buzzResult, setBuzzResult]           = useState<'correct' | 'wrong' | null>(null)
   const [myScore, setMyScore]                 = useState(0)
+  const [allTeamScores, setAllTeamScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
   const [boardCategories, setBoardCategories] = useState<BoardCategory[]>([])
   const [teamNames, setTeamNames]             = useState<Map<string, string>>(new Map())
   const [previewInfo, setPreviewInfo]         = useState<PreviewInfo | null>(null)
+
+  // UI state
+  const [showScoreOverlay, setShowScoreOverlay] = useState(false)
+  const [scoreChipPulse, setScoreChipPulse]     = useState(false)
+  const [showConfetti, setShowConfetti]           = useState(false)
+  const [ripples, setRipples]                     = useState<Array<{ id: number; x: number; y: number }>>([])
+
+  // Double Tap state
+  const [doubleTapStep, setDoubleTapStep]       = useState<'reveal' | 'wager' | null>(null)
+  const [doubleTapPendingQ, setDoubleTapPendingQ] = useState<{
+    questionId: string; rect: DOMRect
+  } | null>(null)
+  const [doubleTapWagerInput, setDoubleTapWagerInput] = useState('')
 
   // Final Jeopardy state
   type FjSubPhase = 'incoming' | 'wager' | 'wager_locked' | 'question' | 'reviewing' | 'done' | null
@@ -75,7 +129,7 @@ export default function PlayView() {
   useEffect(() => { fjResponseRef.current = fjResponse }, [fjResponse])
   useEffect(() => { fjWagerIdRef.current = fjWagerId }, [fjWagerId])
 
-  // Refs to avoid stale closures in async/broadcast callbacks
+  // Refs to avoid stale closures
   const responseSubmittedRef = useRef(false)
   const myBuzzIdRef          = useRef<string | null>(null)
   const myTeamRef            = useRef<Team | null>(null)
@@ -84,12 +138,35 @@ export default function PlayView() {
   const lobbyChannelRef        = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const teamChannelRef         = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const currentTurnTeamIdRef   = useRef<string | null>(null)
+  const prevScoreRef           = useRef(0)
 
   useEffect(() => { responseSubmittedRef.current = responseSubmitted }, [responseSubmitted])
   useEffect(() => { myBuzzIdRef.current = myBuzzId }, [myBuzzId])
   useEffect(() => { myTeamRef.current = myTeam }, [myTeam])
   useEffect(() => { roomRef.current = room }, [room])
   useEffect(() => { currentTurnTeamIdRef.current = currentTurnTeamId }, [currentTurnTeamId])
+
+
+  // Score chip pulse on score change
+  useEffect(() => {
+    if (myScore === prevScoreRef.current) return
+    prevScoreRef.current = myScore
+    setScoreChipPulse(true)
+    const id = setTimeout(() => setScoreChipPulse(false), 600)
+    return () => clearTimeout(id)
+  }, [myScore])
+
+  // Sound + haptics + confetti on buzz result
+  useEffect(() => {
+    if (buzzResult === 'correct') {
+      playCorrect()
+      navigator.vibrate?.([100, 50, 200])
+      setShowConfetti(true)
+    } else if (buzzResult === 'wrong') {
+      playWrong()
+      navigator.vibrate?.(200)
+    }
+  }, [buzzResult])
 
   const loadBoard = useCallback(async (roomId: string, round: number) => {
     const { data: cats } = await supabase
@@ -109,6 +186,12 @@ export default function PlayView() {
     const { data } = await supabase
       .from('players').select().eq('team_id', teamId).order('created_at', { ascending: true })
     setTeammates(data ?? [])
+  }, [])
+
+  // Load all team scores for overlay
+  const refreshAllScores = useCallback(async (roomId: string) => {
+    const { data } = await supabase.from('teams').select('id, name, score').eq('room_id', roomId)
+    if (data) setAllTeamScores(data)
   }, [])
 
   // On mount: resume saved session or auto-resolve the single active room
@@ -137,13 +220,18 @@ export default function PlayView() {
       setRoom(roomData)
       setMyTeam(teamData)
       setMyScore(teamData.score)
+      // Hydrate turn from DB on resume
+      if (roomData.current_turn_team_id !== undefined) {
+        setCurrentTurnTeamId(roomData.current_turn_team_id ?? null)
+      }
       await fetchTeammates(teamId)
+      await refreshAllScores(roomData.id)
       setPhase(roomData.status === 'lobby' ? 'lobby' : 'game')
     }
 
     if (savedTeamId) resume(savedTeamId)
     else autoResolve()
-  }, [fetchTeammates])
+  }, [fetchTeammates, refreshAllScores])
 
   // Poll for an active room while in 'no_lobby' phase (every 3 seconds)
   useEffect(() => {
@@ -178,13 +266,20 @@ export default function PlayView() {
           if (data) setRoom(data)
         }
       })
-    // Polling fallback so room status changes (game start, etc.) work when Realtime is down
+    // Polling fallback
     const poll = setInterval(async () => {
       const { data } = await supabase.from('rooms').select().eq('id', roomId).single()
       if (data) setRoom(data)
     }, 3000)
     return () => { supabase.removeChannel(ch); clearInterval(poll) }
   }, [room?.id])
+
+  // Hydrate currentTurnTeamId from room.current_turn_team_id (polling fallback for turn persistence)
+  useEffect(() => {
+    if (phase === 'game' && room?.current_turn_team_id !== undefined) {
+      setCurrentTurnTeamId(room.current_turn_team_id ?? null)
+    }
+  }, [room?.current_turn_team_id, phase])
 
   // Kick: if room becomes 'finished' while player is in a pre-game phase, send them back
   useEffect(() => {
@@ -217,6 +312,7 @@ export default function PlayView() {
     if (room.status !== 'lobby' && phase === 'lobby') setPhase('game')
 
     if (room.current_question_id) {
+      let cancelled = false
       async function loadQuestion() {
         const qId = room!.current_question_id!
 
@@ -232,6 +328,7 @@ export default function PlayView() {
           supabase.from('questions_public').select().eq('id', qId).single(),
           supabase.from('buzzes').select().eq('question_id', qId).eq('team_id', myTeam!.id).maybeSingle(),
         ])
+        if (cancelled) return
         setActiveQuestion(question ?? null)
         if (existingBuzz) {
           setHasBuzzed(true)
@@ -240,6 +337,7 @@ export default function PlayView() {
         }
       }
       loadQuestion()
+      return () => { cancelled = true }
     } else {
       // Question cleared — reset question state; keep buzzResult so feedback stays visible
       setActiveQuestion(null)
@@ -267,6 +365,12 @@ export default function PlayView() {
       })
       .on('broadcast', { event: 'question_deactivated' }, () => {
         setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
+        setActiveQuestion(null)
+        setHasBuzzed(false)
+        setMyBuzzId(null)
+        setTimerPayload(null)
+        setResponseSubmitted(false)
+        setPreviewInfo(null)
         // Reload board so answered questions are greyed out immediately
         const r = roomRef.current
         if (r) loadBoard(r.id, r.status === 'round_2' ? 2 : 1)
@@ -276,11 +380,20 @@ export default function PlayView() {
       })
       .on('broadcast', { event: 'score_update' }, ({ payload }) => {
         const data = payload as {
-          teams: Array<{ id: string; score: number }>
+          teams: Array<{ id: string; name: string; score: number }>
           answered_question_id?: string
+          winning_team_id?: string
+          wrong_buzz_id?: string
         }
         const mine = data.teams.find(t => t.id === myTeamRef.current?.id)
         if (mine) setMyScore(mine.score)
+        setAllTeamScores(data.teams)
+        // Set buzz feedback via broadcast (reliable) — fires before question_deactivated clears myBuzzId
+        if (data.winning_team_id && data.winning_team_id === myTeamRef.current?.id) {
+          setBuzzResult('correct')
+        } else if (data.wrong_buzz_id && data.wrong_buzz_id === myBuzzIdRef.current) {
+          setBuzzResult('wrong')
+        }
         // Grey out the answered question immediately without waiting for a board reload
         if (data.answered_question_id) {
           setBoardCategories(prev => prev.map(cat => ({
@@ -303,7 +416,7 @@ export default function PlayView() {
         if (!r) return
         setRoom({ ...r, status: status as Room['status'] })
         if (status === 'round_1' || status === 'round_2') {
-          // New round — wipe all mid-game state so no stale preview or question bleeds in
+          // New round — wipe all mid-game state
           setPreviewInfo(null)
           setActiveQuestion(null)
           setCurrentTurnTeamId(null)
@@ -377,8 +490,11 @@ export default function PlayView() {
     if (phase !== 'game' || !room?.id) return
     const round = room.status === 'round_2' ? 2 : 1
     loadBoard(room.id, round)
-    supabase.from('teams').select('id, name').eq('room_id', room.id).then(({ data }) => {
-      if (data) setTeamNames(new Map(data.map(t => [t.id, t.name])))
+    supabase.from('teams').select('id, name, score').eq('room_id', room.id).then(({ data }) => {
+      if (data) {
+        setTeamNames(new Map(data.map(t => [t.id, t.name])))
+        setAllTeamScores(data)
+      }
     })
   }, [phase, room?.id, room?.status, loadBoard])
 
@@ -387,7 +503,6 @@ export default function PlayView() {
     if (room?.status !== 'final_jeopardy' || fjSubPhase !== null) return
     const myId = myTeam?.id
     if (!myId) return
-    // Fetch latest team record to check is_active
     supabase.from('teams').select().eq('id', myId).single().then(({ data: t }) => {
       if (!t) return
       setMyTeam(t)
@@ -395,7 +510,7 @@ export default function PlayView() {
     })
   }, [room?.status, fjSubPhase, myTeam?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Auto-clear correct/wrong feedback after 2.5 s so the board becomes visible
+  // Auto-clear correct/wrong feedback after 2.5 s
   useEffect(() => {
     if (!buzzResult) return
     const id = setTimeout(() => setBuzzResult(null), 2500)
@@ -413,7 +528,6 @@ export default function PlayView() {
       setTimeRemaining(remaining)
 
       if (remaining === 0) {
-        // If it's our turn and we haven't submitted, mark expired
         if (timerPayload.team_id === myTeamRef.current?.id && !responseSubmittedRef.current) {
           const buzzId = myBuzzIdRef.current
           if (buzzId) supabase.from('buzzes').update({ status: 'expired' }).eq('id', buzzId).then(() => {})
@@ -468,7 +582,6 @@ export default function PlayView() {
       setTeams(data ?? [])
     }
 
-    // postgres_changes covers new teams created; broadcast covers instant join events
     const pgCh = supabase
       .channel(`play-teams-${roomId}`)
       .on('postgres_changes',
@@ -510,6 +623,13 @@ export default function PlayView() {
     return () => { supabase.removeChannel(ch); teamChannelRef.current = null }
   }, [phase, myTeam, fetchTeammates])
 
+  // Trigger overlay expansion after previewInfo is painted
+  useEffect(() => {
+    if (!previewInfo) { setOverlayExpanding(false); return }
+    const id = requestAnimationFrame(() => requestAnimationFrame(() => setOverlayExpanding(true)))
+    return () => cancelAnimationFrame(id)
+  }, [previewInfo])
+
   // ── Actions ───────────────────────────────────────────────
 
   async function handleJoinLobby() {
@@ -521,9 +641,7 @@ export default function PlayView() {
   }
 
   async function handleLeave() {
-    const { error: delErr, count } = await supabase
-      .from('players').delete({ count: 'exact' }).eq('session_id', getSessionId())
-    console.log('[handleLeave] delete result — error:', delErr, 'rows deleted:', count)
+    await supabase.from('players').delete({ count: 'exact' }).eq('session_id', getSessionId())
     clearPlayerSession()
     setMyTeam(null); setTeammates([])
     setActiveQuestion(null); setHasBuzzed(false)
@@ -544,11 +662,9 @@ export default function PlayView() {
 
     setTeamId(team.id); setMyTeam(team); setMyScore(team.score)
     await fetchTeammates(team.id)
+    if (room?.id) await refreshAllScores(room.id)
 
-    // Notify all clients immediately — use the already-subscribed channel so the
-    // send goes out instantly without waiting for a new subscription handshake.
     lobbyChannelRef.current?.send({ type: 'broadcast', event: 'team_joined', payload: {} })
-
     setPhase('lobby')
   }
 
@@ -572,6 +688,18 @@ export default function PlayView() {
     if (buzz && !err) { setMyBuzzId(buzz.id); setHasBuzzed(true) }
   }
 
+  function handleBuzzClick(e: React.MouseEvent<HTMLButtonElement>) {
+    const rect = e.currentTarget.getBoundingClientRect()
+    const x = e.clientX - rect.left
+    const y = e.clientY - rect.top
+    const id = Date.now()
+    setRipples(prev => [...prev, { id, x, y }])
+    setTimeout(() => setRipples(prev => prev.filter(r => r.id !== id)), 900)
+    playBuzz()
+    navigator.vibrate?.(100)
+    handleBuzz()
+  }
+
   async function handleSubmitResponse() {
     if (!myBuzzId || !responseText.trim()) return
     await supabase.from('buzzes').update({
@@ -581,16 +709,27 @@ export default function PlayView() {
     setResponseSubmitted(true)
   }
 
-  // Trigger overlay expansion after previewInfo is painted
-  useEffect(() => {
-    if (!previewInfo) { setOverlayExpanding(false); return }
-    const id = requestAnimationFrame(() => requestAnimationFrame(() => setOverlayExpanding(true)))
-    return () => cancelAnimationFrame(id)
-  }, [previewInfo])
-
   function handleSelectQuestion(questionId: string, el: HTMLElement) {
-    // Allow selection when no turn is assigned (Realtime down) or it's explicitly this team's turn
     if (!room || (currentTurnTeamId !== null && myTeam?.id !== currentTurnTeamId)) return
+    const cat = boardCategories.find(c => c.questions.some(q => q.id === questionId))
+    const q   = cat?.questions.find(q => q.id === questionId)
+
+    if (q?.is_double_tap) {
+      // Double Tap! flow
+      const rect = el.getBoundingClientRect()
+      setDoubleTapPendingQ({ questionId, rect })
+      setDoubleTapWagerInput('')
+      setDoubleTapStep('reveal')
+      playDoubleTap()
+      navigator.vibrate?.(200)
+      setTimeout(() => setDoubleTapStep('wager'), 2000)
+      return
+    }
+
+    _fireQuestionSelect(questionId, el, null)
+  }
+
+  function _fireQuestionSelect(questionId: string, elOrRect: HTMLElement | DOMRect, wager: number | null) {
     const cat = boardCategories.find(c => c.questions.some(q => q.id === questionId))
     const q   = cat?.questions.find(q => q.id === questionId)
     const preview: PreviewInfo = {
@@ -598,19 +737,32 @@ export default function PlayView() {
       categoryName: cat?.name ?? '',
       pointValue:   q?.point_value ?? null,
       startTs:      Date.now(),
+      ...(wager !== null ? { doubleTapWager: wager } : {}),
     }
-    // Capture tile screen position for the expand-from-tile animation
-    setTileRect(el.getBoundingClientRect())
-    // Broadcast immediately so host gets it without delay
+    const rect = elOrRect instanceof HTMLElement ? elOrRect.getBoundingClientRect() : elOrRect
+    setTileRect(rect)
     broadcastRef.current?.send({
       type: 'broadcast',
       event: 'question_preview',
       payload: preview,
     })
-    // Flip the tile, then show overlay
     setFlippingId(questionId)
     setTimeout(() => setPreviewInfo(preview), 600)
     setTimeout(() => setFlippingId(null), 650)
+  }
+
+  function handleConfirmDoubleTapWager() {
+    if (!doubleTapPendingQ) return
+    const roundFloor = room?.status === 'round_2' ? 2000 : 500
+    const max    = Math.max(myScore, roundFloor)
+    const parsed = parseInt(doubleTapWagerInput)
+    const wager  = Math.max(5, Math.min(max, isNaN(parsed) ? 5 : parsed))
+    const { questionId, rect } = doubleTapPendingQ
+    setDoubleTapStep(null)
+    setDoubleTapPendingQ(null)
+    // Brief board flash, then overlay opens
+    setTileRect(rect)
+    _fireQuestionSelect(questionId, rect, wager)
   }
 
   async function handleSubmitWager() {
@@ -637,6 +789,28 @@ export default function PlayView() {
     setFjResponseSubmitted(true)
   }
 
+  // ── Derived ───────────────────────────────────────────────
+
+  const isMyTurnNow  = myTeam?.id === currentTurnTeamId
+  const turnTeamName = currentTurnTeamId ? teamNames.get(currentTurnTeamId) : null
+
+  // ── Score chip ────────────────────────────────────────────
+
+  const scoreChip = (
+    <button
+      onClick={() => setShowScoreOverlay(true)}
+      className={`absolute top-4 right-4 bg-gray-900 border border-gray-800 rounded-2xl px-3 py-2 text-right z-10 ${scoreChipPulse ? 'score-chip-pulse' : ''}`}
+    >
+      {myTeam && (
+        <p className="text-gray-500 text-xs leading-tight truncate max-w-[6rem]">{myTeam.name}</p>
+      )}
+      <p className="text-yellow-400 font-mono font-black text-sm tabular-nums leading-tight">
+        <AnimatedScore value={myScore} /> pts
+      </p>
+      <p className="text-gray-700 text-xs leading-tight">all scores ›</p>
+    </button>
+  )
+
   // ── Screens ───────────────────────────────────────────────
 
   if (phase === 'checking') {
@@ -653,6 +827,7 @@ export default function PlayView() {
         <h1 className="text-5xl font-black mb-4 text-yellow-400 tracking-tight">Tapped In!</h1>
         <p className="text-gray-400 animate-pulse">Waiting for host to open a lobby…</p>
         <p className="text-gray-600 text-sm mt-2">This page will update automatically.</p>
+        <QuipCycler />
       </div>
     )
   }
@@ -759,23 +934,29 @@ export default function PlayView() {
         <button onClick={handleLeave} className="mt-8 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors">
           Leave Team
         </button>
+        <QuipCycler />
       </div>
     )
   }
 
   // ── Game phase ────────────────────────────────────────────
 
-  const scoreChip = (
-    <div className="absolute top-4 right-4 bg-gray-900 border border-gray-800 rounded-full px-4 py-1.5 text-sm font-mono font-bold text-yellow-400">
-      {myScore} pts
-    </div>
-  )
+  // Score overlay
+  const scoreOverlayEl = showScoreOverlay ? (
+    <ScoreOverlay
+      teams={allTeamScores.length > 0 ? allTeamScores : (myTeam ? [{ id: myTeam.id, name: myTeam.name, score: myScore }] : [])}
+      myTeamId={myTeam?.id}
+      onClose={() => setShowScoreOverlay(false)}
+    />
+  ) : null
 
   // ── Final Jeopardy screens ────────────────────────────────
 
   if (fjSubPhase === 'incoming') {
     return (
       <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
+        {scoreChip}
         <p className="text-6xl mb-6">🍺</p>
         <p className="text-blue-400 text-xs uppercase tracking-widest mb-3">Final Tap</p>
         <p className="text-3xl font-black text-white mb-4">Starting Soon!</p>
@@ -793,6 +974,7 @@ export default function PlayView() {
           <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '150ms' }} />
           <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '300ms' }} />
         </div>
+        <QuipCycler />
       </div>
     )
   }
@@ -803,6 +985,8 @@ export default function PlayView() {
     const valid    = fjWagerInput !== '' && wagerVal >= 0
     return (
       <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
+        {scoreChip}
         <p className="text-blue-400 text-xs uppercase tracking-widest mb-2">Final Jeopardy</p>
         <p className="text-3xl font-black text-white mb-1">{fjCategoryName}</p>
         <p className="text-gray-400 text-sm mb-8">Enter your wager (max: {maxWager} pts)</p>
@@ -835,10 +1019,13 @@ export default function PlayView() {
   if (fjSubPhase === 'wager_locked') {
     return (
       <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
+        {scoreChip}
         <div className="w-3 h-3 rounded-full bg-green-400 mb-6 animate-pulse" />
         <p className="text-2xl font-black text-white mb-2">Wager locked in</p>
         <p className="text-gray-400 text-sm">Waiting for other teams…</p>
         <p className="text-blue-400 text-xs uppercase tracking-widest mt-10">{fjCategoryName}</p>
+        <QuipCycler />
       </div>
     )
   }
@@ -850,6 +1037,7 @@ export default function PlayView() {
     const low       = remaining <= 15
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+        {scoreOverlayEl}
         {/* Timer bar */}
         <div className="h-2 bg-gray-900 w-full shrink-0">
           <div
@@ -903,9 +1091,12 @@ export default function PlayView() {
   if (fjSubPhase === 'reviewing') {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
+        {scoreChip}
         <div className="w-3 h-3 rounded-full bg-gray-600 mb-6 animate-pulse" />
         <p className="text-2xl font-black text-white mb-2">Time's up!</p>
         <p className="text-gray-500 text-sm">The host is reviewing answers…</p>
+        <QuipCycler />
       </div>
     )
   }
@@ -915,6 +1106,7 @@ export default function PlayView() {
     const myEntry = fjFinalScores.find(t => t.id === myTeam?.id)
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
         <p className="text-gray-500 text-xs uppercase tracking-widest mb-2">Game Over</p>
         <p className="text-4xl font-black text-yellow-400 mb-8">{winner?.name ?? '?'} wins!</p>
         {fjFinalScores.length > 0 && (
@@ -943,6 +1135,8 @@ export default function PlayView() {
   if (buzzResult === 'correct') {
     return (
       <div className="relative min-h-screen bg-green-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
+        <Confetti active={showConfetti} onDone={() => setShowConfetti(false)} />
         {scoreChip}
         <div className="text-8xl mb-6 leading-none">✓</div>
         <p className="text-5xl font-black text-green-400 mb-3">Correct!</p>
@@ -956,6 +1150,7 @@ export default function PlayView() {
   if (buzzResult === 'wrong') {
     return (
       <div className="relative min-h-screen bg-red-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
         {scoreChip}
         <div className="text-8xl mb-6 leading-none">✗</div>
         <p className="text-5xl font-black text-red-400 mb-3">Wrong!</p>
@@ -967,15 +1162,66 @@ export default function PlayView() {
     )
   }
 
-  // No active question — show board, with preview overlay when a question has been picked
+  // ── Double Tap reveal screens ─────────────────────────────
+
+  if (doubleTapStep === 'reveal') {
+    return (
+      <div className="min-h-screen bg-amber-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
+          <p className="text-8xl mb-4">🍺</p>
+          <p className="text-5xl font-black text-amber-400 leading-none mb-2">DOUBLE TAP!</p>
+          <p className="text-amber-200 text-xl font-semibold">Get ready to wager!</p>
+        </div>
+      </div>
+    )
+  }
+
+  if (doubleTapStep === 'wager' && doubleTapPendingQ) {
+    const roundFloor = room?.status === 'round_2' ? 2000 : 500
+    const maxWager = Math.max(myScore, roundFloor)
+    const parsed   = parseInt(doubleTapWagerInput)
+    const wagerVal = isNaN(parsed) ? 5 : Math.max(5, Math.min(maxWager, parsed))
+    const valid    = doubleTapWagerInput !== '' && !isNaN(parsed) && parsed >= 5 && parsed <= maxWager
+    return (
+      <div className="min-h-screen bg-amber-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreChip}
+        <p className="text-5xl mb-4">🍺</p>
+        <p className="text-3xl font-black text-amber-400 mb-1">DOUBLE TAP!</p>
+        <p className="text-gray-400 text-sm mb-8">Min: $5 — Max: ${maxWager.toLocaleString()}</p>
+        <div className="w-full max-w-xs space-y-4">
+          <input
+            type="number"
+            inputMode="numeric"
+            autoFocus
+            min={5}
+            max={maxWager}
+            placeholder="5"
+            value={doubleTapWagerInput}
+            onChange={e => setDoubleTapWagerInput(e.target.value)}
+            className="w-full bg-gray-800 text-white text-center text-5xl font-mono font-black rounded-2xl px-4 py-5 outline-none focus:ring-2 focus:ring-amber-400"
+          />
+          <button
+            onClick={handleConfirmDoubleTapWager}
+            disabled={!valid}
+            className="w-full py-4 rounded-2xl text-lg font-black bg-amber-400 text-gray-950 disabled:opacity-30"
+          >
+            Lock In: {wagerVal} pts
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // ── No active question — show board ───────────────────────
+
   if (!activeQuestion) {
-    const isMyTurnNow  = currentTurnTeamId === null || myTeam?.id === currentTurnTeamId
-    const turnTeamName = currentTurnTeamId ? teamNames.get(currentTurnTeamId) : null
-    const pointValues  = [...new Set(
+    const pointValues = [...new Set(
       boardCategories.flatMap(c => c.questions.map(q => q.point_value ?? 0)).filter(Boolean)
     )].sort((a, b) => a - b)
+
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+        {scoreOverlayEl}
         {scoreChip}
 
         <div className="pt-16 pb-3 px-4 text-center shrink-0">
@@ -1007,16 +1253,17 @@ export default function PlayView() {
               {pointValues.flatMap(pv =>
                 boardCategories.map(cat => {
                   const q = cat.questions.find(q => q.point_value === pv)
-                  if (!q) return <div key={`${cat.id}-${pv}`} className="h-12 rounded bg-gray-900/20" />
-                  const answered = q.is_answered
+                  if (!q) return <div key={`${cat.id}-${pv}`} className="h-20 rounded bg-gray-900/20" />
+                  const answered   = q.is_answered
                   const isFlipping = flippingId === q.id
+                  const isDouble   = q.is_double_tap && !answered
+
                   if (isFlipping) {
                     return (
                       <div key={q.id} className="h-20 rounded"
                         style={{ perspective: '600px', filter: 'drop-shadow(0 6px 20px rgba(0,0,0,0.7))' }}>
                         <div className="relative h-full w-full"
                           style={{ transformStyle: 'preserve-3d', animation: 'card-flip 0.6s ease-in-out forwards' }}>
-                          {/* Front — dollar amount */}
                           <div className="absolute inset-0 rounded flex items-center justify-center font-mono font-black text-yellow-400"
                             style={{
                               backfaceVisibility: 'hidden',
@@ -1026,7 +1273,6 @@ export default function PlayView() {
                             }}>
                             ${pv}
                           </div>
-                          {/* Back — category reveal */}
                           <div className="absolute inset-0 rounded flex items-center justify-center p-1 text-center"
                             style={{
                               backfaceVisibility: 'hidden',
@@ -1038,31 +1284,19 @@ export default function PlayView() {
                               {cat.name}
                             </p>
                           </div>
-                          {/* Card edges — give the tile visible thickness during flip */}
-                          <div style={{
-                            position: 'absolute', top: 0, left: '100%',
-                            width: '4px', height: '100%',
-                            background: '#0a153a',
-                            transform: 'rotateY(90deg)',
-                            transformOrigin: 'left center',
-                          }} />
-                          <div style={{
-                            position: 'absolute', top: 0, right: '100%',
-                            width: '4px', height: '100%',
-                            background: '#0a153a',
-                            transform: 'rotateY(-90deg)',
-                            transformOrigin: 'right center',
-                          }} />
+                          <div style={{ position: 'absolute', top: 0, left: '100%', width: '4px', height: '100%', background: '#0a153a', transform: 'rotateY(90deg)', transformOrigin: 'left center' }} />
+                          <div style={{ position: 'absolute', top: 0, right: '100%', width: '4px', height: '100%', background: '#0a153a', transform: 'rotateY(-90deg)', transformOrigin: 'right center' }} />
                         </div>
                       </div>
                     )
                   }
+
                   return (
                     <button
                       key={q.id}
                       onClick={(e) => isMyTurnNow && !answered && handleSelectQuestion(q.id, e.currentTarget)}
                       disabled={answered || !isMyTurnNow}
-                      className={`h-20 rounded font-mono font-black transition-colors ${
+                      className={`h-20 rounded font-mono font-black transition-colors relative overflow-hidden ${
                         answered
                           ? 'bg-gray-900/30 text-gray-800 cursor-default'
                           : isMyTurnNow
@@ -1089,10 +1323,10 @@ export default function PlayView() {
           Leave Team
         </button>
 
-        {/* Preview overlay — grows from tile position/size to fill screen */}
-        {previewInfo && tileRect && (
+        {/* Preview overlay */}
+        {previewInfo && (
           <div className="fixed inset-0 z-50 bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center"
-            style={(() => {
+            style={tileRect ? (() => {
               const vw = window.innerWidth, vh = window.innerHeight
               const scaleX = tileRect.width  / vw
               const scaleY = tileRect.height / vh
@@ -1106,41 +1340,48 @@ export default function PlayView() {
                   ? 'transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94), border-radius 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
                   : 'none',
                 transformOrigin: 'center center',
-                // Elliptical radius that appears as ~8px on the tile when scaled, transitions to sharp as it fills screen
                 borderRadius: overlayExpanding
                   ? '0px'
                   : `${(8 / scaleX).toFixed(1)}px / ${(8 / scaleY).toFixed(1)}px`,
                 overflow: 'hidden',
               }
-            })()}>
+            })() : undefined}>
             {scoreChip}
+            {previewInfo.doubleTapWager !== undefined && (
+              <div className="mb-4 px-4 py-2 bg-amber-500/20 border border-amber-500/40 rounded-xl">
+                <p className="text-amber-400 font-black text-sm">🍺 DOUBLE TAP! — {previewInfo.doubleTapWager} pts wagered</p>
+              </div>
+            )}
             <p className="text-blue-400 text-xs uppercase tracking-widest mb-6">Category</p>
             <p className="font-black text-white leading-tight mb-3"
               style={{ fontSize: 'clamp(1.75rem, 7vw, 3rem)' }}>
               {previewInfo.categoryName}
             </p>
-            {previewInfo.pointValue != null && (
+            {previewInfo.pointValue != null && !previewInfo.doubleTapWager && (
               <p className="text-yellow-400 font-mono font-black text-3xl mb-8">
                 ${previewInfo.pointValue}
               </p>
             )}
             <p className="text-gray-500 text-sm animate-pulse">Waiting for host…</p>
+            <QuipCycler />
           </div>
         )}
       </div>
     )
   }
 
-  // It's our turn to respond
-  const isMyTurn = timerPayload?.team_id === myTeam?.id
-  const dur = timerPayload?.duration_seconds ?? 30
+  // ── Active question ───────────────────────────────────────
+
+  const isMyTurn  = timerPayload?.team_id === myTeam?.id
+  const dur       = timerPayload?.duration_seconds ?? 30
   const remaining = timeRemaining ?? dur
-  const timerPct = (remaining / dur) * 100
-  const timerLow = remaining <= 10
+  const timerPct  = (remaining / dur) * 100
+  const timerLow  = remaining <= 10
 
   if (hasBuzzed && isMyTurn && !responseSubmitted) {
     return (
       <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-6">
+        {scoreOverlayEl}
         {scoreChip}
         <div className="max-w-sm mx-auto w-full flex flex-col flex-1 pt-8">
           <div className="flex items-center justify-between mb-2">
@@ -1150,7 +1391,6 @@ export default function PlayView() {
             </span>
           </div>
 
-          {/* Timer bar */}
           <div className="w-full h-2 bg-gray-800 rounded-full mb-6 overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-500 ${timerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
@@ -1188,6 +1428,7 @@ export default function PlayView() {
   if (hasBuzzed && responseSubmitted) {
     return (
       <div className="relative min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
         {scoreChip}
         <div className="w-3 h-3 rounded-full bg-yellow-400 mb-6 animate-pulse" />
         <p className="text-2xl font-black text-white mb-2">Response submitted</p>
@@ -1195,6 +1436,7 @@ export default function PlayView() {
         <div className="bg-gray-900 border border-gray-800 rounded-2xl px-6 py-4 max-w-xs">
           <p className="text-gray-300 italic">"{responseText}"</p>
         </div>
+        <QuipCycler />
       </div>
     )
   }
@@ -1203,6 +1445,7 @@ export default function PlayView() {
   if (hasBuzzed && timerPayload && !isMyTurn) {
     return (
       <div className="relative min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
         {scoreChip}
         <div className="w-3 h-3 rounded-full bg-gray-600 mb-6 animate-pulse" />
         <p className="text-2xl font-black text-white mb-1">Stand by</p>
@@ -1220,6 +1463,7 @@ export default function PlayView() {
   if (hasBuzzed) {
     return (
       <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-6">
+        {scoreOverlayEl}
         {scoreChip}
         <div className="max-w-sm mx-auto w-full pt-10">
           <div className="bg-gray-900 rounded-2xl p-5 mb-6">
@@ -1232,6 +1476,7 @@ export default function PlayView() {
             <p className="text-gray-500 text-sm">Waiting for your turn…</p>
           </div>
         </div>
+        <QuipCycler />
       </div>
     )
   }
@@ -1239,9 +1484,10 @@ export default function PlayView() {
   // Active question — BUZZ button
   return (
     <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-5">
+      {scoreOverlayEl}
       {scoreChip}
       <div className="max-w-sm mx-auto w-full flex flex-col" style={{ minHeight: 'calc(100vh - 2.5rem)' }}>
-        <div className="bg-gray-900 rounded-2xl p-5 mb-5">
+        <div className="bg-gray-900 rounded-2xl p-5 mb-5 pt-14">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The answer</p>
           <p className="text-2xl font-bold leading-snug">{activeQuestion.answer}</p>
           {activeQuestion.point_value && (
@@ -1249,14 +1495,27 @@ export default function PlayView() {
           )}
         </div>
         <button
-          onClick={handleBuzz}
+          onClick={handleBuzzClick}
           disabled={buzzing}
-          className="flex-1 w-full rounded-2xl font-black text-5xl tracking-wider
+          className="flex-1 w-full rounded-2xl font-black text-5xl tracking-wider relative overflow-hidden
                      bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:bg-red-900
                      text-white transition-colors
                      shadow-[0_0_60px_rgba(220,38,38,0.5)]
                      min-h-52"
         >
+          {ripples.map(r => (
+            <span
+              key={r.id}
+              className="absolute rounded-full bg-white pointer-events-none"
+              style={{
+                left: r.x - 24,
+                top: r.y - 24,
+                width: 48,
+                height: 48,
+                animation: 'buzz-ripple 0.9s ease-out forwards',
+              }}
+            />
+          ))}
           {buzzing ? '…' : 'BUZZ!'}
         </button>
       </div>

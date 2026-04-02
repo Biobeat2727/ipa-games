@@ -62,7 +62,7 @@ Supabase Realtime had a major outage (17+ incidents in March 2026). Polling fall
 - **Host lobby** (`host/index.tsx`): polls teams every 3s
 - **Player room status** (`play/index.tsx`): polls rooms + team score every 3s — covers game start, current_question_id (buzz button), score updates
 - **Host buzz queue** (`host/Game.tsx`): polls buzzes every 2s when question is active
-- **Player question selection**: allowed when `currentTurnTeamId === null` (turn broadcasts not received)
+- **Player question selection**: ~~allowed when `currentTurnTeamId === null`~~ — **removed**. Turn must be explicitly assigned. Board is locked until `turn_change` broadcast/DB arrives.
 
 **Supabase package pinned:** `"@supabase/supabase-js": "2.97.0"` (exact, no `^`) in package.json. Do not upgrade without testing Realtime first.
 
@@ -72,9 +72,29 @@ Supabase Realtime had a major outage (17+ incidents in March 2026). Polling fall
 - Board grid is fully dynamic: `repeat(${boardCategories.length}, 1fr)` — supports 3 or 4 categories
 - Tile height: `h-20` (80px), font: `clamp(1rem, 4vw, 1.4rem)` — sized for mobile with 4 categories
 - Category headers: `clamp(0.65rem, 3vw, 0.9rem)`
-- **Card flip animation** on question selection: tile flips 3D (600ms) → `clip-path` overlay expands from center to full screen (450ms) → preview screen. CSS keyframes: `card-flip` and `tile-expand` in `src/index.css`
+- **Card flip animation** on question selection: tile flips 3D (600ms) → overlay expands from tile position to full screen → preview screen
 - `flippingId` state tracks which tile is animating
-- Broadcast fires immediately on tap; `setPreviewInfo` fires at 600ms (after flip); overlay uses `position: fixed; z-index: 50` so board stays mounted beneath
+- Broadcast fires immediately on tap; `setPreviewInfo` fires at 600ms (after flip)
+- **Preview overlay** renders for ALL players when `previewInfo` is set. Tile-expand animation only on the selecting device (has `tileRect`); all others get instant fullscreen overlay.
+- `loadQuestion()` async call in the `room.current_question_id` useEffect has a `cancelled` flag — prevents stale DB response from re-setting `activeQuestion` after `question_deactivated` already cleared state
+
+## Host Emergency Controls (added Apr 2 2026)
+During active question (top-right of question card):
+- **Skip** — marks question `is_answered: true` in DB (greys cell everywhere), broadcasts answered state, deactivates. Use when time's up and no one gets it.
+- **Return to Board** — deactivates without marking answered. Question stays available to pick again.
+
+During preview countdown:
+- **Abort** — cancels preview, broadcasts `question_deactivated` so all clients reset.
+
+In buzz queue panel:
+- **Clear** — deletes all buzzes from DB and resets queue. Use when a DC'd player's ghost buzz is blocking the queue.
+
+## Vite / PWA Config (vite.config.ts)
+- `devOptions: { enabled: false }` — service worker disabled in dev. No more stale cached JS during development.
+- `workbox: { skipWaiting: true, clientsClaim: true }` — in production, new deployments activate immediately across all open tabs.
+- `server: { watch: { usePolling: true } }` — fixes HMR on Windows (file watcher misses changes without polling).
+- Landscape warning CSS uses `pointer: coarse` — only shows on touchscreen devices, never on desktop/laptop.
+- No JS orientation lock — removed entirely. CSS overlay is sufficient.
 
 ## Known Issues
 - Points not subtracting for wrong answers

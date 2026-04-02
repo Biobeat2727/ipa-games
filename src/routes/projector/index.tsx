@@ -1,6 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import type { Buzz, Question, Room, Team } from '../../lib/types'
+import AnimatedScore from '../../components/AnimatedScore'
+import { playRoundTransition } from '../../lib/sounds'
 
 interface TimerPayload {
   start_timestamp: number
@@ -49,6 +51,11 @@ export default function ProjectorView() {
   const [previewInfo, setPreviewInfo]             = useState<{
     questionId: string; categoryName: string; pointValue: number | null; startTs: number
   } | null>(null)
+
+  // Projector overlay states
+  const [roundSplash, setRoundSplash]           = useState<string | null>(null)
+  const [doubleTapSplash, setDoubleTapSplash]   = useState(false)
+  const [scoreDeltas, setScoreDeltas]           = useState<Array<{ id: string; teamId: string; delta: number }>>([])
 
   // Final Jeopardy state
   const [fjCategoryName, setFjCategoryName]   = useState('')
@@ -220,8 +227,16 @@ export default function ProjectorView() {
     if (!room?.id) return
     const ch = supabase.channel(`room:${room.id}`)
       .on('broadcast', { event: 'question_preview' }, ({ payload }) => {
-        const p = payload as { questionId: string; categoryName: string; pointValue: number | null; startTs: number }
-        setPreviewInfo(p)
+        const p = payload as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number }
+        if (p.doubleTapWager !== undefined) {
+          setDoubleTapSplash(true)
+          setTimeout(() => {
+            setDoubleTapSplash(false)
+            setPreviewInfo(p)
+          }, 2000)
+        } else {
+          setPreviewInfo(p)
+        }
       })
       .on('broadcast', { event: 'question_activated' }, ({ payload }) => {
         const { question_id } = payload as { question_id: string }
@@ -242,7 +257,25 @@ export default function ProjectorView() {
           current_question_id?: string | null
           answered_question_id?: string
         }
-        setScores(new Map(data.teams.map(t => [t.id, t.score])))
+        const newScoreMap = new Map(data.teams.map(t => [t.id, t.score]))
+        // Compute deltas for floating labels
+        const deltas: Array<{ id: string; teamId: string; delta: number }> = []
+        setScores(prev => {
+          data.teams.forEach(t => {
+            const old = prev.get(t.id)
+            if (old !== undefined && old !== t.score) {
+              deltas.push({ id: `${t.id}-${Date.now()}`, teamId: t.id, delta: t.score - old })
+            }
+          })
+          return newScoreMap
+        })
+        if (deltas.length > 0) {
+          setScoreDeltas(prev => [...prev, ...deltas])
+          setTimeout(() => {
+            const ids = new Set(deltas.map(d => d.id))
+            setScoreDeltas(prev => prev.filter(d => !ids.has(d.id)))
+          }, 1300)
+        }
         // Apply question state from the host payload — most reliable path since
         // score_update always arrives while postgres_changes can be missed.
         if ('current_question_id' in data) {
@@ -265,8 +298,13 @@ export default function ProjectorView() {
       })
       // Fired by the host when the game starts — transition from lobby to board
       .on('broadcast', { event: 'game_state_change' }, ({ payload }) => {
-        const { fj_category } = payload as { fj_category?: string }
+        const { status, fj_category } = payload as { status?: string; fj_category?: string }
         if (fj_category) setFjCategoryName(fj_category)
+        if (status === 'round_2') {
+          setRoundSplash('ROUND 2')
+          playRoundTransition()
+          setTimeout(() => setRoundSplash(null), 2500)
+        }
         resyncAll()
       })
       // Fired by players when they join — keeps lobby team list in sync
@@ -487,18 +525,31 @@ export default function ProjectorView() {
         )}
         {/* Score strip */}
         <div className="fixed bottom-0 left-0 right-0 bg-gray-900/90 border-t border-gray-800 py-3 px-10 flex justify-center gap-12">
-          {sortedTeams.map(team => (
-            <div key={team.id} className="text-center">
-              <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1.1rem)' }}>
-                {team.name}
-              </p>
-              <p className={`font-mono font-black tabular-nums ${
-                (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
-              }`} style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>
-                {scores.get(team.id) ?? team.score}
-              </p>
-            </div>
-          ))}
+          {sortedTeams.map(team => {
+            const delta = scoreDeltas.find(d => d.teamId === team.id)
+            return (
+              <div key={team.id} className="text-center relative">
+                <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1.1rem)' }}>
+                  {team.name}
+                </p>
+                <AnimatedScore
+                  value={scores.get(team.id) ?? team.score}
+                  className={`font-mono font-black tabular-nums ${
+                    (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
+                  }`}
+                  style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)', display: 'block' }}
+                />
+                {delta && (
+                  <span
+                    className={`absolute -top-5 left-1/2 -translate-x-1/2 font-black text-sm tabular-nums pointer-events-none ${delta.delta > 0 ? 'text-green-400' : 'text-red-400'}`}
+                    style={{ animation: 'float-up 1.2s ease-out forwards' }}
+                  >
+                    {delta.delta > 0 ? '+' : ''}{delta.delta}
+                  </span>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
     )
@@ -540,15 +591,17 @@ export default function ProjectorView() {
           {/* Score strip */}
           <div className="shrink-0 bg-gray-900 border-t border-gray-800 py-3 px-10 flex justify-center gap-12">
             {fjTeams.map(team => (
-              <div key={team.id} className="text-center">
+              <div key={team.id} className="text-center relative">
                 <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1.1rem)' }}>
                   {team.name}
                 </p>
-                <p className={`font-mono font-black tabular-nums ${
-                  (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
-                }`} style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>
-                  {scores.get(team.id) ?? team.score}
-                </p>
+                <AnimatedScore
+                  value={scores.get(team.id) ?? team.score}
+                  className={`font-mono font-black tabular-nums ${
+                    (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
+                  }`}
+                  style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)', display: 'block' }}
+                />
               </div>
             ))}
           </div>
@@ -602,10 +655,12 @@ export default function ProjectorView() {
           style={{ fontSize: 'clamp(3.5rem, 14vw, 10rem)' }}>
           {winner?.name ?? '—'}
         </p>
-        <p className="font-mono font-black text-yellow-300 mb-12"
-          style={{ fontSize: 'clamp(2rem, 6vw, 5rem)' }}>
-          {scores.get(winner?.id ?? '') ?? winner?.score ?? 0} pts
-        </p>
+        <AnimatedScore
+          value={scores.get(winner?.id ?? '') ?? winner?.score ?? 0}
+          className="font-mono font-black text-yellow-300 mb-12 block"
+          style={{ fontSize: 'clamp(2rem, 6vw, 5rem)' }}
+        />
+        <p className="text-yellow-300 mb-12" style={{ fontSize: 'clamp(1rem, 2vw, 1.75rem)', marginTop: '-3rem' }}>pts</p>
         <div className="space-y-3 w-full max-w-2xl">
           {finalSorted.map((team, i) => (
             <div key={team.id} className={`flex items-center gap-4 rounded-2xl px-8 py-5 ${
@@ -618,11 +673,13 @@ export default function ProjectorView() {
               <span className="font-bold flex-1 text-left" style={{ fontSize: 'clamp(1.25rem, 3vw, 2rem)' }}>
                 {team.name}
               </span>
-              <span className={`font-mono font-black tabular-nums ${
-                (scores.get(team.id) ?? team.score) < 0 ? 'text-red-400' : 'text-yellow-400'
-              }`} style={{ fontSize: 'clamp(1.25rem, 3vw, 2rem)' }}>
-                {scores.get(team.id) ?? team.score}
-              </span>
+              <AnimatedScore
+                value={scores.get(team.id) ?? team.score}
+                className={`font-mono font-black tabular-nums ${
+                  (scores.get(team.id) ?? team.score) < 0 ? 'text-red-400' : 'text-yellow-400'
+                }`}
+                style={{ fontSize: 'clamp(1.25rem, 3vw, 2rem)' }}
+              />
             </div>
           ))}
         </div>
@@ -656,6 +713,37 @@ export default function ProjectorView() {
     )
   }
 
+  // Double tap splash
+  if (doubleTapSplash) {
+    return (
+      <div className="h-screen bg-amber-950 text-white flex flex-col items-center justify-center text-center">
+        <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
+          <p style={{ fontSize: 'clamp(6rem, 18vw, 14rem)' }}>🍺</p>
+          <p className="font-black text-amber-400 leading-none" style={{ fontSize: 'clamp(4rem, 12vw, 10rem)' }}>
+            DOUBLE TAP!
+          </p>
+          <p className="text-amber-200 font-bold mt-4" style={{ fontSize: 'clamp(1.5rem, 4vw, 3rem)' }}>
+            A player is wagering…
+          </p>
+        </div>
+      </div>
+    )
+  }
+
+  // Round transition splash
+  if (roundSplash) {
+    return (
+      <div className="h-screen bg-gray-950 text-white flex items-center justify-center">
+        <p
+          className="font-black text-yellow-400 text-center"
+          style={{ fontSize: 'clamp(5rem, 18vw, 14rem)', animation: 'round-splash-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}
+        >
+          {roundSplash}
+        </p>
+      </div>
+    )
+  }
+
   // Category grid (no active question)
   if (!activeQuestion && categories.length > 0) {
     const roundLabel = room.status === 'round_2' ? 'Round 2' : 'Round 1'
@@ -675,18 +763,31 @@ export default function ProjectorView() {
             )}
           </div>
           <div className="flex gap-8">
-            {sortedTeams.map(team => (
-              <div key={team.id} className="text-center">
-                <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1rem)' }}>
-                  {team.name}
-                </p>
-                <p className={`font-mono font-black tabular-nums ${
-                  (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-300'
-                }`} style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
-                  {scores.get(team.id) ?? team.score}
-                </p>
-              </div>
-            ))}
+            {sortedTeams.map(team => {
+              const delta = scoreDeltas.find(d => d.teamId === team.id)
+              return (
+                <div key={team.id} className="text-center relative">
+                  <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1rem)' }}>
+                    {team.name}
+                  </p>
+                  <AnimatedScore
+                    value={scores.get(team.id) ?? team.score}
+                    className={`font-mono font-black tabular-nums ${
+                      (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-300'
+                    }`}
+                    style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)', display: 'block' }}
+                  />
+                  {delta && (
+                    <span
+                      className={`absolute -top-6 left-1/2 -translate-x-1/2 font-black text-sm tabular-nums pointer-events-none ${delta.delta > 0 ? 'text-green-400' : 'text-red-400'}`}
+                      style={{ animation: 'float-up 1.2s ease-out forwards' }}
+                    >
+                      {delta.delta > 0 ? '+' : ''}{delta.delta}
+                    </span>
+                  )}
+                </div>
+              )
+            })}
           </div>
         </div>
 
@@ -811,18 +912,31 @@ export default function ProjectorView() {
 
         {/* Score strip */}
         <div className="shrink-0 bg-gray-900 border-t border-gray-800 py-3 px-10 flex justify-center gap-12">
-          {sortedTeams.map(team => (
-            <div key={team.id} className="text-center">
-              <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1.1rem)' }}>
-                {team.name}
-              </p>
-              <p className={`font-mono font-black tabular-nums ${
-                (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
-              }`} style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>
-                {scores.get(team.id) ?? team.score}
-              </p>
-            </div>
-          ))}
+          {sortedTeams.map(team => {
+            const delta = scoreDeltas.find(d => d.teamId === team.id)
+            return (
+              <div key={team.id} className="text-center relative">
+                <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1.1rem)' }}>
+                  {team.name}
+                </p>
+                <AnimatedScore
+                  value={scores.get(team.id) ?? team.score}
+                  className={`font-mono font-black tabular-nums ${
+                    (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
+                  }`}
+                  style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)', display: 'block' }}
+                />
+                {delta && (
+                  <span
+                    className={`absolute -top-5 left-1/2 -translate-x-1/2 font-black text-sm tabular-nums pointer-events-none ${delta.delta > 0 ? 'text-green-400' : 'text-red-400'}`}
+                    style={{ animation: 'float-up 1.2s ease-out forwards' }}
+                  >
+                    {delta.delta > 0 ? '+' : ''}{delta.delta}
+                  </span>
+                )}
+              </div>
+            )
+          })}
         </div>
       </div>
     )

@@ -16,6 +16,7 @@ export type Room = {
   host_id: string
   status: RoomStatus
   current_question_id: string | null
+  current_turn_team_id?: string | null
   created_at: string
 }
 
@@ -51,6 +52,7 @@ export type Question = {
   point_value: number | null // null for Final Jeopardy
   is_answered: boolean
   answered_by_team_id: string | null
+  is_double_tap?: boolean
 }
 
 export type QuestionPublic = {
@@ -60,6 +62,7 @@ export type QuestionPublic = {
   point_value: number | null
   is_answered: boolean
   answered_by_team_id: string | null
+  is_double_tap?: boolean
 }
 
 export type Buzz = {

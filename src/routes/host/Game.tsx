@@ -31,8 +31,11 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const [timerSeconds, setTimerSeconds]       = useState(RESPONSE_SECONDS)
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
   const [previewInfo, setPreviewInfo] = useState<{
-    questionId: string; categoryName: string; pointValue: number | null; startTs: number
+    questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number
   } | null>(null)
+  const [doubleTapWager, setDoubleTapWager] = useState<number | null>(null)
+  const [pendingDeactivation, setPendingDeactivation] = useState(false)
+  const [newGameConfirm, setNewGameConfirm] = useState(false)
 
   const broadcastRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
 
@@ -84,8 +87,10 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     let autoAssigned = false
     const ch = supabase.channel(`room:${initialRoom.id}`)
       .on('broadcast', { event: 'question_preview' }, ({ payload }) => {
-        const p = payload as { questionId: string; categoryName: string; pointValue: number | null; startTs: number }
+        const p = payload as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number }
         setPreviewInfo(p)
+        if (p.doubleTapWager !== undefined) setDoubleTapWager(p.doubleTapWager)
+        else setDoubleTapWager(null)
       })
       .on('broadcast', { event: 'question_activated' }, ({ payload }) => {
         const { question_id } = payload as { question_id: string }
@@ -342,6 +347,8 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       .from('rooms').update({ current_question_id: null }).eq('id', roomId)
     if (!error) {
       setRoom(prev => ({ ...prev, current_question_id: null }))
+      setDoubleTapWager(null)
+      setPendingDeactivation(false)
       broadcastRef.current?.send({
         type: 'broadcast',
         event: 'question_deactivated',
@@ -372,6 +379,45 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     setJudgeStartTime(null)
   }
 
+  async function skipQuestion() {
+    if (!activeQuestion) return
+    await supabase.from('questions')
+      .update({ is_answered: true })
+      .eq('id', activeQuestion.id)
+    setCategories(prev => prev.map(cat => ({
+      ...cat,
+      questions: cat.questions.map(q =>
+        q.id === activeQuestion.id ? { ...q, is_answered: true } : q
+      ),
+    })))
+    broadcastRef.current?.send({
+      type: 'broadcast',
+      event: 'score_update',
+      payload: {
+        teams: teams.map(t => ({ id: t.id, name: t.name, score: scores.get(t.id) ?? t.score })),
+        current_question_id: null,
+        answered_question_id: activeQuestion.id,
+      },
+    })
+    clearJudging()
+    deactivateQuestion()
+  }
+
+  async function clearBuzzQueue() {
+    if (!activeQuestion) return
+    await supabase.from('buzzes').delete().eq('question_id', activeQuestion.id)
+    setBuzzes([])
+  }
+
+  function abortPreview() {
+    setPreviewInfo(null)
+    broadcastRef.current?.send({
+      type: 'broadcast',
+      event: 'question_deactivated',
+      payload: {},
+    })
+  }
+
   function assignTurn(teamId: string | null) {
     setCurrentTurnTeamId(teamId)
     broadcastRef.current?.send({
@@ -379,11 +425,13 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       event: 'turn_change',
       payload: { team_id: teamId },
     })
+    // Persist turn to DB so page refreshes restore it
+    supabase.from('rooms').update({ current_turn_team_id: teamId }).eq('id', roomId).then(() => {})
   }
 
   async function handleCorrect(buzz: Buzz) {
     if (!activeQuestion) return
-    const pointValue   = activeQuestion.point_value ?? 0
+    const pointValue   = doubleTapWager ?? (activeQuestion.point_value ?? 0)
     const currentScore = scores.get(buzz.team_id) ?? 0
     const newScore     = currentScore + pointValue
 
@@ -414,6 +462,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
         current_question_id: null,
         answered_question_id: activeQuestion.id,
+        winning_team_id: buzz.team_id,
       },
     })
 
@@ -424,7 +473,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
 
   async function handleWrong(buzz: Buzz) {
     if (!activeQuestion) return
-    const pointValue   = activeQuestion.point_value ?? 0
+    const pointValue   = doubleTapWager ?? (activeQuestion.point_value ?? 0)
     const currentScore = scores.get(buzz.team_id) ?? 0
     const newScore     = currentScore - pointValue
 
@@ -462,6 +511,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       event: 'score_update',
       payload: {
         teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
+        wrong_buzz_id: buzz.id,
         ...(questionDone ? { current_question_id: null, answered_question_id: activeQuestion.id } : {}),
       },
     })
@@ -470,7 +520,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
 
     if (questionDone) {
       assignTurn(null)
-      deactivateQuestion()
+      setPendingDeactivation(true)
     }
   }
 
@@ -687,16 +737,31 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                   ⚡ FT
                 </button>
               )}
-              <button
-                onClick={async () => {
-                  broadcastRef.current?.send({ type: 'broadcast', event: 'lobby_closed', payload: {} })
-                  await supabase.from('rooms').update({ status: 'finished' }).neq('status', 'finished')
-                  window.location.reload()
-                }}
-                className="text-xs text-gray-600 hover:text-red-400 transition-colors"
-              >
-                New Game
-              </button>
+              {newGameConfirm ? (
+                <div className="flex items-center gap-2">
+                  <span className="text-xs text-gray-400">Sure?</span>
+                  <button
+                    onClick={async () => {
+                      setNewGameConfirm(false)
+                      broadcastRef.current?.send({ type: 'broadcast', event: 'lobby_closed', payload: {} })
+                      await supabase.from('rooms').update({ status: 'finished' }).neq('status', 'finished')
+                      window.location.reload()
+                    }}
+                    className="text-xs text-red-400 hover:text-red-300 font-semibold transition-colors"
+                  >Yes</button>
+                  <button
+                    onClick={() => setNewGameConfirm(false)}
+                    className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+                  >Cancel</button>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setNewGameConfirm(true)}
+                  className="text-xs text-gray-600 hover:text-red-400 transition-colors"
+                >
+                  New Game
+                </button>
+              )}
             </div>
           </div>
           <div className="space-y-1 overflow-y-auto max-h-48">
@@ -773,6 +838,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                             }`}
                           >
                             <span className="font-mono mr-2 opacity-60">{q.point_value}</span>
+                            {q.is_double_tap && <span className="mr-1">🍺</span>}
                             {q.answer.length > 60 ? q.answer.slice(0, 60) + '…' : q.answer}
                           </button>
                         )
@@ -961,12 +1027,28 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                   </div>
                 ))}
               </div>
-              <button
-                onClick={() => { clearHostSession(); window.location.reload() }}
-                className="w-full py-3 rounded-xl text-sm font-bold bg-gray-800 text-white hover:bg-gray-700 transition-colors"
-              >
-                New Game
-              </button>
+              {newGameConfirm ? (
+                <div className="flex flex-col gap-2 w-full">
+                  <p className="text-sm text-center text-gray-400">Start a new game? This will clear everything.</p>
+                  <div className="flex gap-2">
+                    <button
+                      onClick={() => { setNewGameConfirm(false); clearHostSession(); window.location.reload() }}
+                      className="flex-1 py-3 rounded-xl text-sm font-bold bg-red-700 text-white hover:bg-red-600 transition-colors"
+                    >Yes, New Game</button>
+                    <button
+                      onClick={() => setNewGameConfirm(false)}
+                      className="flex-1 py-3 rounded-xl text-sm font-bold bg-gray-800 text-white hover:bg-gray-700 transition-colors"
+                    >Cancel</button>
+                  </div>
+                </div>
+              ) : (
+                <button
+                  onClick={() => setNewGameConfirm(true)}
+                  className="w-full py-3 rounded-xl text-sm font-bold bg-gray-800 text-white hover:bg-gray-700 transition-colors"
+                >
+                  New Game
+                </button>
+              )}
             </div>
           )
 
@@ -997,12 +1079,20 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                 ) : null
               })()}
               <p className="text-gray-600 text-xs">Read the clue aloud, then open the buzzer</p>
-              <button
-                onClick={() => activateQuestion(previewInfo.questionId)}
-                className="px-8 py-3 rounded-xl font-bold bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
-              >
-                Open Buzzer
-              </button>
+              <div className="flex items-center gap-3">
+                <button
+                  onClick={() => activateQuestion(previewInfo.questionId)}
+                  className="px-8 py-3 rounded-xl font-bold bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+                >
+                  Open Buzzer
+                </button>
+                <button
+                  onClick={abortPreview}
+                  className="px-4 py-3 rounded-xl text-sm font-semibold text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-colors"
+                >
+                  Abort
+                </button>
+              </div>
             </div>
           ) : round2Complete ? (
             // ── Start Final Jeopardy ──────────────────────
@@ -1088,22 +1178,36 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
             {/* Question card */}
             <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
               <div className="flex items-start justify-between mb-1">
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs bg-yellow-400 text-gray-950 font-bold px-2 py-0.5 rounded-full">
                     Active
                   </span>
-                  {activeQuestion.point_value && (
+                  {doubleTapWager !== null ? (
+                    <span className="text-xs bg-amber-500 text-gray-950 font-black px-2 py-0.5 rounded-full">
+                      🍺 DOUBLE TAP! {doubleTapWager} pts
+                    </span>
+                  ) : activeQuestion.point_value ? (
                     <span className="text-xs text-yellow-400 font-mono font-semibold">
                       {activeQuestion.point_value} pts
                     </span>
-                  )}
+                  ) : null}
                 </div>
-                <button
-                  onClick={deactivateQuestion}
-                  className="text-xs text-gray-600 hover:text-red-400 transition-colors"
-                >
-                  Deactivate
-                </button>
+                <div className="flex items-center gap-2">
+                  <button
+                    onClick={skipQuestion}
+                    className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:text-yellow-300 hover:bg-gray-700 transition-colors"
+                    title="Mark as answered (no winner) and return to board"
+                  >
+                    Skip
+                  </button>
+                  <button
+                    onClick={deactivateQuestion}
+                    className="text-xs px-2 py-1 rounded bg-gray-800 text-gray-400 hover:text-red-400 hover:bg-gray-700 transition-colors"
+                    title="Return to board (question stays available)"
+                  >
+                    Return to Board
+                  </button>
+                </div>
               </div>
               <p className="text-lg font-bold mt-3 mb-4 leading-snug">{activeQuestion.answer}</p>
               <div className="border-t border-gray-800 pt-3">
@@ -1147,13 +1251,13 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                     onClick={() => handleWrong(judgingBuzz)}
                     className="py-5 rounded-2xl font-black text-xl bg-red-700 hover:bg-red-600 active:bg-red-800 transition-colors"
                   >
-                    ✗ Wrong
+                    ✗ Wrong −{doubleTapWager ?? activeQuestion?.point_value ?? 0}
                   </button>
                   <button
                     onClick={() => handleCorrect(judgingBuzz)}
                     className="py-5 rounded-2xl font-black text-xl bg-green-600 hover:bg-green-500 active:bg-green-700 transition-colors"
                   >
-                    ✓ Correct
+                    ✓ Correct +{doubleTapWager ?? activeQuestion?.point_value ?? 0}
                   </button>
                 </div>
 
@@ -1166,17 +1270,28 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
               </div>
             ) : (
               // ── Buzz queue ──────────────────────────────
-              <div className="bg-gray-900 rounded-2xl p-5 flex-1 border border-gray-800">
+              <div className="bg-gray-900 rounded-2xl p-5 flex-1 border border-gray-800 flex flex-col">
                 <div className="flex items-center justify-between mb-4">
                   <h3 className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Buzz Queue</h3>
-                  <span className="text-xs text-gray-600 bg-gray-800 px-2 py-0.5 rounded-full">
-                    {pendingBuzzes.length} pending
-                  </span>
+                  <div className="flex items-center gap-2">
+                    {buzzes.length > 0 && (
+                      <button
+                        onClick={clearBuzzQueue}
+                        className="text-xs text-gray-600 hover:text-red-400 transition-colors"
+                        title="Delete all buzzes and reopen question for new buzzes"
+                      >
+                        Clear
+                      </button>
+                    )}
+                    <span className="text-xs text-gray-600 bg-gray-800 px-2 py-0.5 rounded-full">
+                      {pendingBuzzes.length} pending
+                    </span>
+                  </div>
                 </div>
 
                 {buzzes.length === 0 ? (
                   <div className="text-center py-8">
-                    <p className="text-gray-700 text-sm">Waiting for buzzes…</p>
+                    <p className="text-gray-700 text-sm">{pendingDeactivation ? 'No other buzzes.' : 'Waiting for buzzes…'}</p>
                   </div>
                 ) : (
                   <ul className="space-y-2">
@@ -1219,6 +1334,15 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                       )
                     })}
                   </ul>
+                )}
+
+                {pendingDeactivation && (
+                  <button
+                    onClick={deactivateQuestion}
+                    className="mt-4 w-full py-4 rounded-2xl font-black text-lg bg-blue-600 hover:bg-blue-500 active:bg-blue-700 transition-colors"
+                  >
+                    Open Board
+                  </button>
                 )}
               </div>
             )}

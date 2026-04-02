@@ -73,7 +73,11 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
     .eq('room_id', roomId)
   if (clearErr) throw new Error(`Clear failed: ${clearErr.message}`)
 
+  // Track all inserted question IDs per round so we can randomly mark one as Double Tap
+  const insertedByRound = new Map<number, string[]>()
+
   for (const round of content.rounds) {
+    const roundIds: string[] = []
     for (const cat of round.categories) {
       const { data: category, error: catErr } = await supabase
         .from('categories')
@@ -82,16 +86,26 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
         .single()
       if (!category || catErr) throw new Error(`Category "${cat.name}": ${catErr?.message}`)
 
-      const { error: qErr } = await supabase.from('questions').insert(
+      const { data: inserted, error: qErr } = await supabase.from('questions').insert(
         cat.questions.map(q => ({
           category_id: category.id,
           answer: q.answer,
           correct_question: q.correct_question,
           point_value: q.point_value,
         }))
-      )
+      ).select('id')
       if (qErr) throw new Error(`Questions for "${cat.name}": ${qErr.message}`)
+      if (inserted) roundIds.push(...inserted.map((r: { id: string }) => r.id))
     }
+    insertedByRound.set(round.round, roundIds)
+  }
+
+  // Randomly pick 1 question per round (rounds 1 & 2 only) and mark as Double Tap
+  for (const roundNum of [1, 2]) {
+    const ids = insertedByRound.get(roundNum)
+    if (!ids || ids.length === 0) continue
+    const chosen = ids[Math.floor(Math.random() * ids.length)]
+    await supabase.from('questions').update({ is_double_tap: true }).eq('id', chosen)
   }
 
   // Final Jeopardy — point_value is null (wager determines scoring)
