@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { ablyClient } from '../../lib/ably'
 import {
   clearPlayerSession,
   getSessionId,
@@ -134,8 +135,8 @@ export default function PlayView() {
   const myBuzzIdRef          = useRef<string | null>(null)
   const myTeamRef            = useRef<Team | null>(null)
   const roomRef                = useRef<Room | null>(null)
-  const broadcastRef           = useRef<ReturnType<typeof supabase.channel> | null>(null)
-  const lobbyChannelRef        = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const broadcastRef           = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
+  const lobbyChannelRef        = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
   const teamChannelRef         = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const currentTurnTeamIdRef   = useRef<string | null>(null)
   const prevScoreRef           = useRef(0)
@@ -294,14 +295,13 @@ export default function PlayView() {
   // Kick via broadcast: host sends lobby_closed on the room channel
   useEffect(() => {
     if (!room?.id || !['join_lobby', 'select_team', 'lobby'].includes(phase)) return
-    const ch = supabase.channel(`play-kick-${room.id}`)
-      .on('broadcast', { event: 'lobby_closed' }, () => {
-        clearPlayerSession()
-        setRoom(null); setMyTeam(null); setTeams([])
-        setPhase('no_lobby')
-      })
-      .subscribe()
-    return () => { supabase.removeChannel(ch) }
+    const ch = ablyClient.channels.get(`play-kick-${room.id}`)
+    ch.subscribe('lobby_closed', () => {
+      clearPlayerSession()
+      setRoom(null); setMyTeam(null); setTeams([])
+      setPhase('no_lobby')
+    })
+    return () => { ch.unsubscribe() }
   }, [room?.id, phase])
 
   // React to room changes → game state transitions
@@ -354,135 +354,133 @@ export default function PlayView() {
   useEffect(() => {
     if (phase !== 'game' || !room?.id) return
 
-    const ch = supabase.channel(`room:${room.id}`)
-      .on('broadcast', { event: 'question_preview' }, ({ payload }) => {
-        setPreviewInfo(payload as PreviewInfo)
-      })
-      .on('broadcast', { event: 'question_activated' }, ({ payload }) => {
-        const { question_id } = payload as { question_id: string }
+    const ch = ablyClient.channels.get(`room:${room.id}`)
+
+    ch.subscribe('question_preview', ({ data }) => {
+      setPreviewInfo(data as PreviewInfo)
+    })
+    ch.subscribe('question_activated', ({ data }) => {
+      const { question_id } = data as { question_id: string }
+      setPreviewInfo(null)
+      setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
+    })
+    ch.subscribe('question_deactivated', () => {
+      setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
+      setActiveQuestion(null)
+      setHasBuzzed(false)
+      setMyBuzzId(null)
+      setTimerPayload(null)
+      setResponseSubmitted(false)
+      setPreviewInfo(null)
+      // Reload board so answered questions are greyed out immediately
+      const r = roomRef.current
+      if (r) loadBoard(r.id, r.status === 'round_2' ? 2 : 1)
+    })
+    ch.subscribe('timer_start', ({ data }) => {
+      setTimerPayload(data as TimerPayload)
+    })
+    ch.subscribe('score_update', ({ data: upd }) => {
+      const msg = upd as {
+        teams: Array<{ id: string; name: string; score: number }>
+        answered_question_id?: string
+        winning_team_id?: string
+        wrong_buzz_id?: string
+      }
+      const mine = msg.teams.find(t => t.id === myTeamRef.current?.id)
+      if (mine) setMyScore(mine.score)
+      setAllTeamScores(msg.teams)
+      // Set buzz feedback via broadcast (reliable) — fires before question_deactivated clears myBuzzId
+      if (msg.winning_team_id && msg.winning_team_id === myTeamRef.current?.id) {
+        setBuzzResult('correct')
+      } else if (msg.wrong_buzz_id && msg.wrong_buzz_id === myBuzzIdRef.current) {
+        setBuzzResult('wrong')
+      }
+      // Grey out the answered question immediately without waiting for a board reload
+      if (msg.answered_question_id) {
+        setBoardCategories(prev => prev.map(cat => ({
+          ...cat,
+          questions: cat.questions.map(q =>
+            q.id === msg.answered_question_id ? { ...q, is_answered: true } : q
+          ),
+        })))
+      }
+    })
+    ch.subscribe('turn_change', ({ data }) => {
+      const { team_id } = data as { team_id: string | null }
+      setCurrentTurnTeamId(team_id)
+    })
+    ch.subscribe('game_state_change', ({ data }) => {
+      const { status, fj_category } = data as { status: string; fj_category?: string }
+      const r = roomRef.current
+      if (!r) return
+      setRoom({ ...r, status: status as Room['status'] })
+      if (status === 'round_1' || status === 'round_2') {
+        // New round — wipe all mid-game state
         setPreviewInfo(null)
-        setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
-      })
-      .on('broadcast', { event: 'question_deactivated' }, () => {
-        setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
         setActiveQuestion(null)
+        setCurrentTurnTeamId(null)
+        setTimerPayload(null)
         setHasBuzzed(false)
         setMyBuzzId(null)
-        setTimerPayload(null)
-        setResponseSubmitted(false)
-        setPreviewInfo(null)
-        // Reload board so answered questions are greyed out immediately
-        const r = roomRef.current
-        if (r) loadBoard(r.id, r.status === 'round_2' ? 2 : 1)
-      })
-      .on('broadcast', { event: 'timer_start' }, ({ payload }) => {
-        setTimerPayload(payload as TimerPayload)
-      })
-      .on('broadcast', { event: 'score_update' }, ({ payload }) => {
-        const data = payload as {
-          teams: Array<{ id: string; name: string; score: number }>
-          answered_question_id?: string
-          winning_team_id?: string
-          wrong_buzz_id?: string
-        }
-        const mine = data.teams.find(t => t.id === myTeamRef.current?.id)
-        if (mine) setMyScore(mine.score)
-        setAllTeamScores(data.teams)
-        // Set buzz feedback via broadcast (reliable) — fires before question_deactivated clears myBuzzId
-        if (data.winning_team_id && data.winning_team_id === myTeamRef.current?.id) {
-          setBuzzResult('correct')
-        } else if (data.wrong_buzz_id && data.wrong_buzz_id === myBuzzIdRef.current) {
-          setBuzzResult('wrong')
-        }
-        // Grey out the answered question immediately without waiting for a board reload
-        if (data.answered_question_id) {
-          setBoardCategories(prev => prev.map(cat => ({
-            ...cat,
-            questions: cat.questions.map(q =>
-              q.id === data.answered_question_id ? { ...q, is_answered: true } : q
-            ),
-          })))
-        }
-      })
-      .on('broadcast', { event: 'turn_change' }, ({ payload }) => {
-        const { team_id } = payload as { team_id: string | null }
-        setCurrentTurnTeamId(team_id)
-      })
-      .on('broadcast', { event: 'game_state_change' }, ({ payload }) => {
-        const { status, fj_category } = payload as {
-          status: string; fj_category?: string
-        }
-        const r = roomRef.current
-        if (!r) return
-        setRoom({ ...r, status: status as Room['status'] })
-        if (status === 'round_1' || status === 'round_2') {
-          // New round — wipe all mid-game state
-          setPreviewInfo(null)
-          setActiveQuestion(null)
-          setCurrentTurnTeamId(null)
-          setTimerPayload(null)
-          setHasBuzzed(false)
-          setMyBuzzId(null)
-          setBuzzResult(null)
-          loadBoard(r.id, status === 'round_2' ? 2 : 1)
-          return
-        }
-        if (status === 'final_jeopardy') {
-          setFjCategoryName(fj_category ?? 'Final Jeopardy')
-          setFjWagerInput(''); setFjWagerId(null); setFjQuestion(null)
-          setFjResponse(''); setFjResponseSubmitted(false)
-          setFjTimerStart(null); setFjTimeRemaining(null); setFjFinalScores([])
-          setFjSubPhase('incoming')
-        }
-      })
-      .on('broadcast', { event: 'fj_question_revealed' }, async ({ payload }) => {
-        const { question_id, start_ts, duration } = payload as { question_id: string; start_ts: number; duration: number }
-        const { data: q } = await supabase.from('questions_public').select().eq('id', question_id).single()
-        setFjQuestion(q ?? null)
-        setFjTimerStart(start_ts)
-        setFjTimeRemaining(duration)
-        setFjSubPhase('question')
-      })
-      .on('broadcast', { event: 'fj_wager_open' }, ({ payload }) => {
-        const { active_team_ids } = payload as { active_team_ids?: string[] }
-        const myId = myTeamRef.current?.id
-        if (!myId) return
-        const isActive = active_team_ids ? active_team_ids.includes(myId) : true
-        setFjSubPhase(isActive ? 'wager' : 'done')
-      })
-      .on('broadcast', { event: 'fj_timer_expired' }, () => {
-        // Auto-submit whatever the player has typed
-        const wagerId = fjWagerIdRef.current
-        const resp    = fjResponseRef.current.trim()
-        if (wagerId) {
-          supabase.from('wagers').update({
-            response: resp || null,
-            submitted_at: new Date().toISOString(),
-          }).eq('id', wagerId).then(() => {})
-        }
-        setFjResponseSubmitted(true)
-        setFjSubPhase('reviewing')
-      })
-      .on('broadcast', { event: 'game_over' }, ({ payload }) => {
-        const { scores: s } = payload as { scores: Array<{ id: string; name: string; score: number }> }
-        setFjFinalScores(s)
-        const mine = s.find(t => t.id === myTeamRef.current?.id)
-        if (mine) setMyScore(mine.score)
-        setRoom(prev => prev ? { ...prev, status: 'finished' } : prev)
-        setFjSubPhase('done')
-      })
-      .on('broadcast', { event: 'lobby_closed' }, () => {
-        clearPlayerSession()
-        setPreviewInfo(null); setActiveQuestion(null); setCurrentTurnTeamId(null)
-        setTimerPayload(null); setHasBuzzed(false); setMyBuzzId(null); setBuzzResult(null)
-        setRoom(null); setMyTeam(null)
-        setFjSubPhase(null)
-        setPhase('no_lobby')
-      })
-      .subscribe()
+        setBuzzResult(null)
+        loadBoard(r.id, status === 'round_2' ? 2 : 1)
+        return
+      }
+      if (status === 'final_jeopardy') {
+        setFjCategoryName(fj_category ?? 'Final Jeopardy')
+        setFjWagerInput(''); setFjWagerId(null); setFjQuestion(null)
+        setFjResponse(''); setFjResponseSubmitted(false)
+        setFjTimerStart(null); setFjTimeRemaining(null); setFjFinalScores([])
+        setFjSubPhase('incoming')
+      }
+    })
+    ch.subscribe('fj_question_revealed', async ({ data }) => {
+      const { question_id, start_ts, duration } = data as { question_id: string; start_ts: number; duration: number }
+      const { data: q } = await supabase.from('questions_public').select().eq('id', question_id).single()
+      setFjQuestion(q ?? null)
+      setFjTimerStart(start_ts)
+      setFjTimeRemaining(duration)
+      setFjSubPhase('question')
+    })
+    ch.subscribe('fj_wager_open', ({ data }) => {
+      const { active_team_ids } = data as { active_team_ids?: string[] }
+      const myId = myTeamRef.current?.id
+      if (!myId) return
+      const isActive = active_team_ids ? active_team_ids.includes(myId) : true
+      setFjSubPhase(isActive ? 'wager' : 'done')
+    })
+    ch.subscribe('fj_timer_expired', () => {
+      // Auto-submit whatever the player has typed
+      const wagerId = fjWagerIdRef.current
+      const resp    = fjResponseRef.current.trim()
+      if (wagerId) {
+        supabase.from('wagers').update({
+          response: resp || null,
+          submitted_at: new Date().toISOString(),
+        }).eq('id', wagerId).then(() => {})
+      }
+      setFjResponseSubmitted(true)
+      setFjSubPhase('reviewing')
+    })
+    ch.subscribe('game_over', ({ data }) => {
+      const { scores: s } = data as { scores: Array<{ id: string; name: string; score: number }> }
+      setFjFinalScores(s)
+      const mine = s.find(t => t.id === myTeamRef.current?.id)
+      if (mine) setMyScore(mine.score)
+      setRoom(prev => prev ? { ...prev, status: 'finished' } : prev)
+      setFjSubPhase('done')
+    })
+    ch.subscribe('lobby_closed', () => {
+      clearPlayerSession()
+      setPreviewInfo(null); setActiveQuestion(null); setCurrentTurnTeamId(null)
+      setTimerPayload(null); setHasBuzzed(false); setMyBuzzId(null); setBuzzResult(null)
+      setRoom(null); setMyTeam(null)
+      setFjSubPhase(null)
+      setPhase('no_lobby')
+    })
 
     broadcastRef.current = ch
-    return () => { supabase.removeChannel(ch); broadcastRef.current = null }
+    return () => { ch.unsubscribe(); broadcastRef.current = null }
   }, [phase, room?.id, loadBoard])
 
   // Load board + team names when entering game phase
@@ -589,21 +587,19 @@ export default function PlayView() {
         refreshTeams)
       .subscribe()
 
-    const roomCh = supabase
-      .channel(`room:${roomId}`)
-      .on('broadcast', { event: 'team_joined' }, refreshTeams)
-      .on('broadcast', { event: 'lobby_closed' }, () => {
-        clearPlayerSession()
-        setRoom(null); setMyTeam(null); setTeams([])
-        setPhase('no_lobby')
-      })
-      .subscribe()
+    const roomCh = ablyClient.channels.get(`room:${roomId}`)
+    roomCh.subscribe('team_joined', refreshTeams)
+    roomCh.subscribe('lobby_closed', () => {
+      clearPlayerSession()
+      setRoom(null); setMyTeam(null); setTeams([])
+      setPhase('no_lobby')
+    })
 
     lobbyChannelRef.current = roomCh
 
     return () => {
       supabase.removeChannel(pgCh)
-      supabase.removeChannel(roomCh)
+      roomCh.unsubscribe()
       lobbyChannelRef.current = null
     }
   }, [phase, room?.id])
@@ -664,7 +660,7 @@ export default function PlayView() {
     await fetchTeammates(team.id)
     if (room?.id) await refreshAllScores(room.id)
 
-    lobbyChannelRef.current?.send({ type: 'broadcast', event: 'team_joined', payload: {} })
+    lobbyChannelRef.current?.publish('team_joined', {})
     setPhase('lobby')
   }
 
@@ -741,11 +737,7 @@ export default function PlayView() {
     }
     const rect = elOrRect instanceof HTMLElement ? elOrRect.getBoundingClientRect() : elOrRect
     setTileRect(rect)
-    broadcastRef.current?.send({
-      type: 'broadcast',
-      event: 'question_preview',
-      payload: preview,
-    })
+    broadcastRef.current?.publish('question_preview', preview)
     setFlippingId(questionId)
     setTimeout(() => setPreviewInfo(preview), 600)
     setTimeout(() => setFlippingId(null), 650)
@@ -774,9 +766,7 @@ export default function PlayView() {
     if (!wager || err) return
     setFjWagerId(wager.id)
     setFjSubPhase('wager_locked')
-    broadcastRef.current?.send({
-      type: 'broadcast', event: 'fj_wager_locked', payload: { team_id: myTeam.id },
-    })
+    broadcastRef.current?.publish('fj_wager_locked', { team_id: myTeam.id })
   }
 
   async function handleSubmitFJResponse() {

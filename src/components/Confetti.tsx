@@ -22,6 +22,10 @@ export default function Confetti({ active, onDone }: Props) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const rafRef    = useRef<number | null>(null)
   const piecesRef = useRef<Piece[]>([])
+  const onDoneRef = useRef(onDone)
+
+  // Keep ref current without adding onDone to effect deps
+  useEffect(() => { onDoneRef.current = onDone }, [onDone])
 
   useEffect(() => {
     if (!active) return
@@ -33,19 +37,28 @@ export default function Confetti({ active, onDone }: Props) {
     canvas.width  = window.innerWidth
     canvas.height = window.innerHeight
 
-    // Burst from upper-center
-    piecesRef.current = Array.from({ length: 140 }, () => ({
-      x: canvas.width / 2 + rnd(-80, 80),
-      y: canvas.height * 0.3,
-      vx: rnd(-14, 14),
-      vy: rnd(-20, -5),
-      rotation: rnd(0, Math.PI * 2),
-      rotSpeed: rnd(-0.18, 0.18),
-      color: COLORS[Math.floor(Math.random() * COLORS.length)],
-      w: rnd(8, 16),
-      h: rnd(4, 9),
-      alpha: 1,
-    }))
+    const W = canvas.width
+    const H = canvas.height
+
+    // 70 pieces per corner — bottom-left shoots up+right, bottom-right shoots up+left
+    const makeCorner = (fromX: number, dirX: 1 | -1): Piece[] =>
+      Array.from({ length: 70 }, () => ({
+        x: fromX + rnd(-20, 20),
+        y: H - rnd(0, 20),
+        vx: dirX * rnd(3, 14),
+        vy: rnd(-22, -10),
+        rotation: rnd(0, Math.PI * 2),
+        rotSpeed: rnd(-0.2, 0.2),
+        color: COLORS[Math.floor(Math.random() * COLORS.length)],
+        w: rnd(8, 16),
+        h: rnd(4, 9),
+        alpha: 1,
+      }))
+
+    piecesRef.current = [
+      ...makeCorner(0, 1),        // bottom-left
+      ...makeCorner(W, -1),       // bottom-right
+    ]
 
     let last = performance.now()
 
@@ -61,7 +74,8 @@ export default function Confetti({ active, onDone }: Props) {
         p.x  += p.vx * dt
         p.y  += p.vy * dt
         p.rotation += p.rotSpeed * dt
-        if (p.y > canvas!.height * 0.65) p.alpha = Math.max(0, p.alpha - 0.025 * dt)
+        // Fade out as pieces fall back toward the bottom half
+        if (p.y > canvas!.height * 0.6) p.alpha = Math.max(0, p.alpha - 0.03 * dt)
         if (p.alpha <= 0) continue
         anyAlive = true
         ctx2d!.save()
@@ -76,13 +90,13 @@ export default function Confetti({ active, onDone }: Props) {
       if (anyAlive) {
         rafRef.current = requestAnimationFrame(tick)
       } else {
-        onDone?.()
+        onDoneRef.current?.()
       }
     }
 
     rafRef.current = requestAnimationFrame(tick)
     return () => { if (rafRef.current !== null) cancelAnimationFrame(rafRef.current) }
-  }, [active, onDone])
+  }, [active]) // onDone intentionally excluded — tracked via ref
 
   if (!active) return null
 

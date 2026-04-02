@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { ablyClient } from '../../lib/ably'
 import { clearHostSession } from '../../lib/session'
 import type { Buzz, Question, Room, Team, Wager } from '../../lib/types'
 
@@ -37,7 +38,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const [pendingDeactivation, setPendingDeactivation] = useState(false)
   const [newGameConfirm, setNewGameConfirm] = useState(false)
 
-  const broadcastRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const broadcastRef = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
 
   // ── Final Jeopardy state ──────────────────────────────────
   const [fjPhase, setFjPhase]               = useState<'starting' | 'wager' | 'question' | 'review' | 'done' | null>(null)
@@ -85,33 +86,33 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   // Broadcast channel
   useEffect(() => {
     let autoAssigned = false
-    const ch = supabase.channel(`room:${initialRoom.id}`)
-      .on('broadcast', { event: 'question_preview' }, ({ payload }) => {
-        const p = payload as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number }
-        setPreviewInfo(p)
-        if (p.doubleTapWager !== undefined) setDoubleTapWager(p.doubleTapWager)
-        else setDoubleTapWager(null)
-      })
-      .on('broadcast', { event: 'question_activated' }, ({ payload }) => {
-        const { question_id } = payload as { question_id: string }
-        setPreviewInfo(null)
-        setRoom(prev => ({ ...prev, current_question_id: question_id }))
-      })
-      .on('broadcast', { event: 'fj_wager_locked' }, ({ payload }) => {
-        const { team_id } = payload as { team_id: string }
-        setFjWagerStatus(prev => new Map([...prev, [team_id, true]]))
-      })
-    ch.subscribe((status) => {
-      // Auto-assign first turn when the game starts
-      if (status === 'SUBSCRIBED' && !autoAssigned && teams.length > 0) {
+    const ch = ablyClient.channels.get(`room:${initialRoom.id}`)
+    ch.subscribe('question_preview', ({ data }) => {
+      const p = data as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number }
+      setPreviewInfo(p)
+      if (p.doubleTapWager !== undefined) setDoubleTapWager(p.doubleTapWager)
+      else setDoubleTapWager(null)
+    })
+    ch.subscribe('question_activated', ({ data }) => {
+      const { question_id } = data as { question_id: string }
+      setPreviewInfo(null)
+      setRoom(prev => ({ ...prev, current_question_id: question_id }))
+    })
+    ch.subscribe('fj_wager_locked', ({ data }) => {
+      const { team_id } = data as { team_id: string }
+      setFjWagerStatus(prev => new Map([...prev, [team_id, true]]))
+    })
+    // Auto-assign first turn when the channel connects
+    ch.on('attached', () => {
+      if (!autoAssigned && teams.length > 0) {
         autoAssigned = true
         const firstTeamId = teams[0].id
         setCurrentTurnTeamId(firstTeamId)
-        ch.send({ type: 'broadcast', event: 'turn_change', payload: { team_id: firstTeamId } })
+        ch.publish('turn_change', { team_id: firstTeamId })
       }
     })
     broadcastRef.current = ch
-    return () => { supabase.removeChannel(ch); broadcastRef.current = null }
+    return () => { ch.unsubscribe(); broadcastRef.current = null }
   }, [initialRoom.code]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Subscribe to room + team score changes
@@ -215,7 +216,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     if (!fjTimerExpired || fjPhase !== 'question' || fjExpiryInProgress.current) return
     fjExpiryInProgress.current = true
     setFjTimerExpired(false)
-    broadcastRef.current?.send({ type: 'broadcast', event: 'fj_timer_expired', payload: {} })
+    broadcastRef.current?.publish('fj_timer_expired', {})
 
     // Capture synchronously before any awaits
     const activeIds    = fjActiveTeamIdsRef.current
@@ -247,11 +248,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
 
       if (order.length > 0) {
         const wager = latestWagers.find(w => w.team_id === order[0])
-        broadcastRef.current?.send({
-          type: 'broadcast',
-          event: 'fj_answer_reveal',
-          payload: { team_id: order[0], team_name: teamName(order[0]), response: wager?.response ?? null },
-        })
+        broadcastRef.current?.publish('fj_answer_reveal', { team_id: order[0], team_name: teamName(order[0]), response: wager?.response ?? null })
       }
     })()
   }, [fjTimerExpired]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -334,11 +331,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     if (!error) {
       setRoom(prev => ({ ...prev, current_question_id: questionId }))
       setPreviewInfo(null)
-      broadcastRef.current?.send({
-        type: 'broadcast',
-        event: 'question_activated',
-        payload: { question_id: questionId },
-      })
+      broadcastRef.current?.publish('question_activated', { question_id: questionId })
     } else console.error('activateQuestion failed:', error)
   }
 
@@ -349,11 +342,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       setRoom(prev => ({ ...prev, current_question_id: null }))
       setDoubleTapWager(null)
       setPendingDeactivation(false)
-      broadcastRef.current?.send({
-        type: 'broadcast',
-        event: 'question_deactivated',
-        payload: {},
-      })
+      broadcastRef.current?.publish('question_deactivated', {})
     } else console.error('deactivateQuestion failed:', error)
   }
 
@@ -361,16 +350,12 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     const startTs = Date.now()
     setJudgingBuzzId(buzz.id)
     setJudgeStartTime(startTs)
-    broadcastRef.current?.send({
-      type: 'broadcast',
-      event: 'timer_start',
-      payload: {
-        start_timestamp: startTs,
-        duration_seconds: RESPONSE_SECONDS,
-        team_id: buzz.team_id,
-        buzz_id: buzz.id,
-        team_name: teamName(buzz.team_id),
-      },
+    broadcastRef.current?.publish('timer_start', {
+      start_timestamp: startTs,
+      duration_seconds: RESPONSE_SECONDS,
+      team_id: buzz.team_id,
+      buzz_id: buzz.id,
+      team_name: teamName(buzz.team_id),
     })
   }
 
@@ -390,14 +375,10 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         q.id === activeQuestion.id ? { ...q, is_answered: true } : q
       ),
     })))
-    broadcastRef.current?.send({
-      type: 'broadcast',
-      event: 'score_update',
-      payload: {
-        teams: teams.map(t => ({ id: t.id, name: t.name, score: scores.get(t.id) ?? t.score })),
-        current_question_id: null,
-        answered_question_id: activeQuestion.id,
-      },
+    broadcastRef.current?.publish('score_update', {
+      teams: teams.map(t => ({ id: t.id, name: t.name, score: scores.get(t.id) ?? t.score })),
+      current_question_id: null,
+      answered_question_id: activeQuestion.id,
     })
     clearJudging()
     deactivateQuestion()
@@ -411,20 +392,12 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
 
   function abortPreview() {
     setPreviewInfo(null)
-    broadcastRef.current?.send({
-      type: 'broadcast',
-      event: 'question_deactivated',
-      payload: {},
-    })
+    broadcastRef.current?.publish('question_deactivated', {})
   }
 
   function assignTurn(teamId: string | null) {
     setCurrentTurnTeamId(teamId)
-    broadcastRef.current?.send({
-      type: 'broadcast',
-      event: 'turn_change',
-      payload: { team_id: teamId },
-    })
+    broadcastRef.current?.publish('turn_change', { team_id: teamId })
     // Persist turn to DB so page refreshes restore it
     supabase.from('rooms').update({ current_turn_team_id: teamId }).eq('id', roomId).then(() => {})
   }
@@ -455,15 +428,11 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     }))
     setCategories(nextCategories)
 
-    broadcastRef.current?.send({
-      type: 'broadcast',
-      event: 'score_update',
-      payload: {
-        teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
-        current_question_id: null,
-        answered_question_id: activeQuestion.id,
-        winning_team_id: buzz.team_id,
-      },
+    broadcastRef.current?.publish('score_update', {
+      teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
+      current_question_id: null,
+      answered_question_id: activeQuestion.id,
+      winning_team_id: buzz.team_id,
     })
 
     clearJudging()
@@ -506,14 +475,10 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       setCategories(nextCategories)
     }
 
-    broadcastRef.current?.send({
-      type: 'broadcast',
-      event: 'score_update',
-      payload: {
-        teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
-        wrong_buzz_id: buzz.id,
-        ...(questionDone ? { current_question_id: null, answered_question_id: activeQuestion.id } : {}),
-      },
+    broadcastRef.current?.publish('score_update', {
+      teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
+      wrong_buzz_id: buzz.id,
+      ...(questionDone ? { current_question_id: null, answered_question_id: activeQuestion.id } : {}),
     })
 
     clearJudging()
@@ -557,20 +522,12 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     setFjCategoryName(catName)
     setFjQuestion(loadedQuestion)
     setFjPhase('starting')
-    broadcastRef.current?.send({
-      type: 'broadcast',
-      event: 'game_state_change',
-      payload: { status: 'final_jeopardy', fj_category: catName, active_team_ids: [...top3ids] },
-    })
+    broadcastRef.current?.publish('game_state_change', { status: 'final_jeopardy', fj_category: catName, active_team_ids: [...top3ids] })
   }
 
   function openFJWagering() {
     setFjPhase('wager')
-    broadcastRef.current?.send({
-      type: 'broadcast',
-      event: 'fj_wager_open',
-      payload: { active_team_ids: [...fjActiveTeamIds] },
-    })
+    broadcastRef.current?.publish('fj_wager_open', { active_team_ids: [...fjActiveTeamIds] })
   }
 
   async function revealFJQuestion() {
@@ -578,11 +535,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     const startTs = Date.now()
     setFjPhase('question')
     setFjTimerStart(startTs)
-    broadcastRef.current?.send({
-      type: 'broadcast',
-      event: 'fj_question_revealed',
-      payload: { question_id: fjQuestion.id, start_ts: startTs, duration: 90 },
-    })
+    broadcastRef.current?.publish('fj_question_revealed', { question_id: fjQuestion.id, start_ts: startTs, duration: 90 })
   }
 
   async function handleFJCorrect(wager: Wager) {
@@ -598,10 +551,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     ])
     const updatedScores = new Map([...scores, [wager.team_id, newScore]])
     setScores(updatedScores)
-    broadcastRef.current?.send({
-      type: 'broadcast', event: 'fj_answer_judged',
-      payload: { team_id: wager.team_id, status: 'correct', wager: wager.amount, new_score: newScore },
-    })
+    broadcastRef.current?.publish('fj_answer_judged', { team_id: wager.team_id, status: 'correct', wager: wager.amount, new_score: newScore })
 
     const nextIdx = reviewIdx + 1
     if (nextIdx >= revealOrder.length) {
@@ -610,10 +560,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       setFjReviewIdx(nextIdx)
       const nextId = revealOrder[nextIdx]
       const nextWager = wagerList.find(w => w.team_id === nextId)
-      broadcastRef.current?.send({
-        type: 'broadcast', event: 'fj_answer_reveal',
-        payload: { team_id: nextId, team_name: teamName(nextId), response: nextWager?.response ?? null },
-      })
+      broadcastRef.current?.publish('fj_answer_reveal', { team_id: nextId, team_name: teamName(nextId), response: nextWager?.response ?? null })
     }
   }
 
@@ -630,10 +577,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     ])
     const updatedScores = new Map([...scores, [wager.team_id, newScore]])
     setScores(updatedScores)
-    broadcastRef.current?.send({
-      type: 'broadcast', event: 'fj_answer_judged',
-      payload: { team_id: wager.team_id, status: 'wrong', wager: wager.amount, new_score: newScore },
-    })
+    broadcastRef.current?.publish('fj_answer_judged', { team_id: wager.team_id, status: 'wrong', wager: wager.amount, new_score: newScore })
 
     const nextIdx = reviewIdx + 1
     if (nextIdx >= revealOrder.length) {
@@ -642,10 +586,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       setFjReviewIdx(nextIdx)
       const nextId = revealOrder[nextIdx]
       const nextWager = wagerList.find(w => w.team_id === nextId)
-      broadcastRef.current?.send({
-        type: 'broadcast', event: 'fj_answer_reveal',
-        payload: { team_id: nextId, team_name: teamName(nextId), response: nextWager?.response ?? null },
-      })
+      broadcastRef.current?.publish('fj_answer_reveal', { team_id: nextId, team_name: teamName(nextId), response: nextWager?.response ?? null })
     }
   }
 
@@ -653,10 +594,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     await supabase.from('rooms').update({ status: 'finished', current_question_id: null }).eq('id', roomId)
     setRoom(prev => ({ ...prev, status: 'finished', current_question_id: null }))
     setFjPhase('done')
-    broadcastRef.current?.send({
-      type: 'broadcast', event: 'game_over',
-      payload: { scores: teams.map(t => ({ id: t.id, name: t.name, score: finalScores.get(t.id) ?? t.score })) },
-    })
+    broadcastRef.current?.publish('game_over', { scores: teams.map(t => ({ id: t.id, name: t.name, score: finalScores.get(t.id) ?? t.score })) })
   }
 
   async function commitScoreEdit(teamId: string) {
@@ -666,10 +604,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     await supabase.from('teams').update({ score: parsed }).eq('id', teamId)
     const updatedScores = new Map([...scores, [teamId, parsed]])
     setScores(updatedScores)
-    broadcastRef.current?.send({
-      type: 'broadcast', event: 'score_update',
-      payload: { teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })) },
-    })
+    broadcastRef.current?.publish('score_update', { teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })) })
   }
 
   async function transitionToRound2() {
@@ -679,11 +614,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       .from('rooms').update({ status: 'round_2' }).eq('id', roomId)
     if (!error) {
       setRoom(prev => ({ ...prev, status: 'round_2' }))
-      broadcastRef.current?.send({
-        type: 'broadcast',
-        event: 'game_state_change',
-        payload: { status: 'round_2' },
-      })
+      broadcastRef.current?.publish('game_state_change', { status: 'round_2' })
       assignTurn(firstTeamId)
     }
   }
@@ -743,7 +674,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                   <button
                     onClick={async () => {
                       setNewGameConfirm(false)
-                      broadcastRef.current?.send({ type: 'broadcast', event: 'lobby_closed', payload: {} })
+                      broadcastRef.current?.publish('lobby_closed', {})
                       await supabase.from('rooms').update({ status: 'finished' }).neq('status', 'finished')
                       window.location.reload()
                     }}

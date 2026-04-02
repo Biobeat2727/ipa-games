@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { ablyClient } from '../../lib/ably'
 import { generateRoomCode } from '../../lib/roomCode'
 import { getContentSummary, importContent } from '../../lib/content'
 import type { ContentJSON, ContentSummary } from '../../lib/content'
@@ -33,7 +34,7 @@ export default function HostView() {
   const [error, setError]        = useState('')
 
   // Ref to the lobby broadcast channel so handleStartGame can fire game_state_change
-  const lobbyBroadcastRef = useRef<ReturnType<typeof supabase.channel> | null>(null)
+  const lobbyBroadcastRef = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
 
   // Content import state
   const [summary, setSummary]         = useState<ContentSummary | null>(null)
@@ -99,20 +100,18 @@ export default function HostView() {
       })
 
     // Broadcast path — player sends team_joined after joining
-    const bcCh = supabase
-      .channel(`room:${roomId}`)
-      .on('broadcast', { event: 'team_joined' }, () => fetchTeams(roomId))
-      .on('broadcast', { event: 'player_left' }, () => fetchTeams(roomId))
-      .subscribe()
+    const ablyChannel = ablyClient.channels.get(`room:${roomId}`)
+    ablyChannel.subscribe('team_joined', () => fetchTeams(roomId))
+    ablyChannel.subscribe('player_left', () => fetchTeams(roomId))
 
-    lobbyBroadcastRef.current = bcCh
+    lobbyBroadcastRef.current = ablyChannel
 
     // Polling fallback — catches team joins even when Realtime is unhealthy
     const poll = setInterval(() => fetchTeams(roomId), 3000)
 
     return () => {
       supabase.removeChannel(pgCh)
-      supabase.removeChannel(bcCh)
+      ablyChannel.unsubscribe()
       lobbyBroadcastRef.current = null
       clearInterval(poll)
     }
@@ -174,11 +173,7 @@ export default function HostView() {
     const { error: err } = await supabase
       .from('rooms').update({ status: 'round_1', current_question_id: null }).eq('id', room.id)
     if (!err) {
-      lobbyBroadcastRef.current?.send({
-        type: 'broadcast',
-        event: 'game_state_change',
-        payload: { status: 'round_1' },
-      })
+      lobbyBroadcastRef.current?.publish('game_state_change', { status: 'round_1' })
       setRoom(prev => prev ? { ...prev, status: 'round_1' } : prev)
       setPhase('game')
     }
@@ -187,7 +182,7 @@ export default function HostView() {
   async function handleNewGame() {
     // Kick all connected players/projectors before clearing state
     if (room) {
-      lobbyBroadcastRef.current?.send({ type: 'broadcast', event: 'lobby_closed', payload: {} })
+      lobbyBroadcastRef.current?.publish('lobby_closed', {})
       await supabase.from('rooms').update({ status: 'finished' }).eq('id', room.id)
     }
     setRoom(null)

@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
+import { ablyClient } from '../../lib/ably'
 import type { Buzz, Question, Room, Team } from '../../lib/types'
 import AnimatedScore from '../../components/AnimatedScore'
 import { playRoundTransition } from '../../lib/sounds'
@@ -225,130 +226,130 @@ export default function ProjectorView() {
 
   useEffect(() => {
     if (!room?.id) return
-    const ch = supabase.channel(`room:${room.id}`)
-      .on('broadcast', { event: 'question_preview' }, ({ payload }) => {
-        const p = payload as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number }
-        if (p.doubleTapWager !== undefined) {
-          setDoubleTapSplash(true)
-          setTimeout(() => {
-            setDoubleTapSplash(false)
-            setPreviewInfo(p)
-          }, 2000)
-        } else {
+    const ch = ablyClient.channels.get(`room:${room.id}`)
+
+    ch.subscribe('question_preview', ({ data }) => {
+      const p = data as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number }
+      if (p.doubleTapWager !== undefined) {
+        setDoubleTapSplash(true)
+        setTimeout(() => {
+          setDoubleTapSplash(false)
           setPreviewInfo(p)
-        }
-      })
-      .on('broadcast', { event: 'question_activated' }, ({ payload }) => {
-        const { question_id } = payload as { question_id: string }
-        setPreviewInfo(null)
-        setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
-        setTimerPayload(null)
-      })
-      .on('broadcast', { event: 'question_deactivated' }, () => {
-        setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
-        setTimerPayload(null)
-      })
-      .on('broadcast', { event: 'timer_start' }, ({ payload }) => {
-        setTimerPayload(payload as TimerPayload)
-      })
-      .on('broadcast', { event: 'score_update' }, ({ payload }) => {
-        const data = payload as {
-          teams: Array<{ id: string; score: number }>
-          current_question_id?: string | null
-          answered_question_id?: string
-        }
-        const newScoreMap = new Map(data.teams.map(t => [t.id, t.score]))
-        // Compute deltas for floating labels
-        const deltas: Array<{ id: string; teamId: string; delta: number }> = []
-        setScores(prev => {
-          data.teams.forEach(t => {
-            const old = prev.get(t.id)
-            if (old !== undefined && old !== t.score) {
-              deltas.push({ id: `${t.id}-${Date.now()}`, teamId: t.id, delta: t.score - old })
-            }
-          })
-          return newScoreMap
+        }, 2000)
+      } else {
+        setPreviewInfo(p)
+      }
+    })
+    ch.subscribe('question_activated', ({ data }) => {
+      const { question_id } = data as { question_id: string }
+      setPreviewInfo(null)
+      setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
+      setTimerPayload(null)
+    })
+    ch.subscribe('question_deactivated', () => {
+      setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
+      setTimerPayload(null)
+    })
+    ch.subscribe('timer_start', ({ data }) => {
+      setTimerPayload(data as TimerPayload)
+    })
+    ch.subscribe('score_update', ({ data: msg }) => {
+      const upd = msg as {
+        teams: Array<{ id: string; score: number }>
+        current_question_id?: string | null
+        answered_question_id?: string
+      }
+      const newScoreMap = new Map(upd.teams.map(t => [t.id, t.score]))
+      // Compute deltas for floating labels
+      const deltas: Array<{ id: string; teamId: string; delta: number }> = []
+      setScores(prev => {
+        upd.teams.forEach(t => {
+          const old = prev.get(t.id)
+          if (old !== undefined && old !== t.score) {
+            deltas.push({ id: `${t.id}-${Date.now()}`, teamId: t.id, delta: t.score - old })
+          }
         })
-        if (deltas.length > 0) {
-          setScoreDeltas(prev => [...prev, ...deltas])
-          setTimeout(() => {
-            const ids = new Set(deltas.map(d => d.id))
-            setScoreDeltas(prev => prev.filter(d => !ids.has(d.id)))
-          }, 1300)
-        }
-        // Apply question state from the host payload — most reliable path since
-        // score_update always arrives while postgres_changes can be missed.
-        if ('current_question_id' in data) {
-          setRoom(prev => prev ? { ...prev, current_question_id: data.current_question_id ?? null } : prev)
-          if (!data.current_question_id) setTimerPayload(null)
-        }
-        // Mark the answered question in local categories so the board cell greys out.
-        if (data.answered_question_id) {
-          setCategories(prev => prev.map(cat => ({
-            ...cat,
-            questions: cat.questions.map(q =>
-              q.id === data.answered_question_id ? { ...q, is_answered: true } : q
-            ),
-          })))
-        }
+        return newScoreMap
       })
-      .on('broadcast', { event: 'turn_change' }, ({ payload }) => {
-        const { team_id } = payload as { team_id: string | null }
-        setCurrentTurnTeamId(team_id)
-      })
-      // Fired by the host when the game starts — transition from lobby to board
-      .on('broadcast', { event: 'game_state_change' }, ({ payload }) => {
-        const { status, fj_category } = payload as { status?: string; fj_category?: string }
-        if (fj_category) setFjCategoryName(fj_category)
-        if (status === 'round_2') {
-          setRoundSplash('ROUND 2')
-          playRoundTransition()
-          setTimeout(() => setRoundSplash(null), 2500)
-        }
-        resyncAll()
-      })
-      // Fired by players when they join — keeps lobby team list in sync
-      .on('broadcast', { event: 'team_joined' }, () => refetchTeams())
-      .on('broadcast', { event: 'fj_wager_locked' }, ({ payload }) => {
-        const { team_id } = payload as { team_id: string }
-        setFjWagerStatus(prev => new Set([...prev, team_id]))
-      })
-      .on('broadcast', { event: 'fj_question_revealed' }, async ({ payload }) => {
-        const { question_id, start_ts } = payload as { question_id: string; start_ts: number }
-        const { data: q } = await supabase.from('questions_public').select().eq('id', question_id).single()
-        if (q) setFjQuestion({ answer: q.answer })
-        setFjTimerStart(start_ts)
-        setFjTimeRemaining(90)
-      })
-      .on('broadcast', { event: 'fj_timer_expired' }, () => {
-        setFjTimeRemaining(0)
-      })
-      .on('broadcast', { event: 'fj_answer_reveal' }, ({ payload }) => {
-        const { team_name, response } = payload as { team_name: string; response: string | null }
-        setFjReveal({ teamName: team_name, response })
-      })
-      .on('broadcast', { event: 'fj_answer_judged' }, ({ payload }) => {
-        const { team_id, status, wager, new_score } = payload as {
-          team_id: string; status: 'correct' | 'wrong'; wager: number; new_score: number
-        }
-        setFjReveal(prev => prev ? { ...prev, result: status, wager, newScore: new_score } : prev)
-        setScores(prev => new Map([...prev, [team_id, new_score]]))
-      })
-      .on('broadcast', { event: 'game_over' }, ({ payload }) => {
-        const { scores: s } = payload as { scores: Array<{ id: string; score: number }> }
-        setScores(new Map(s.map(t => [t.id, t.score])))
-        setRoom(prev => prev ? { ...prev, status: 'finished' } : prev)
-      })
-      .on('broadcast', { event: 'lobby_closed' }, () => {
-        setRoom(null)
-        setTeams([]); setCategories([]); setBuzzes([])
-        setPhase('waiting')
-      })
-      .subscribe(status => {
-        // On (re)connect, re-sync all state so nothing is missed
-        if (status === 'SUBSCRIBED') resyncAll()
-      })
-    return () => { supabase.removeChannel(ch) }
+      if (deltas.length > 0) {
+        setScoreDeltas(prev => [...prev, ...deltas])
+        setTimeout(() => {
+          const ids = new Set(deltas.map(d => d.id))
+          setScoreDeltas(prev => prev.filter(d => !ids.has(d.id)))
+        }, 1300)
+      }
+      // Apply question state from the host payload — most reliable path since
+      // score_update always arrives while postgres_changes can be missed.
+      if ('current_question_id' in upd) {
+        setRoom(prev => prev ? { ...prev, current_question_id: upd.current_question_id ?? null } : prev)
+        if (!upd.current_question_id) setTimerPayload(null)
+      }
+      // Mark the answered question in local categories so the board cell greys out.
+      if (upd.answered_question_id) {
+        setCategories(prev => prev.map(cat => ({
+          ...cat,
+          questions: cat.questions.map(q =>
+            q.id === upd.answered_question_id ? { ...q, is_answered: true } : q
+          ),
+        })))
+      }
+    })
+    ch.subscribe('turn_change', ({ data }) => {
+      const { team_id } = data as { team_id: string | null }
+      setCurrentTurnTeamId(team_id)
+    })
+    // Fired by the host when the game starts — transition from lobby to board
+    ch.subscribe('game_state_change', ({ data }) => {
+      const { status, fj_category } = data as { status?: string; fj_category?: string }
+      if (fj_category) setFjCategoryName(fj_category)
+      if (status === 'round_2') {
+        setRoundSplash('ROUND 2')
+        playRoundTransition()
+        setTimeout(() => setRoundSplash(null), 2500)
+      }
+      resyncAll()
+    })
+    // Fired by players when they join — keeps lobby team list in sync
+    ch.subscribe('team_joined', () => refetchTeams())
+    ch.subscribe('fj_wager_locked', ({ data }) => {
+      const { team_id } = data as { team_id: string }
+      setFjWagerStatus(prev => new Set([...prev, team_id]))
+    })
+    ch.subscribe('fj_question_revealed', async ({ data }) => {
+      const { question_id, start_ts } = data as { question_id: string; start_ts: number }
+      const { data: q } = await supabase.from('questions_public').select().eq('id', question_id).single()
+      if (q) setFjQuestion({ answer: q.answer })
+      setFjTimerStart(start_ts)
+      setFjTimeRemaining(90)
+    })
+    ch.subscribe('fj_timer_expired', () => {
+      setFjTimeRemaining(0)
+    })
+    ch.subscribe('fj_answer_reveal', ({ data }) => {
+      const { team_name, response } = data as { team_name: string; response: string | null }
+      setFjReveal({ teamName: team_name, response })
+    })
+    ch.subscribe('fj_answer_judged', ({ data }) => {
+      const { team_id, status, wager, new_score } = data as {
+        team_id: string; status: 'correct' | 'wrong'; wager: number; new_score: number
+      }
+      setFjReveal(prev => prev ? { ...prev, result: status, wager, newScore: new_score } : prev)
+      setScores(prev => new Map([...prev, [team_id, new_score]]))
+    })
+    ch.subscribe('game_over', ({ data }) => {
+      const { scores: s } = data as { scores: Array<{ id: string; score: number }> }
+      setScores(new Map(s.map(t => [t.id, t.score])))
+      setRoom(prev => prev ? { ...prev, status: 'finished' } : prev)
+    })
+    ch.subscribe('lobby_closed', () => {
+      setRoom(null)
+      setTeams([]); setCategories([]); setBuzzes([])
+      setPhase('waiting')
+    })
+    // On (re)connect, re-sync all state so nothing is missed
+    ch.on('attached', () => resyncAll())
+
+    return () => { ch.unsubscribe() }
   }, [room?.id, refetchTeams, resyncAll])
 
   // ── Buzzes for active question ────────────────────────────
