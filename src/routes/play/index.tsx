@@ -359,20 +359,23 @@ export default function PlayView() {
 
     const ch = ablyClient.channels.get(`room:${room.id}`)
 
-    ch.subscribe('double_tap_selected', ({ data }) => {
-      const { teamId } = data as { teamId: string; teamName: string }
-      if (teamId === myTeamRef.current?.id) return // selector handles own reveal via doubleTapStep
-      setDoubleTapTeamId(teamId)
-      setDtRevealForObserver(true) // stays true until question_preview clears it
-    })
-
     ch.subscribe('question_preview', ({ data }) => {
-      const p = data as PreviewInfo & { selectorTeamId?: string }
+      const p = data as PreviewInfo & { selectorTeamId?: string; doubleTapPending?: boolean }
+
+      // First DT broadcast (tile tap, before wager) — observers show the reveal animation
+      if (p.doubleTapPending && p.selectorTeamId) {
+        setDoubleTapTeamId(p.selectorTeamId)
+        if (p.selectorTeamId !== myTeamRef.current?.id) {
+          setDtRevealForObserver(true)
+        }
+        return // don't show previewInfo yet — wait for the real preview after wager
+      }
+
+      // Real preview (post-wager or normal question)
       setPreviewInfo(p)
-      // Lock out other teams + transition away from reveal animation
       if (p.doubleTapWager !== undefined && p.selectorTeamId) {
         setDoubleTapTeamId(p.selectorTeamId)
-        setDtRevealForObserver(false) // preview overlay takes over
+        setDtRevealForObserver(false) // transition to preview overlay
       }
     })
     ch.subscribe('question_activated', ({ data }) => {
@@ -765,10 +768,18 @@ export default function PlayView() {
     const q   = cat?.questions.find(q => q.id === questionId)
 
     if (q?.is_double_tap) {
-      // Double Tap! flow — notify all observers immediately before wager screen opens
+      // Fire question_preview immediately so all observers see the DT reveal at tile-tap time.
+      // A second question_preview with the real wager fires after wager is confirmed.
       const team = myTeamRef.current
       if (team) {
-        broadcastRef.current?.publish('double_tap_selected', { teamId: team.id, teamName: team.name })
+        broadcastRef.current?.publish('question_preview', {
+          questionId,
+          categoryName: cat?.name ?? '',
+          pointValue: q.point_value ?? null,
+          startTs: Date.now(),
+          selectorTeamId: team.id,
+          doubleTapPending: true,
+        })
       }
       const rect = el.getBoundingClientRect()
       setDoubleTapPendingQ({ questionId, rect })

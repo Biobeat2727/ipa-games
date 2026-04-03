@@ -88,7 +88,8 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     let autoAssigned = false
     const ch = ablyClient.channels.get(`room:${initialRoom.id}`)
     ch.subscribe('question_preview', ({ data }) => {
-      const p = data as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number }
+      const p = data as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number; doubleTapPending?: boolean }
+      if (p.doubleTapPending) return // ignore immediate DT notification — wait for real preview after wager
       setPreviewInfo(p)
       if (p.doubleTapWager !== undefined) setDoubleTapWager(p.doubleTapWager)
       else setDoubleTapWager(null)

@@ -229,8 +229,14 @@ export default function ProjectorView() {
     const ch = ablyClient.channels.get(`room:${room.id}`)
 
     ch.subscribe('question_preview', ({ data }) => {
-      const p = data as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number }
+      const p = data as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number; doubleTapPending?: boolean }
+      if (p.doubleTapPending) {
+        // Immediate DT notification at tile-tap — show the splash right away
+        setDoubleTapSplash(true)
+        return
+      }
       if (p.doubleTapWager !== undefined) {
+        // Real DT preview (post-wager) — splash may already be showing; keep it 2s then show preview
         setDoubleTapSplash(true)
         setTimeout(() => {
           setDoubleTapSplash(false)
