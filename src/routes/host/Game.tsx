@@ -297,6 +297,24 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     })()
   }, [room.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Double Tap: auto-start timer when the selecting team's buzz arrives (no manual click needed)
+  useEffect(() => {
+    if (doubleTapWager === null || judgingBuzzId !== null) return
+    const pending = buzzes.filter(b => b.status === 'pending')
+    if (pending.length === 0) return
+    const buzz    = pending[0]
+    const startTs = Date.now()
+    setJudgingBuzzId(buzz.id)
+    setJudgeStartTime(startTs)
+    broadcastRef.current?.publish('timer_start', {
+      start_timestamp: startTs,
+      duration_seconds: RESPONSE_SECONDS,
+      team_id: buzz.team_id,
+      buzz_id: buzz.id,
+      team_name: teams.find(t => t.id === buzz.team_id)?.name ?? 'Unknown',
+    })
+  }, [buzzes, doubleTapWager, judgingBuzzId, teams]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // Judge timer countdown
   useEffect(() => {
     if (judgeStartTime === null) { setTimerSeconds(RESPONSE_SECONDS); return }

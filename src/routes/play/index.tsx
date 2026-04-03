@@ -100,6 +100,7 @@ export default function PlayView() {
   const [teamNames, setTeamNames]             = useState<Map<string, string>>(new Map())
   const [previewInfo, setPreviewInfo]         = useState<PreviewInfo | null>(null)
   const [doubleTapTeamId, setDoubleTapTeamId] = useState<string | null>(null)
+  const [dtRevealForObserver, setDtRevealForObserver] = useState(false)
 
   // UI state
   const [showScoreOverlay, setShowScoreOverlay] = useState(false)
@@ -141,6 +142,7 @@ export default function PlayView() {
   const teamChannelRef         = useRef<ReturnType<typeof supabase.channel> | null>(null)
   const currentTurnTeamIdRef   = useRef<string | null>(null)
   const prevScoreRef           = useRef(0)
+  const dtAutoBuzzedRef        = useRef<string | null>(null) // tracks question ID already auto-buzzed
 
   useEffect(() => { responseSubmittedRef.current = responseSubmitted }, [responseSubmitted])
   useEffect(() => { myBuzzIdRef.current = myBuzzId }, [myBuzzId])
@@ -363,6 +365,10 @@ export default function PlayView() {
       // Lock out other teams immediately at preview time (before question_activated)
       if (p.doubleTapWager !== undefined && p.selectorTeamId) {
         setDoubleTapTeamId(p.selectorTeamId)
+        if (p.selectorTeamId !== myTeamRef.current?.id) {
+          setDtRevealForObserver(true)
+          setTimeout(() => setDtRevealForObserver(false), 2000)
+        }
       }
     })
     ch.subscribe('question_activated', ({ data }) => {
@@ -372,6 +378,8 @@ export default function PlayView() {
       setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
     })
     ch.subscribe('question_deactivated', () => {
+      dtAutoBuzzedRef.current = null
+      setDtRevealForObserver(false)
       setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
       setActiveQuestion(null)
       setHasBuzzed(false)
@@ -385,7 +393,11 @@ export default function PlayView() {
       if (r) loadBoard(r.id, r.status === 'round_2' ? 2 : 1)
     })
     ch.subscribe('timer_start', ({ data }) => {
-      setTimerPayload(data as TimerPayload)
+      // Don't override if we already set a local timer for this same buzz (DT auto-buzz)
+      setTimerPayload(prev => {
+        const p = data as TimerPayload
+        return prev?.buzz_id === p.buzz_id ? prev : p
+      })
     })
     ch.subscribe('score_update', ({ data: upd }) => {
       const msg = upd as {
@@ -546,6 +558,33 @@ export default function PlayView() {
     const id = setInterval(tick, 500)
     return () => clearInterval(id)
   }, [timerPayload])
+
+  // Double Tap: auto-buzz + local timer for the selecting team (no manual buzz needed)
+  useEffect(() => {
+    if (!activeQuestion || !doubleTapTeamId || doubleTapTeamId !== myTeam?.id) return
+    if (dtAutoBuzzedRef.current === activeQuestion.id) return // already fired for this question
+    dtAutoBuzzedRef.current = activeQuestion.id
+    const qId  = activeQuestion.id
+    const team = myTeamRef.current
+    if (!team) return
+    ;(async () => {
+      const { data: buzz } = await supabase
+        .from('buzzes')
+        .insert({ question_id: qId, team_id: team.id, status: 'pending' })
+        .select().single()
+      if (!buzz) return
+      setMyBuzzId(buzz.id)
+      setHasBuzzed(true)
+      // Set timer locally so the answer box appears immediately without waiting for host broadcast
+      setTimerPayload({
+        start_timestamp: Date.now(),
+        duration_seconds: 30,
+        team_id: team.id,
+        buzz_id: buzz.id,
+        team_name: team.name,
+      })
+    })()
+  }, [activeQuestion, doubleTapTeamId, myTeam?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // FJ 90-second countdown
   useEffect(() => {
@@ -1172,6 +1211,21 @@ export default function PlayView() {
           <p className="text-8xl mb-4">🍺</p>
           <p className="text-5xl font-black text-amber-400 leading-none mb-2">DOUBLE TAP!</p>
           <p className="text-amber-200 text-xl font-semibold">Get ready to wager!</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Other players see the DT reveal animation too, but locked out
+  if (dtRevealForObserver) {
+    const dtName = doubleTapTeamId ? (teamNames.get(doubleTapTeamId) ?? 'Another team') : 'Another team'
+    return (
+      <div className="min-h-screen bg-amber-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreChip}
+        <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
+          <p className="text-8xl mb-4">🍺</p>
+          <p className="text-5xl font-black text-amber-400 leading-none mb-2">DOUBLE TAP!</p>
+          <p className="text-amber-200 text-xl font-semibold">{dtName} is wagering!</p>
         </div>
       </div>
     )
