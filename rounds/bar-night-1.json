@@ -8,7 +8,7 @@
           "questions": [
             { "point_value": 100, "answer": "This actor played Iron Man in the Marvel Cinematic Universe", "correct_question": "Who is Robert Downey Jr.?" },
             { "point_value": 200, "answer": "Taylor Swift's 2023 tour, one of the highest-grossing of all time", "correct_question": "What is the Eras Tour?" },
-            { "point_value": 300, "answer": "This HBO series features dragons and the Targaryen family as a prequel to Game of Thrones", "correct_question": "What is House of the Dragon?" },
+            { "point_value": 300, "answer": "This HBO series features dragons and the Targaryen family as a prequel to Game of Thrones", "correct_question": "What is House of Dragons?" },
             { "point_value": 400, "answer": "Beyoncé's 2016 visual album named after a citrus fruit", "correct_question": "What is Lemonade?" },
             { "point_value": 500, "answer": "This Netflix show about a group of kids in Hawkins, Indiana ended in 2025", "correct_question": "What is Stranger Things?" }
           ]
