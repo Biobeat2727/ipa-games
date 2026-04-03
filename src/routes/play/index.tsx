@@ -359,16 +359,20 @@ export default function PlayView() {
 
     const ch = ablyClient.channels.get(`room:${room.id}`)
 
+    ch.subscribe('double_tap_selected', ({ data }) => {
+      const { teamId } = data as { teamId: string; teamName: string }
+      if (teamId === myTeamRef.current?.id) return // selector handles own reveal via doubleTapStep
+      setDoubleTapTeamId(teamId)
+      setDtRevealForObserver(true) // stays true until question_preview clears it
+    })
+
     ch.subscribe('question_preview', ({ data }) => {
       const p = data as PreviewInfo & { selectorTeamId?: string }
       setPreviewInfo(p)
-      // Lock out other teams immediately at preview time (before question_activated)
+      // Lock out other teams + transition away from reveal animation
       if (p.doubleTapWager !== undefined && p.selectorTeamId) {
         setDoubleTapTeamId(p.selectorTeamId)
-        if (p.selectorTeamId !== myTeamRef.current?.id) {
-          setDtRevealForObserver(true)
-          setTimeout(() => setDtRevealForObserver(false), 2000)
-        }
+        setDtRevealForObserver(false) // preview overlay takes over
       }
     })
     ch.subscribe('question_activated', ({ data }) => {
@@ -443,6 +447,8 @@ export default function PlayView() {
         setHasBuzzed(false)
         setMyBuzzId(null)
         setBuzzResult(null)
+        setDoubleTapTeamId(null)
+        setDtRevealForObserver(false)
         loadBoard(r.id, status === 'round_2' ? 2 : 1)
         return
       }
@@ -494,6 +500,7 @@ export default function PlayView() {
       clearPlayerSession()
       setPreviewInfo(null); setActiveQuestion(null); setCurrentTurnTeamId(null)
       setTimerPayload(null); setHasBuzzed(false); setMyBuzzId(null); setBuzzResult(null)
+      setDoubleTapTeamId(null); setDtRevealForObserver(false)
       setRoom(null); setMyTeam(null)
       setFjSubPhase(null)
       setPhase('no_lobby')
@@ -758,7 +765,11 @@ export default function PlayView() {
     const q   = cat?.questions.find(q => q.id === questionId)
 
     if (q?.is_double_tap) {
-      // Double Tap! flow
+      // Double Tap! flow — notify all observers immediately before wager screen opens
+      const team = myTeamRef.current
+      if (team) {
+        broadcastRef.current?.publish('double_tap_selected', { teamId: team.id, teamName: team.name })
+      }
       const rect = el.getBoundingClientRect()
       setDoubleTapPendingQ({ questionId, rect })
       setDoubleTapWagerInput('')
