@@ -1245,6 +1245,9 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                 {buzzes.length === 0 ? (
                   <div className="text-center py-8">
                     <p className="text-gray-700 text-sm">{pendingDeactivation ? 'No other buzzes.' : 'Waiting for buzzes…'}</p>
+                    {doubleTapWager !== null && (
+                      <p className="text-amber-400 font-black text-2xl mt-3">🍺 {doubleTapWager} pts wagered</p>
+                    )}
                   </div>
                 ) : (
                   <ul className="space-y-2">
