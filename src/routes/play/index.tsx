@@ -358,7 +358,12 @@ export default function PlayView() {
     const ch = ablyClient.channels.get(`room:${room.id}`)
 
     ch.subscribe('question_preview', ({ data }) => {
-      setPreviewInfo(data as PreviewInfo)
+      const p = data as PreviewInfo & { selectorTeamId?: string }
+      setPreviewInfo(p)
+      // Lock out other teams immediately at preview time (before question_activated)
+      if (p.doubleTapWager !== undefined && p.selectorTeamId) {
+        setDoubleTapTeamId(p.selectorTeamId)
+      }
     })
     ch.subscribe('question_activated', ({ data }) => {
       const { question_id, double_tap_team_id } = data as { question_id: string; double_tap_team_id?: string }
@@ -740,7 +745,10 @@ export default function PlayView() {
     }
     const rect = elOrRect instanceof HTMLElement ? elOrRect.getBoundingClientRect() : elOrRect
     setTileRect(rect)
-    broadcastRef.current?.publish('question_preview', preview)
+    broadcastRef.current?.publish('question_preview', {
+      ...preview,
+      ...(wager !== null && myTeam ? { selectorTeamId: myTeam.id } : {}),
+    })
     setFlippingId(questionId)
     setTimeout(() => setPreviewInfo(preview), 600)
     setTimeout(() => setFlippingId(null), 650)
