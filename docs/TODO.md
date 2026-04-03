@@ -26,3 +26,6 @@
 
 
 Fix the issue with refresh allowing players to choose categories when it's not their turn.
+
+
+For the Double tap round there needs to be some overhauls on the functionality. While the other team is wagering, the player screens need to show something other  than the board. The team that selected the double tap round is the only team that can wager, guess, and gain or lose points. New sound effect and animation for winning the double tap category. 
