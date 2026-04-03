@@ -99,6 +99,7 @@ export default function PlayView() {
   const [boardCategories, setBoardCategories] = useState<BoardCategory[]>([])
   const [teamNames, setTeamNames]             = useState<Map<string, string>>(new Map())
   const [previewInfo, setPreviewInfo]         = useState<PreviewInfo | null>(null)
+  const [doubleTapTeamId, setDoubleTapTeamId] = useState<string | null>(null)
 
   // UI state
   const [showScoreOverlay, setShowScoreOverlay] = useState(false)
@@ -360,8 +361,9 @@ export default function PlayView() {
       setPreviewInfo(data as PreviewInfo)
     })
     ch.subscribe('question_activated', ({ data }) => {
-      const { question_id } = data as { question_id: string }
+      const { question_id, double_tap_team_id } = data as { question_id: string; double_tap_team_id?: string }
       setPreviewInfo(null)
+      setDoubleTapTeamId(double_tap_team_id ?? null)
       setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
     })
     ch.subscribe('question_deactivated', () => {
@@ -372,6 +374,7 @@ export default function PlayView() {
       setTimerPayload(null)
       setResponseSubmitted(false)
       setPreviewInfo(null)
+      setDoubleTapTeamId(null)
       // Reload board so answered questions are greyed out immediately
       const r = roomRef.current
       if (r) loadBoard(r.id, r.status === 'round_2' ? 2 : 1)
@@ -1466,6 +1469,24 @@ export default function PlayView() {
           </div>
         </div>
         <QuipCycler />
+      </div>
+    )
+  }
+
+  // Double Tap — locked out (another team's exclusive question)
+  if (doubleTapTeamId && doubleTapTeamId !== myTeam?.id) {
+    const dtTeamName = teamNames.get(doubleTapTeamId) ?? 'Another team'
+    return (
+      <div className="relative min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
+        {scoreChip}
+        <div className="text-5xl mb-6">🍺</div>
+        <p className="text-2xl font-black text-amber-400 mb-2">Double Tap!</p>
+        <p className="text-gray-400 text-lg mb-6">{dtTeamName} is answering</p>
+        <div className="bg-gray-900 rounded-2xl p-5 max-w-sm w-full">
+          <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The answer</p>
+          <p className="text-xl font-bold leading-snug">{activeQuestion.answer}</p>
+        </div>
       </div>
     )
   }

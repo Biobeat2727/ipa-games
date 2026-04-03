@@ -331,7 +331,10 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     if (!error) {
       setRoom(prev => ({ ...prev, current_question_id: questionId }))
       setPreviewInfo(null)
-      broadcastRef.current?.publish('question_activated', { question_id: questionId })
+      broadcastRef.current?.publish('question_activated', {
+        question_id: questionId,
+        ...(doubleTapWager !== null ? { double_tap_team_id: currentTurnTeamId } : {}),
+      })
     } else console.error('activateQuestion failed:', error)
   }
 
