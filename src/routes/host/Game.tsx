@@ -38,7 +38,8 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const [pendingDeactivation, setPendingDeactivation] = useState(false)
   const [newGameConfirm, setNewGameConfirm] = useState(false)
 
-  const broadcastRef = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
+  const broadcastRef        = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
+  const activationStartTsRef = useRef<number | null>(null)
 
   // ── Final Jeopardy state ──────────────────────────────────
   const [fjPhase, setFjPhase]               = useState<'starting' | 'wager' | 'question' | 'review' | 'done' | null>(null)
@@ -298,7 +299,8 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     })()
   }, [room.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Double Tap: auto-start timer when the selecting team's buzz arrives (no manual click needed)
+  // Double Tap only: auto-start judging when the selecting team's buzz arrives.
+  // Regular questions use the manual Judge button so the host can read all responses first.
   useEffect(() => {
     if (doubleTapWager === null || judgingBuzzId !== null) return
     const pending = buzzes.filter(b => b.status === 'pending')
@@ -350,35 +352,43 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     if (!error) {
       setRoom(prev => ({ ...prev, current_question_id: questionId }))
       setPreviewInfo(null)
-      broadcastRef.current?.publish('question_activated', {
-        question_id: questionId,
-        ...(doubleTapWager !== null ? { double_tap_team_id: currentTurnTeamId } : {}),
-      })
+      // For regular questions, record activation time so the answer timer continues
+      // from when the buzzer opened (not from when the team buzzed).
+      // Also send buzz_opened_at in question_activated so players can show the countdown.
+      if (doubleTapWager === null) {
+        const startTs = Date.now()
+        activationStartTsRef.current = startTs
+        setJudgeStartTime(startTs)
+        broadcastRef.current?.publish('question_activated', {
+          question_id: questionId,
+          buzz_opened_at: startTs,
+        })
+      } else {
+        activationStartTsRef.current = null
+        broadcastRef.current?.publish('question_activated', {
+          question_id: questionId,
+          double_tap_team_id: currentTurnTeamId,
+        })
+      }
     } else console.error('activateQuestion failed:', error)
+  }
+
+  function handleJudge(buzz: Buzz) {
+    setJudgingBuzzId(buzz.id)
+    // judgeStartTime already set at activation; no need to fire timer_start since
+    // players already have their answer boxes open from the shared buzz window countdown.
   }
 
   async function deactivateQuestion() {
     const { error } = await supabase
       .from('rooms').update({ current_question_id: null }).eq('id', roomId)
     if (!error) {
+      activationStartTsRef.current = null
       setRoom(prev => ({ ...prev, current_question_id: null }))
       setDoubleTapWager(null)
       setPendingDeactivation(false)
       broadcastRef.current?.publish('question_deactivated', {})
     } else console.error('deactivateQuestion failed:', error)
-  }
-
-  function handleJudge(buzz: Buzz) {
-    const startTs = Date.now()
-    setJudgingBuzzId(buzz.id)
-    setJudgeStartTime(startTs)
-    broadcastRef.current?.publish('timer_start', {
-      start_timestamp: startTs,
-      duration_seconds: RESPONSE_SECONDS,
-      team_id: buzz.team_id,
-      buzz_id: buzz.id,
-      team_name: teamName(buzz.team_id),
-    })
   }
 
   function clearJudging() {
@@ -1267,21 +1277,29 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                           }`}
                         >
                           <span className="text-xs text-gray-600 w-5 shrink-0 text-center font-mono">{i + 1}</span>
-                          <span className={`font-semibold flex-1 ${isNextUp ? 'text-yellow-400' : 'text-white'}`}>
-                            {teamName(buzz.team_id)}
-                          </span>
-                          <span className={`text-xs font-medium ${
+                          <div className="flex-1 min-w-0">
+                            <p className={`font-semibold ${isNextUp ? 'text-yellow-400' : 'text-white'}`}>
+                              {teamName(buzz.team_id)}
+                            </p>
+                            {buzz.response && (
+                              <p className="text-sm text-gray-300 italic truncate">{buzz.response}</p>
+                            )}
+                            {buzz.status === 'pending' && !buzz.response && (
+                              <p className="text-xs text-gray-600">typing…</p>
+                            )}
+                          </div>
+                          <span className={`text-xs font-medium shrink-0 ${
                             buzz.status === 'correct' ? 'text-green-400'
                             : buzz.status === 'wrong'   ? 'text-red-400'
                             : buzz.status === 'expired' ? 'text-gray-600'
                             : 'text-gray-500'
                           }`}>
-                            {buzz.status}
+                            {buzz.status !== 'pending' && buzz.status}
                           </span>
                           {isNextUp && (
                             <button
                               onClick={() => handleJudge(buzz)}
-                              className="ml-1 px-4 py-1.5 rounded-lg text-xs font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+                              className="ml-1 px-4 py-1.5 rounded-lg text-xs font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors shrink-0"
                             >
                               Judge
                             </button>
