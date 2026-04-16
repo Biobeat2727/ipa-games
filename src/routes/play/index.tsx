@@ -146,12 +146,36 @@ export default function PlayView() {
   const currentTurnTeamIdRef   = useRef<string | null>(null)
   const prevScoreRef           = useRef(0)
   const dtAutoBuzzedRef        = useRef<string | null>(null) // tracks question ID already auto-buzzed
+  const phaseRef               = useRef<Phase>(phase)
+  const pendingSwReloadRef     = useRef(false)
 
   useEffect(() => { responseSubmittedRef.current = responseSubmitted }, [responseSubmitted])
   useEffect(() => { myBuzzIdRef.current = myBuzzId }, [myBuzzId])
   useEffect(() => { myTeamRef.current = myTeam }, [myTeam])
   useEffect(() => { roomRef.current = room }, [room])
   useEffect(() => { currentTurnTeamIdRef.current = currentTurnTeamId }, [currentTurnTeamId])
+  useEffect(() => { phaseRef.current = phase }, [phase])
+
+  // SW update: reload immediately if not mid-game, otherwise defer until game ends
+  useEffect(() => {
+    if (!navigator.serviceWorker) return
+    const handler = () => {
+      if (phaseRef.current !== 'game') {
+        window.location.reload()
+      } else {
+        pendingSwReloadRef.current = true
+      }
+    }
+    navigator.serviceWorker.addEventListener('controllerchange', handler)
+    return () => navigator.serviceWorker.removeEventListener('controllerchange', handler)
+  }, [])
+
+  // Deferred SW reload — fires when game ends and a reload was queued
+  useEffect(() => {
+    if (phase !== 'game' && pendingSwReloadRef.current) {
+      window.location.reload()
+    }
+  }, [phase])
 
 
   // Score chip pulse on score change
