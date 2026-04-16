@@ -5,6 +5,13 @@
 - Points not subtracting for wrong answers in rounds (score logic)
 - Projector only updates on first host-chosen question, not player-chosen
 - Host doesn't show active question after countdown ends (projector/player sides work fine)
+- **Refresh breaks game state** — if a player refreshes mid-question they get a fresh 40s timer and answer box even if the buzz window has already closed. On reconnect, `loadQuestion` needs to validate the buzz window expiry against the server before restoring answer UI.
+
+## PWA / Caching
+- **PWA update strategy** — players on stale cached versions don't get updates automatically. Options:
+  - Visibility-change polling (`registration.update()` on tab focus) + auto-reload with phase guard
+  - "Update available" banner (user-initiated reload)
+  - Add `vercel.json` with `Cache-Control: no-store` on `sw.js` (should be done regardless)
 
 ## Supabase Setup Required
 - Confirm `teams`, `rooms`, `questions`, `buzzes`, `wagers` tables are all added to the Supabase realtime publication (Dashboard → Database → Replication → supabase_realtime). Without this, postgres_changes subscriptions silently do nothing — broadcasts are the fallback but not a full replacement.
