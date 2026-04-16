@@ -4,7 +4,7 @@ import { ablyClient } from '../../lib/ably'
 import { clearHostSession } from '../../lib/session'
 import type { Buzz, Question, Room, Team, Wager } from '../../lib/types'
 
-const RESPONSE_SECONDS = 30
+const RESPONSE_SECONDS = 40
 
 type CategoryRow = {
   id: string
@@ -35,6 +35,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number
   } | null>(null)
   const [doubleTapWager, setDoubleTapWager] = useState<number | null>(null)
+  const [dtPendingTeamId, setDtPendingTeamId] = useState<string | null>(null)
   const [pendingDeactivation, setPendingDeactivation] = useState(false)
   const [newGameConfirm, setNewGameConfirm] = useState(false)
 
@@ -89,8 +90,12 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     let autoAssigned = false
     const ch = ablyClient.channels.get(`room:${initialRoom.id}`)
     ch.subscribe('question_preview', ({ data }) => {
-      const p = data as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number; doubleTapPending?: boolean }
-      if (p.doubleTapPending) return // ignore immediate DT notification — wait for real preview after wager
+      const p = data as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number; doubleTapPending?: boolean; selectorTeamId?: string }
+      if (p.doubleTapPending) {
+        if (p.selectorTeamId) setDtPendingTeamId(p.selectorTeamId)
+        return // wait for real preview after wager
+      }
+      setDtPendingTeamId(null)
       setPreviewInfo(p)
       if (p.doubleTapWager !== undefined) setDoubleTapWager(p.doubleTapWager)
       else setDoubleTapWager(null)
@@ -683,6 +688,14 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   return (
     <div className="h-screen bg-gray-950 text-white flex overflow-hidden">
 
+      {/* ── Double Tap selected notification ─────────────── */}
+      {dtPendingTeamId && !previewInfo && (
+        <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-500 text-gray-950 px-6 py-3 rounded-2xl font-black text-lg shadow-2xl animate-pulse flex items-center gap-3">
+          <span>🍺</span>
+          <span>DOUBLE TAP! — {teams.find(t => t.id === dtPendingTeamId)?.name ?? 'A team'} is wagering</span>
+        </div>
+      )}
+
       {/* ── Left: scores + question list ─────────────────── */}
       <div className="w-5/12 border-r border-gray-800 flex flex-col overflow-hidden">
 
@@ -1022,8 +1035,14 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
               <div className="text-center">
                 <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">Category Reveal</p>
                 <p className="font-black text-white text-2xl leading-tight">{previewInfo.categoryName}</p>
-                {previewInfo.pointValue != null && (
+                {previewInfo.pointValue != null && !previewInfo.doubleTapWager && (
                   <p className="text-yellow-400 font-mono text-lg font-bold">${previewInfo.pointValue}</p>
+                )}
+                {previewInfo.doubleTapWager !== undefined && (
+                  <div className="mt-2 inline-flex items-center gap-2 bg-amber-500/20 border border-amber-500/40 rounded-xl px-4 py-2">
+                    <span>🍺</span>
+                    <span className="text-amber-400 font-black text-xl">{previewInfo.doubleTapWager} pts wagered</span>
+                  </div>
                 )}
               </div>
               {(() => {

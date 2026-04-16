@@ -556,12 +556,19 @@ export default function PlayView() {
     return () => clearTimeout(id)
   }, [buzzResult])
 
+  // Fallback: if question loads but buzz_opened_at broadcast was missed (e.g. arrived via DB poll),
+  // start the timer from now so the countdown always appears.
+  useEffect(() => {
+    if (!activeQuestion || doubleTapTeamId || buzzWindowTs) return
+    setBuzzWindowTs(Date.now())
+  }, [activeQuestion, doubleTapTeamId, buzzWindowTs])
+
   // Buzz window countdown (shown on buzz button before anyone buzzes)
   useEffect(() => {
     if (!buzzWindowTs) { setBuzzWindowRemaining(null); return }
     let fired = false
     const tick = () => {
-      const r = Math.max(0, Math.floor((buzzWindowTs + 30_000 - Date.now()) / 1000))
+      const r = Math.max(0, Math.floor((buzzWindowTs + 40_000 - Date.now()) / 1000))
       setBuzzWindowRemaining(r)
       if (r === 0 && !fired) {
         fired = true
@@ -620,7 +627,7 @@ export default function PlayView() {
       // Set timer locally so the answer box appears immediately without waiting for host broadcast
       setTimerPayload({
         start_timestamp: Date.now(),
-        duration_seconds: 30,
+        duration_seconds: 40,
         team_id: team.id,
         buzz_id: buzz.id,
         team_name: team.name,
@@ -1500,8 +1507,8 @@ export default function PlayView() {
 
   // DT uses its own timerPayload (30s from buzz); regular questions use the shared buzz window countdown
   const isDt          = doubleTapTeamId !== null && doubleTapTeamId === myTeam?.id
-  const answerTimer   = isDt ? (timeRemaining ?? 30) : (buzzWindowRemaining ?? 0)
-  const answerTimerPct = (answerTimer / 30) * 100
+  const answerTimer   = isDt ? (timeRemaining ?? 40) : (buzzWindowRemaining ?? 0)
+  const answerTimerPct = (answerTimer / 40) * 100
   const answerTimerLow = answerTimer <= 10
 
   if (hasBuzzed && !responseSubmitted && isDt) {
@@ -1618,7 +1625,7 @@ export default function PlayView() {
             <div className="w-full h-1.5 bg-gray-800 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${buzzWindowRemaining <= 10 ? 'bg-red-500' : 'bg-yellow-400'}`}
-                style={{ width: `${(buzzWindowRemaining / 30) * 100}%` }}
+                style={{ width: `${(buzzWindowRemaining / 40) * 100}%` }}
               />
             </div>
           </div>
