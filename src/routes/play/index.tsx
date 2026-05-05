@@ -808,7 +808,7 @@ export default function PlayView() {
     const startTs = Date.now()
     const payload: TimerPayload = {
       start_timestamp: startTs,
-      duration_seconds: 10,
+      duration_seconds: 15,
       team_id: myTeam.id,
       buzz_id: buzz.id,
       team_name: myTeam.name,
@@ -1593,8 +1593,8 @@ export default function PlayView() {
 
   // Non-DT answer phase: this team buzzed (me or a teammate), now has 10s to type response
   if (timerPayload?.team_id === myTeam?.id && !responseSubmitted && !isDt) {
-    const ansTimer    = timeRemaining ?? 10
-    const ansTimerPct = (ansTimer / 10) * 100
+    const ansTimer    = timeRemaining ?? 15
+    const ansTimerPct = (ansTimer / 15) * 100
     const ansTimerLow = ansTimer <= 3
     return (
       <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-6">
