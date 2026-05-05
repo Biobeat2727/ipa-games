@@ -434,11 +434,11 @@ export default function PlayView() {
     })
     ch.subscribe('timer_start', ({ data }) => {
       const p = data as TimerPayload
+      // Only our team's timer is relevant — ignore other teams' buzzes entirely
+      if (p.team_id !== myTeamRef.current?.id) return
       setTimerPayload(prev => {
         // Don't override same buzz (DT auto-buzz)
         if (prev?.buzz_id === p.buzz_id) return prev
-        // Don't let another team's buzz kick us out of our active answer window
-        if (prev?.team_id === myTeamRef.current?.id) return prev
         return p
       })
     })
