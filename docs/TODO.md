@@ -1,16 +1,11 @@
 # TODO / Known Issues
 
-## 🔴 High Priority
+## ✅ Resolved
 
 ### PWA Stale Cache — 404 on Real Devices
-**Symptom:** Player gets 404 on phone in regular browser; works fine in incognito.
-**Root cause:** Incognito has no service worker cache, so it fetches fresh from network. Regular browser loads stale SW from HTTP cache → SW intercepts requests → serves old hashed asset URLs that no longer exist on the CDN after a Vercel redeploy.
-
-**Fixes needed:**
-- [x] Add `vercel.json` with `Cache-Control: no-store` on `/sw.js`, `/registerSW.js`, `/index.html` and `no-cache` on `/manifest.webmanifest`
-- [x] Exclude `index.html` from SW precache (`globIgnores`) — navigation always hits network for fresh HTML
-- [x] Confirm `cleanupOutdatedCaches: true` in workbox config (already set in vite.config.ts)
-- [ ] Deploy and have friend test on real device to confirm fix
+- `vercel.json` added: SPA rewrite + `no-store` on `sw.js`/`registerSW.js`/`index.html`
+- `globIgnores: ['**/index.html']` in workbox — SW never serves stale HTML
+- Refresh after any deploy now serves the latest version automatically
 
 ---
 

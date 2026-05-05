@@ -433,10 +433,13 @@ export default function PlayView() {
       if (r) loadBoard(r.id, r.status === 'round_2' ? 2 : 1)
     })
     ch.subscribe('timer_start', ({ data }) => {
-      // Don't override if we already set a local timer for this same buzz (DT auto-buzz)
+      const p = data as TimerPayload
       setTimerPayload(prev => {
-        const p = data as TimerPayload
-        return prev?.buzz_id === p.buzz_id ? prev : p
+        // Don't override same buzz (DT auto-buzz)
+        if (prev?.buzz_id === p.buzz_id) return prev
+        // Don't let another team's buzz kick us out of our active answer window
+        if (prev?.team_id === myTeamRef.current?.id) return prev
+        return p
       })
     })
     ch.subscribe('score_update', ({ data: upd }) => {
