@@ -545,6 +545,15 @@ export default function PlayView() {
       setPhase('no_lobby')
     })
 
+    ch.subscribe('team_answer_submitted', ({ data }) => {
+      const p = data as { team_id: string; buzz_id: string; buzzPosition: number | null }
+      if (p.team_id === myTeamRef.current?.id && !responseSubmittedRef.current) {
+        setBuzzPosition(p.buzzPosition)
+        setResponseSubmitted(true)
+        responseSubmittedRef.current = true
+      }
+    })
+
     broadcastRef.current = ch
     return () => { ch.unsubscribe(); broadcastRef.current = null }
   }, [phase, room?.id, loadBoard])
@@ -599,18 +608,6 @@ export default function PlayView() {
       setTimeRemaining(remaining)
 
       if (remaining === 0) {
-        if (timerPayload.team_id === myTeamRef.current?.id && !responseSubmittedRef.current) {
-          const buzzId = myBuzzIdRef.current
-          if (buzzId) {
-            const text = responseTextRef.current.trim()
-            supabase.from('buzzes').update({
-              response: text || null,
-              response_submitted_at: new Date().toISOString(),
-            }).eq('id', buzzId).then(() => {})
-            setResponseSubmitted(true)
-            responseSubmittedRef.current = true
-          }
-        }
         clearInterval(id)
       }
     }
@@ -830,13 +827,19 @@ export default function PlayView() {
   }
 
   async function handleSubmitResponse() {
-    if (!myBuzzId || !responseText.trim()) return
+    const buzzId = myBuzzId ?? timerPayload?.buzz_id
+    if (!buzzId || !responseText.trim()) return
+    responseSubmittedRef.current = true // guard before await to prevent race
     await supabase.from('buzzes').update({
       response: responseText.trim(),
       response_submitted_at: new Date().toISOString(),
-    }).eq('id', myBuzzId)
+    }).eq('id', buzzId)
     setResponseSubmitted(true)
-    responseSubmittedRef.current = true
+    broadcastRef.current?.publish('team_answer_submitted', {
+      team_id: myTeam?.id,
+      buzz_id: buzzId,
+      buzzPosition,
+    })
   }
 
   function handleSelectQuestion(questionId: string, el: HTMLElement) {
@@ -1585,8 +1588,8 @@ export default function PlayView() {
     )
   }
 
-  // Non-DT answer phase: player buzzed, now has 10s to type response
-  if (hasBuzzed && !responseSubmitted && !isDt) {
+  // Non-DT answer phase: this team buzzed (me or a teammate), now has 10s to type response
+  if (timerPayload?.team_id === myTeam?.id && !responseSubmitted && !isDt) {
     const ansTimer    = timeRemaining ?? 10
     const ansTimerPct = (ansTimer / 10) * 100
     const ansTimerLow = ansTimer <= 3
@@ -1596,7 +1599,7 @@ export default function PlayView() {
         {scoreChip}
         <div className="max-w-sm mx-auto w-full flex flex-col flex-1 pt-8">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-yellow-400 font-black text-xl">You're in! Type fast!</p>
+            <p className="text-yellow-400 font-black text-xl">{hasBuzzed ? "You're in! Type fast!" : 'Teammate buzzed! Type fast!'}</p>
             <span className={`font-mono text-4xl font-black tabular-nums ${ansTimerLow ? 'text-red-400' : 'text-white'}`}>
               {ansTimer}
             </span>
@@ -1617,7 +1620,7 @@ export default function PlayView() {
           {ansTimer === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
               <p className="text-red-400 font-black text-3xl mb-2">Time's up!</p>
-              <p className="text-gray-500 text-sm">Your response was submitted automatically.</p>
+              <p className="text-gray-500 text-sm">You didn't answer in time.</p>
             </div>
           ) : (
             <>
@@ -1644,7 +1647,7 @@ export default function PlayView() {
   }
 
   // Response submitted — waiting for host judgment
-  if (hasBuzzed && responseSubmitted) {
+  if (timerPayload?.team_id === myTeam?.id && responseSubmitted) {
     const posLabel = buzzPosition === 1 ? '1st' : buzzPosition === 2 ? '2nd' : buzzPosition === 3 ? '3rd' : `${buzzPosition ?? '?'}th`
     return (
       <div className="relative min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
