@@ -363,7 +363,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       if (doubleTapWager === null) {
         const startTs = Date.now()
         activationStartTsRef.current = startTs
-        setJudgeStartTime(startTs)
+        // Timer is now player-side (10s from buzz) — no host judgeStartTime for regular questions
         broadcastRef.current?.publish('question_activated', {
           question_id: questionId,
           buzz_opened_at: startTs,
@@ -1201,28 +1201,34 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
             {judgingBuzz ? (
               // ── Judging panel ───────────────────────────
               <div className="bg-gray-900 rounded-2xl p-5 flex-1 flex flex-col border border-gray-800">
-                <div className="flex items-center justify-between mb-1">
+                <div className="flex items-center justify-between mb-4">
                   <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Judging</p>
-                  <span className={`font-mono text-4xl font-black tabular-nums leading-none ${
-                    timerLow ? 'text-red-400' : 'text-yellow-400'
-                  }`}>
-                    {timerSeconds}
-                  </span>
+                  {/* Show timer only for Double Tap (DT has its own 40s window) */}
+                  {doubleTapWager !== null && (
+                    <span className={`font-mono text-4xl font-black tabular-nums leading-none ${
+                      timerLow ? 'text-red-400' : 'text-yellow-400'
+                    }`}>
+                      {timerSeconds}
+                    </span>
+                  )}
                 </div>
 
-                {/* Timer bar */}
-                <div className="w-full h-1.5 bg-gray-800 rounded-full mb-4 overflow-hidden">
-                  <div
-                    className={`h-full rounded-full transition-all duration-500 ${timerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
-                    style={{ width: `${(timerSeconds / RESPONSE_SECONDS) * 100}%` }}
-                  />
-                </div>
+                {doubleTapWager !== null && (
+                  <div className="w-full h-1.5 bg-gray-800 rounded-full mb-4 overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${timerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
+                      style={{ width: `${(timerSeconds / RESPONSE_SECONDS) * 100}%` }}
+                    />
+                  </div>
+                )}
 
                 <p className="text-2xl font-black mb-4">{teamName(judgingBuzz.team_id)}</p>
 
                 <div className="flex-1 bg-gray-800 rounded-xl p-4 mb-5 min-h-20">
                   {judgingBuzz.response ? (
                     <p className="text-white text-lg">{judgingBuzz.response}</p>
+                  ) : judgingBuzz.response_submitted_at ? (
+                    <p className="text-gray-500 text-sm italic">⏱ No response — time expired</p>
                   ) : (
                     <p className="text-gray-600 text-sm italic">Waiting for response…</p>
                   )}

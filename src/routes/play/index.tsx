@@ -90,7 +90,6 @@ export default function PlayView() {
   const [buzzing, setBuzzing]                 = useState(false)
   const [timerPayload, setTimerPayload]         = useState<TimerPayload | null>(null)
   const [buzzWindowTs, setBuzzWindowTs]         = useState<number | null>(null)
-  const [buzzWindowRemaining, setBuzzWindowRemaining] = useState<number | null>(null)
   const [timeRemaining, setTimeRemaining]       = useState<number | null>(null)
   const [responseText, setResponseText]       = useState('')
   const [responseSubmitted, setResponseSubmitted] = useState(false)
@@ -137,6 +136,7 @@ export default function PlayView() {
 
   // Refs to avoid stale closures
   const responseSubmittedRef = useRef(false)
+  const responseTextRef      = useRef('')
   const myBuzzIdRef          = useRef<string | null>(null)
   const myTeamRef            = useRef<Team | null>(null)
   const roomRef                = useRef<Room | null>(null)
@@ -150,6 +150,7 @@ export default function PlayView() {
   const pendingSwReloadRef     = useRef(false)
 
   useEffect(() => { responseSubmittedRef.current = responseSubmitted }, [responseSubmitted])
+  useEffect(() => { responseTextRef.current = responseText }, [responseText])
   useEffect(() => { myBuzzIdRef.current = myBuzzId }, [myBuzzId])
   useEffect(() => { myTeamRef.current = myTeam }, [myTeam])
   useEffect(() => { roomRef.current = room }, [room])
@@ -587,27 +588,6 @@ export default function PlayView() {
     setBuzzWindowTs(Date.now())
   }, [activeQuestion, doubleTapTeamId, buzzWindowTs])
 
-  // Buzz window countdown (shown on buzz button before anyone buzzes)
-  useEffect(() => {
-    if (!buzzWindowTs) { setBuzzWindowRemaining(null); return }
-    let fired = false
-    const tick = () => {
-      const r = Math.max(0, Math.floor((buzzWindowTs + 40_000 - Date.now()) / 1000))
-      setBuzzWindowRemaining(r)
-      if (r === 0 && !fired) {
-        fired = true
-        const buzzId = myBuzzIdRef.current
-        if (buzzId && !responseSubmittedRef.current) {
-          supabase.from('buzzes').update({ status: 'expired' }).eq('id', buzzId).then(() => {})
-        }
-        clearInterval(id)
-      }
-    }
-    tick()
-    const id = setInterval(tick, 500)
-    return () => clearInterval(id)
-  }, [buzzWindowTs])
-
   // Timer countdown
   useEffect(() => {
     if (!timerPayload) { setTimeRemaining(null); return }
@@ -621,7 +601,15 @@ export default function PlayView() {
       if (remaining === 0) {
         if (timerPayload.team_id === myTeamRef.current?.id && !responseSubmittedRef.current) {
           const buzzId = myBuzzIdRef.current
-          if (buzzId) supabase.from('buzzes').update({ status: 'expired' }).eq('id', buzzId).then(() => {})
+          if (buzzId) {
+            const text = responseTextRef.current.trim()
+            supabase.from('buzzes').update({
+              response: text || null,
+              response_submitted_at: new Date().toISOString(),
+            }).eq('id', buzzId).then(() => {})
+            setResponseSubmitted(true)
+            responseSubmittedRef.current = true
+          }
         }
         clearInterval(id)
       }
@@ -794,7 +782,7 @@ export default function PlayView() {
   }
 
   async function handleSubmitBuzz() {
-    if (!myTeam || !room?.current_question_id || hasBuzzed || buzzing || !responseText.trim()) return
+    if (!myTeam || !room?.current_question_id || hasBuzzed || buzzing) return
     setBuzzing(true)
     const qId = room.current_question_id
     const { data: buzz, error: err } = await supabase
@@ -803,8 +791,6 @@ export default function PlayView() {
         question_id: qId,
         team_id: myTeam.id,
         status: 'pending',
-        response: responseText.trim(),
-        response_submitted_at: new Date().toISOString(),
       })
       .select().single()
     if (!buzz || err) { setBuzzing(false); return }
@@ -816,10 +802,19 @@ export default function PlayView() {
       .lte('buzzed_at', buzz.buzzed_at)
     setMyBuzzId(buzz.id)
     setHasBuzzed(true)
-    setResponseSubmitted(true)
-    responseSubmittedRef.current = true
     setBuzzPosition(count)
     setBuzzing(false)
+    // Start 10s answer timer locally and broadcast for projector
+    const startTs = Date.now()
+    const payload: TimerPayload = {
+      start_timestamp: startTs,
+      duration_seconds: 10,
+      team_id: myTeam.id,
+      buzz_id: buzz.id,
+      team_name: myTeam.name,
+    }
+    setTimerPayload(payload)
+    broadcastRef.current?.publish('timer_start', payload)
   }
 
   function handleBuzzSubmitClick(e: React.MouseEvent<HTMLButtonElement>) {
@@ -841,6 +836,7 @@ export default function PlayView() {
       response_submitted_at: new Date().toISOString(),
     }).eq('id', myBuzzId)
     setResponseSubmitted(true)
+    responseSubmittedRef.current = true
   }
 
   function handleSelectQuestion(questionId: string, el: HTMLElement) {
@@ -1529,13 +1525,13 @@ export default function PlayView() {
 
   // ── Active question ───────────────────────────────────────
 
-  // DT uses its own timerPayload (30s from buzz); regular questions use the shared buzz window countdown
-  const isDt          = doubleTapTeamId !== null && doubleTapTeamId === myTeam?.id
-  const answerTimer   = isDt ? (timeRemaining ?? 40) : (buzzWindowRemaining ?? 0)
-  const answerTimerPct = (answerTimer / 40) * 100
-  const answerTimerLow = answerTimer <= 10
+  const isDt = doubleTapTeamId !== null && doubleTapTeamId === myTeam?.id
 
+  // DT answer phase: auto-buzzed team types response with 40s timer
   if (hasBuzzed && !responseSubmitted && isDt) {
+    const dtTimer    = timeRemaining ?? 40
+    const dtTimerPct = (dtTimer / 40) * 100
+    const dtTimerLow = dtTimer <= 10
     return (
       <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-6">
         {scoreOverlayEl}
@@ -1543,15 +1539,15 @@ export default function PlayView() {
         <div className="max-w-sm mx-auto w-full flex flex-col flex-1 pt-8">
           <div className="flex items-center justify-between mb-2">
             <p className="text-yellow-400 font-black text-xl">Your turn!</p>
-            <span className={`font-mono text-4xl font-black tabular-nums ${answerTimerLow ? 'text-red-400' : 'text-white'}`}>
-              {answerTimer}
+            <span className={`font-mono text-4xl font-black tabular-nums ${dtTimerLow ? 'text-red-400' : 'text-white'}`}>
+              {dtTimer}
             </span>
           </div>
 
           <div className="w-full h-2 bg-gray-800 rounded-full mb-6 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all duration-500 ${answerTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
-              style={{ width: `${answerTimerPct}%` }}
+              className={`h-full rounded-full transition-all duration-500 ${dtTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
+              style={{ width: `${dtTimerPct}%` }}
             />
           </div>
 
@@ -1560,10 +1556,68 @@ export default function PlayView() {
             <p className="text-lg font-bold leading-snug">{activeQuestion.answer}</p>
           </div>
 
-          {answerTimer === 0 ? (
+          {dtTimer === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
               <p className="text-red-400 font-black text-3xl mb-2">Time's up!</p>
               <p className="text-gray-500 text-sm">You didn't answer in time.</p>
+            </div>
+          ) : (
+            <>
+              <textarea
+                autoFocus
+                placeholder="Type your response…"
+                value={responseText}
+                onChange={e => setResponseText(e.target.value)}
+                rows={3}
+                className="w-full bg-gray-800 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-yellow-400 resize-none text-lg mb-4"
+              />
+              <button
+                onClick={handleSubmitResponse}
+                disabled={!responseText.trim()}
+                className="w-full py-4 rounded-2xl font-black text-lg bg-yellow-400 text-gray-950 disabled:opacity-30"
+              >
+                Submit Response
+              </button>
+            </>
+          )}
+        </div>
+      </div>
+    )
+  }
+
+  // Non-DT answer phase: player buzzed, now has 10s to type response
+  if (hasBuzzed && !responseSubmitted && !isDt) {
+    const ansTimer    = timeRemaining ?? 10
+    const ansTimerPct = (ansTimer / 10) * 100
+    const ansTimerLow = ansTimer <= 3
+    return (
+      <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-6">
+        {scoreOverlayEl}
+        {scoreChip}
+        <div className="max-w-sm mx-auto w-full flex flex-col flex-1 pt-8">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-yellow-400 font-black text-xl">You're in! Type fast!</p>
+            <span className={`font-mono text-4xl font-black tabular-nums ${ansTimerLow ? 'text-red-400' : 'text-white'}`}>
+              {ansTimer}
+            </span>
+          </div>
+
+          <div className="w-full h-2 bg-gray-800 rounded-full mb-4 overflow-hidden">
+            <div
+              className={`h-full rounded-full transition-all duration-500 ${ansTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
+              style={{ width: `${ansTimerPct}%` }}
+            />
+          </div>
+
+          <div className="bg-gray-900 rounded-2xl p-4 mb-4">
+            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The answer</p>
+            <p className="text-lg font-bold leading-snug">{activeQuestion.answer}</p>
+          </div>
+
+          {ansTimer === 0 ? (
+            <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
+              <p className="text-red-400 font-black text-3xl mb-2">Time's up!</p>
+              <p className="text-gray-500 text-sm">Your response was submitted automatically.</p>
             </div>
           ) : (
             <>
@@ -1606,9 +1660,15 @@ export default function PlayView() {
         ) : (
           <p className="text-2xl font-black text-white mb-6">Buzzed in!</p>
         )}
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl px-6 py-4 max-w-xs">
-          <p className="text-gray-300 italic">"{responseText}"</p>
-        </div>
+        {responseText ? (
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl px-6 py-4 max-w-xs">
+            <p className="text-gray-300 italic">"{responseText}"</p>
+          </div>
+        ) : (
+          <div className="bg-gray-900 border border-gray-800 rounded-2xl px-6 py-4 max-w-xs">
+            <p className="text-gray-600 italic text-sm">No response submitted</p>
+          </div>
+        )}
         <p className="text-gray-600 text-xs mt-6">Waiting for the host…</p>
       </div>
     )
@@ -1632,74 +1692,41 @@ export default function PlayView() {
     )
   }
 
-  // Active question — answer entry (submit = buzz)
+  // Active question — buzz phase (question visible, waiting for buzz)
   return (
     <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-5">
       {scoreOverlayEl}
       {scoreChip}
       <div className="max-w-sm mx-auto w-full flex flex-col" style={{ minHeight: 'calc(100vh - 2.5rem)' }}>
-        {buzzWindowRemaining !== null && (
-          <div className="mb-4">
-            <div className="flex justify-between items-baseline mb-1.5">
-              <span className="text-xs text-gray-500 uppercase tracking-wider">Time remaining</span>
-              <span className={`font-mono text-3xl font-black tabular-nums ${buzzWindowRemaining <= 10 ? 'text-red-400' : 'text-white'}`}>
-                {buzzWindowRemaining}
-              </span>
-            </div>
-            <div className="w-full h-1.5 bg-gray-800 rounded-full overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${buzzWindowRemaining <= 10 ? 'bg-red-500' : 'bg-yellow-400'}`}
-                style={{ width: `${(buzzWindowRemaining / 40) * 100}%` }}
-              />
-            </div>
-          </div>
-        )}
-        <div className="bg-gray-900 rounded-2xl p-5 mb-4 pt-14">
+        <div className="bg-gray-900 rounded-2xl p-5 mb-6 pt-14">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The answer</p>
           <p className="text-2xl font-bold leading-snug">{activeQuestion.answer}</p>
           {activeQuestion.point_value && (
             <p className="text-yellow-400 font-mono text-sm mt-3 font-semibold">{activeQuestion.point_value} pts</p>
           )}
         </div>
-        {buzzWindowRemaining === 0 ? (
-          <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
-            <p className="text-red-400 font-black text-3xl mb-2">Time's up!</p>
-            <p className="text-gray-500 text-sm">You didn't answer in time.</p>
-          </div>
-        ) : (
-          <div className="flex flex-col gap-3 flex-1">
-            <textarea
-              autoFocus
-              placeholder="Type your answer…"
-              value={responseText}
-              onChange={e => setResponseText(e.target.value)}
-              rows={4}
-              className="w-full bg-gray-800 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-red-500 resize-none text-lg"
-            />
-            <div className="flex justify-end">
-              <button
-                onClick={handleBuzzSubmitClick}
-                disabled={!responseText.trim() || buzzing}
-                className="relative overflow-hidden px-8 py-3 rounded-xl font-black text-lg bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:bg-red-900 text-white transition-colors shadow-[0_0_30px_rgba(220,38,38,0.4)]"
-              >
-                {ripples.map(r => (
-                  <span
-                    key={r.id}
-                    className="absolute rounded-full bg-white pointer-events-none"
-                    style={{
-                      left: r.x - 24,
-                      top: r.y - 24,
-                      width: 48,
-                      height: 48,
-                      animation: 'buzz-ripple 0.9s ease-out forwards',
-                    }}
-                  />
-                ))}
-                {buzzing ? '…' : 'BUZZ!'}
-              </button>
-            </div>
-          </div>
-        )}
+        <div className="flex-1 flex flex-col justify-end pb-4">
+          <button
+            onClick={handleBuzzSubmitClick}
+            disabled={buzzing}
+            className="relative overflow-hidden w-full py-8 rounded-2xl font-black text-2xl bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:bg-red-900 text-white transition-colors shadow-[0_0_40px_rgba(220,38,38,0.5)]"
+          >
+            {ripples.map(r => (
+              <span
+                key={r.id}
+                className="absolute rounded-full bg-white pointer-events-none"
+                style={{
+                  left: r.x - 24,
+                  top: r.y - 24,
+                  width: 48,
+                  height: 48,
+                  animation: 'buzz-ripple 0.9s ease-out forwards',
+                }}
+              />
+            ))}
+            {buzzing ? '…' : 'BUZZ!'}
+          </button>
+        </div>
       </div>
     </div>
   )
