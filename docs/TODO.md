@@ -1,35 +1,42 @@
 # TODO / Known Issues
 
-## Bugs
-- Player count on host lobby doesn't update in realtime when players leave teams (low priority)
-- Points not subtracting for wrong answers in rounds (score logic)
-- Projector only updates on first host-chosen question, not player-chosen
-- Host doesn't show active question after countdown ends (projector/player sides work fine)
-- **Refresh breaks game state** — if a player refreshes mid-question they get a fresh 40s timer and answer box even if the buzz window has already closed. On reconnect, `loadQuestion` needs to validate the buzz window expiry against the server before restoring answer UI.
+## 🔴 High Priority
 
-## PWA / Caching
-- **PWA update strategy** — players on stale cached versions don't get updates automatically. Options:
-  - Visibility-change polling (`registration.update()` on tab focus) + auto-reload with phase guard
-  - "Update available" banner (user-initiated reload)
-  - Add `vercel.json` with `Cache-Control: no-store` on `sw.js` (should be done regardless)
+### PWA Stale Cache — 404 on Real Devices
+**Symptom:** Player gets 404 on phone in regular browser; works fine in incognito.
+**Root cause:** Incognito has no service worker cache, so it fetches fresh from network. Regular browser loads stale SW from HTTP cache → SW intercepts requests → serves old hashed asset URLs that no longer exist on the CDN after a Vercel redeploy.
 
-## Supabase Setup Required
-- Confirm `teams`, `rooms`, `questions`, `buzzes`, `wagers` tables are all added to the Supabase realtime publication (Dashboard → Database → Replication → supabase_realtime). Without this, postgres_changes subscriptions silently do nothing — broadcasts are the fallback but not a full replacement.
+**Fixes needed:**
+- [x] Add `vercel.json` with `Cache-Control: no-store` on `/sw.js`, `/registerSW.js`, `/index.html` and `no-cache` on `/manifest.webmanifest`
+- [x] Exclude `index.html` from SW precache (`globIgnores`) — navigation always hits network for fresh HTML
+- [x] Confirm `cleanupOutdatedCaches: true` in workbox config (already set in vite.config.ts)
+- [ ] Deploy and have friend test on real device to confirm fix
 
-## Improvements / Not Yet Built
-- Winning team chooses next question (currently auto-assigned or host manually gives)
+---
+
+## 🟡 Bugs
+
+- **Refresh mid-question** — player reconnecting mid-question gets a fresh timer and answer box even if the buzz window has already closed. `loadQuestion` needs to validate buzz window expiry against the server before restoring answer UI.
+- **Player count on host lobby** — doesn't update in realtime when players leave teams. Needs testing to confirm current state. (Low priority)
+
+---
+
+## 🟢 Improvements / Not Yet Built
+
 - Projector setup screen
 - Format changes / content editor
-- Manual score adjustment UI (partially exists via inline edit on host scoreboard)
 
-## Final Tap — Known Edge Cases
+---
+
+## Final Tap — Known Edge Cases (documented, not actionable)
+
 - `currentTurnTeamId` is ephemeral (broadcast only). Host page refresh resets it — host must use "give" button to reassign.
 - If host refreshes during `question` phase of FJ, state restores to `wager` phase (can't recover timer start timestamp from DB). Host must click "Reveal Anyway" to restart the question.
 - Eliminated players (non-top-3) land in `fjSubPhase = 'done'` immediately on `fj_wager_open`.
 
+---
+
 ## Testing Notes
+
 - Use `⚡ FT` button in host scoreboard (dev only) to skip directly to Final Tap from any point in the game
 - DEV guard: `import.meta.env.DEV` — button never appears in production builds
-
-
-Github test.

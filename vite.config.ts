@@ -15,6 +15,9 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
+        // Never precache index.html — always fetch fresh from network so stale
+        // HTML with old asset hashes never gets served after a redeploy.
+        globIgnores: ['**/index.html'],
       },
       manifest: {
         name: 'Tapped In!',
