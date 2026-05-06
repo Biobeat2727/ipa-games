@@ -416,7 +416,13 @@ export default function PlayView() {
       // First DT broadcast (tile tap, before wager) — observers show the reveal animation
       if (p.doubleTapPending && p.selectorTeamId) {
         setDoubleTapTeamId(p.selectorTeamId)
-        sessionStorage.setItem('dtWager', JSON.stringify({ selectorTeamId: p.selectorTeamId }))
+        // Preserve isInitiator flag if this device already set it (clicker's own echo)
+        const existingDt = (() => { try { return JSON.parse(sessionStorage.getItem('dtWager') ?? 'null') } catch { return null } })()
+        sessionStorage.setItem('dtWager', JSON.stringify({
+          selectorTeamId: p.selectorTeamId,
+          questionId: p.questionId,
+          isInitiator: existingDt?.isInitiator === true,
+        }))
         if (p.selectorTeamId !== myTeamRef.current?.id) {
           setDtRevealForObserver(true)
         } else {
@@ -652,15 +658,20 @@ export default function PlayView() {
     setBuzzWindowTs(Date.now())
   }, [activeQuestion, doubleTapTeamId, buzzWindowTs])
 
-  // Fallback: if page was refreshed during DT wager phase, restore the waiting screen from sessionStorage.
+  // Fallback: if page was refreshed during DT wager phase, restore the appropriate screen from sessionStorage.
   useEffect(() => {
     if (activeQuestion || doubleTapTeamId || !myTeam || !room || room.current_question_id) return
     try {
       const saved = sessionStorage.getItem('dtWager')
       if (!saved) return
-      const { selectorTeamId } = JSON.parse(saved) as { selectorTeamId: string }
+      const { selectorTeamId, questionId: savedQId, isInitiator } = JSON.parse(saved) as { selectorTeamId: string; questionId: string; isInitiator: boolean }
       setDoubleTapTeamId(selectorTeamId)
-      if (selectorTeamId === myTeam.id) {
+      if (selectorTeamId === myTeam.id && isInitiator) {
+        // Restore wager screen for the clicker — use a zero rect (no tile animation)
+        setDoubleTapPendingQ({ questionId: savedQId, rect: new DOMRect() })
+        setDoubleTapWagerInput('')
+        setDoubleTapStep('wager')
+      } else if (selectorTeamId === myTeam.id) {
         setDtTeammateWaiting(true)
       } else {
         setDtRevealForObserver(true)
@@ -940,6 +951,8 @@ export default function PlayView() {
       // A second question_preview with the real wager fires after wager is confirmed.
       const team = myTeamRef.current
       if (team) {
+        // Mark this device as the initiator BEFORE broadcasting so the echo doesn't overwrite the flag.
+        sessionStorage.setItem('dtWager', JSON.stringify({ selectorTeamId: team.id, questionId, isInitiator: true }))
         broadcastRef.current?.publish('question_preview', {
           questionId,
           categoryName: cat?.name ?? '',
