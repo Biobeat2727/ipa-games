@@ -105,8 +105,11 @@ export default function PlayView() {
   const [teamNames, setTeamNames]             = useState<Map<string, string>>(new Map())
   const [previewInfo, setPreviewInfo]         = useState<PreviewInfo | null>(null)
   const [doubleTapTeamId, setDoubleTapTeamId] = useState<string | null>(null)
-  const [dtRevealForObserver, setDtRevealForObserver] = useState(false)
-  const [dtTeammateWaiting, setDtTeammateWaiting] = useState(false)
+
+  // Read dtWager role once at mount so the correct screen shows on the very first paint (no board flash)
+  const _dtWagerInit = (() => { try { return JSON.parse(sessionStorage.getItem('dtWager') ?? 'null') } catch { return null } })()
+  const [dtRevealForObserver, setDtRevealForObserver] = useState<boolean>(() => _dtWagerInit?.role === 'observer')
+  const [dtTeammateWaiting, setDtTeammateWaiting] = useState<boolean>(() => _dtWagerInit?.role === 'teammate')
 
   // UI state
   const [showScoreOverlay, setShowScoreOverlay] = useState(false)
@@ -115,10 +118,10 @@ export default function PlayView() {
   const [ripples, setRipples]                     = useState<Array<{ id: number; x: number; y: number }>>([])
 
   // Double Tap state
-  const [doubleTapStep, setDoubleTapStep]       = useState<'reveal' | 'wager' | null>(null)
+  const [doubleTapStep, setDoubleTapStep]       = useState<'reveal' | 'wager' | null>(() => _dtWagerInit?.role === 'initiator' ? 'wager' : null)
   const [doubleTapPendingQ, setDoubleTapPendingQ] = useState<{
     questionId: string; rect: DOMRect
-  } | null>(null)
+  } | null>(() => _dtWagerInit?.role === 'initiator' ? { questionId: _dtWagerInit.questionId, rect: new DOMRect() } : null)
   const [doubleTapWagerInput, setDoubleTapWagerInput] = useState('')
 
   // Final Jeopardy state
@@ -416,12 +419,14 @@ export default function PlayView() {
       // First DT broadcast (tile tap, before wager) — observers show the reveal animation
       if (p.doubleTapPending && p.selectorTeamId) {
         setDoubleTapTeamId(p.selectorTeamId)
-        // Preserve isInitiator flag if this device already set it (clicker's own echo)
+        // Preserve role if this device already set it (clicker's own echo); otherwise assign observer/teammate
         const existingDt = (() => { try { return JSON.parse(sessionStorage.getItem('dtWager') ?? 'null') } catch { return null } })()
+        const role = existingDt?.role === 'initiator' ? 'initiator'
+          : p.selectorTeamId !== myTeamRef.current?.id ? 'observer' : 'teammate'
         sessionStorage.setItem('dtWager', JSON.stringify({
           selectorTeamId: p.selectorTeamId,
           questionId: p.questionId,
-          isInitiator: existingDt?.isInitiator === true,
+          role,
         }))
         if (p.selectorTeamId !== myTeamRef.current?.id) {
           setDtRevealForObserver(true)
@@ -658,26 +663,17 @@ export default function PlayView() {
     setBuzzWindowTs(Date.now())
   }, [activeQuestion, doubleTapTeamId, buzzWindowTs])
 
-  // Fallback: if page was refreshed during DT wager phase, restore the appropriate screen from sessionStorage.
+  // After refresh during DT wager phase: screen state is already restored from sessionStorage via lazy
+  // useState initializers above. This effect just sets doubleTapTeamId for the team name display.
   useEffect(() => {
-    if (activeQuestion || doubleTapTeamId || !myTeam || !room || room.current_question_id) return
+    if (doubleTapTeamId) return
     try {
       const saved = sessionStorage.getItem('dtWager')
       if (!saved) return
-      const { selectorTeamId, questionId: savedQId, isInitiator } = JSON.parse(saved) as { selectorTeamId: string; questionId: string; isInitiator: boolean }
+      const { selectorTeamId } = JSON.parse(saved) as { selectorTeamId: string }
       setDoubleTapTeamId(selectorTeamId)
-      if (selectorTeamId === myTeam.id && isInitiator) {
-        // Restore wager screen for the clicker — use a zero rect (no tile animation)
-        setDoubleTapPendingQ({ questionId: savedQId, rect: new DOMRect() })
-        setDoubleTapWagerInput('')
-        setDoubleTapStep('wager')
-      } else if (selectorTeamId === myTeam.id) {
-        setDtTeammateWaiting(true)
-      } else {
-        setDtRevealForObserver(true)
-      }
     } catch {}
-  }, [activeQuestion, doubleTapTeamId, myTeam?.id, room?.current_question_id]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [doubleTapTeamId])
 
   // Buzz window countdown (25s from when host opened buzzer)
   useEffect(() => {
@@ -951,8 +947,8 @@ export default function PlayView() {
       // A second question_preview with the real wager fires after wager is confirmed.
       const team = myTeamRef.current
       if (team) {
-        // Mark this device as the initiator BEFORE broadcasting so the echo doesn't overwrite the flag.
-        sessionStorage.setItem('dtWager', JSON.stringify({ selectorTeamId: team.id, questionId, isInitiator: true }))
+        // Mark this device as the initiator BEFORE broadcasting so the echo doesn't overwrite the role.
+        sessionStorage.setItem('dtWager', JSON.stringify({ selectorTeamId: team.id, questionId, role: 'initiator' }))
         broadcastRef.current?.publish('question_preview', {
           questionId,
           categoryName: cat?.name ?? '',
