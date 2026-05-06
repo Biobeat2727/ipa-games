@@ -549,9 +549,10 @@ export default function PlayView() {
     })
 
     ch.subscribe('team_answer_submitted', ({ data }) => {
-      const p = data as { team_id: string; buzz_id: string; buzzPosition: number | null }
+      const p = data as { team_id: string; buzz_id: string; buzzPosition: number | null; response?: string }
       if (p.team_id === myTeamRef.current?.id && !responseSubmittedRef.current) {
         setBuzzPosition(p.buzzPosition)
+        if (p.response) setResponseText(p.response)
         setResponseSubmitted(true)
         responseSubmittedRef.current = true
       }
@@ -842,6 +843,7 @@ export default function PlayView() {
       team_id: myTeam?.id,
       buzz_id: buzzId,
       buzzPosition,
+      response: responseText.trim(),
     })
   }
 
