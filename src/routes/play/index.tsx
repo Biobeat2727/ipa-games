@@ -1685,14 +1685,18 @@ export default function PlayView() {
     )
   }
 
-  // Already submitted — waiting for host (covers actual buzzer AND teammates after wrong judgment clears timerPayload)
-  if (responseSubmitted) {
+  // Buzzed or submitted — never show buzz button again until question is cleared
+  // hasBuzzed covers: buzzed but timer expired before submission, then host judges wrong (clears timerPayload)
+  // responseSubmitted covers: teammates who submitted via team_answer_submitted broadcast
+  if (hasBuzzed || responseSubmitted) {
     return (
       <div className="relative min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         {scoreChip}
         <div className="w-3 h-3 rounded-full bg-yellow-400 mb-6 animate-pulse" />
-        <p className="text-2xl font-black text-white mb-2">Response submitted</p>
+        <p className="text-2xl font-black text-white mb-2">
+          {responseSubmitted ? 'Response submitted' : 'Buzzed in!'}
+        </p>
         <p className="text-gray-500 text-sm">Waiting for the host…</p>
         {responseText && (
           <div className="bg-gray-900 border border-gray-800 rounded-2xl px-6 py-4 max-w-xs mt-6">
