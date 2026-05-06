@@ -369,6 +369,17 @@ export default function PlayView() {
         if (existingBuzz) {
           setHasBuzzed(true)
           setMyBuzzId(existingBuzz.id)
+          // Reconstruct timerPayload from server buzz time so answer/waiting screens render after refresh
+          const team = myTeamRef.current
+          if (team) {
+            setTimerPayload({
+              start_timestamp: new Date(existingBuzz.buzzed_at).getTime(),
+              duration_seconds: 15,
+              team_id: team.id,
+              buzz_id: existingBuzz.id,
+              team_name: team.name,
+            })
+          }
           if (existingBuzz.response) { setResponseText(existingBuzz.response); setResponseSubmitted(true) }
         }
       }
@@ -417,10 +428,15 @@ export default function PlayView() {
       setPreviewInfo(null)
       setDoubleTapTeamId(double_tap_team_id ?? null)
       setBuzzWindowTs(buzz_opened_at ?? null)
+      // Persist so the buzz-window countdown survives a page refresh
+      if (buzz_opened_at) {
+        sessionStorage.setItem('buzzWindow', JSON.stringify({ questionId: question_id, ts: buzz_opened_at }))
+      }
       setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
     })
     ch.subscribe('question_deactivated', () => {
       dtAutoBuzzedRef.current = null
+      sessionStorage.removeItem('buzzWindow')
       setDtRevealForObserver(false)
       setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
       setActiveQuestion(null)
@@ -601,10 +617,17 @@ export default function PlayView() {
     return () => clearTimeout(id)
   }, [buzzResult])
 
-  // Fallback: if question loads but buzz_opened_at broadcast was missed (e.g. arrived via DB poll),
-  // start the timer from now so the countdown always appears.
+  // Fallback: if question loads but buzz_opened_at broadcast was missed (e.g. refresh or DB poll),
+  // restore from sessionStorage if it matches, otherwise start from now.
   useEffect(() => {
     if (!activeQuestion || doubleTapTeamId || buzzWindowTs) return
+    try {
+      const saved = sessionStorage.getItem('buzzWindow')
+      if (saved) {
+        const { questionId, ts } = JSON.parse(saved) as { questionId: string; ts: number }
+        if (questionId === activeQuestion.id) { setBuzzWindowTs(ts); return }
+      }
+    } catch {}
     setBuzzWindowTs(Date.now())
   }, [activeQuestion, doubleTapTeamId, buzzWindowTs])
 
