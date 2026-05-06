@@ -55,7 +55,7 @@ checking → no_lobby → join_lobby → select_team → lobby → game
 - After 10s: question is activated (`rooms.current_question_id` updated + `question_activated` broadcast)
 - Buzz button goes live on all player screens simultaneously
 - Buzzes stored with server timestamp → host sees chronological queue
-- First team in queue: text input + `timer_start` broadcast (30s countdown)
+- First team in queue: text input + `timer_start` broadcast (15s countdown); ALL teammates on that team see the answer box simultaneously
 - Host judges: **Correct** or **Wrong**
   - **Correct:** score added, question marked `is_answered`, turn passes to winning team
   - **Wrong:** buzz marked wrong, next in queue gets fresh timer

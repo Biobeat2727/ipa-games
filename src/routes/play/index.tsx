@@ -987,9 +987,19 @@ export default function PlayView() {
           <p className="text-white font-black text-2xl mb-1">Tonight's Game</p>
           <p className="text-gray-500 text-sm">Opened at {openedAt}</p>
         </div>
+        <input
+          type="text"
+          placeholder="Your nickname"
+          value={nickname}
+          onChange={e => setNickname(e.target.value)}
+          onKeyDown={e => e.key === 'Enter' && nickname.trim() && handleJoinLobby()}
+          className="w-full max-w-sm bg-gray-800 text-white rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-yellow-400 text-center text-lg"
+          autoFocus
+        />
         <button
           onClick={handleJoinLobby}
-          className="w-full max-w-sm py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950"
+          disabled={!nickname.trim()}
+          className="w-full max-w-sm py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 disabled:opacity-30"
         >
           Join Lobby
         </button>
@@ -1002,13 +1012,6 @@ export default function PlayView() {
       <div className="min-h-screen bg-gray-950 text-white flex flex-col p-6">
         <div className="max-w-sm mx-auto w-full pt-10">
           <h1 className="text-center text-4xl font-black text-yellow-400 mb-8">Tapped In!</h1>
-          <input
-            type="text"
-            placeholder="Your nickname (optional)"
-            value={nickname}
-            onChange={e => setNickname(e.target.value)}
-            className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 mb-6 outline-none focus:ring-2 focus:ring-yellow-400 text-sm"
-          />
           {!showCreate ? (
             <button
               onClick={() => setShowCreate(true)}
