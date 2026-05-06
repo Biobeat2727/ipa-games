@@ -1349,7 +1349,7 @@ export default function PlayView() {
           <p className="text-2xl font-black text-yellow-400">Score History</p>
           <p className="text-gray-500 text-sm mt-1">Waiting for host to start Round 2…</p>
         </div>
-        <div className="flex-1 min-h-[50vh]">
+        <div style={{ height: '45vh' }}>
           <ScoreHistoryChart
             snapshots={intermissionSnapshots}
             teamNames={teamNameMap}

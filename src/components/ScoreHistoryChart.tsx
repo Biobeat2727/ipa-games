@@ -86,9 +86,9 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds }: Pro
             color: '#f9fafb',
             fontSize: 13,
           }}
-          formatter={(value: number, name: string) => [
-            value.toLocaleString(),
-            teamNames.get(name) ?? name,
+          formatter={(value, name) => [
+            typeof value === 'number' ? value.toLocaleString() : String(value ?? ''),
+            teamNames.get(String(name ?? '')) ?? String(name ?? ''),
           ]}
           labelStyle={{ color: '#d1d5db', fontWeight: 700, marginBottom: 4 }}
         />

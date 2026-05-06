@@ -681,6 +681,16 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     broadcastRef.current?.publish('round_intermission', { snapshots })
   }
 
+  function devShowGraph() {
+    if (teams.length === 0) { alert('DEV: No teams in this room yet — join some first.'); return }
+    const snapshots: ScoreSnapshot[] = [{
+      label: 'Round 1',
+      scores: teams.map(t => ({ team_id: t.id, score: scores.get(t.id) ?? t.score })),
+    }]
+    setIntermissionSnapshots(snapshots)
+    broadcastRef.current?.publish('round_intermission', { snapshots })
+  }
+
   async function beginRound2() {
     // Capture turn assignment before the async gap so it doesn't go stale
     const firstTeamId = currentTurnTeamId
@@ -743,13 +753,22 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
             <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold">Scoreboard</p>
             <div className="flex items-center gap-3">
               {import.meta.env.DEV && !fjPhase && (
-                <button
-                  onClick={startFinalJeopardy}
-                  className="text-xs text-purple-500 hover:text-purple-300 transition-colors"
-                  title="DEV: skip to Final Tap"
-                >
-                  ⚡ FT
-                </button>
+                <>
+                  <button
+                    onClick={devShowGraph}
+                    className="text-xs text-pink-500 hover:text-pink-300 transition-colors"
+                    title="DEV: test score graph"
+                  >
+                    ⚡ Graph
+                  </button>
+                  <button
+                    onClick={startFinalJeopardy}
+                    className="text-xs text-purple-500 hover:text-purple-300 transition-colors"
+                    title="DEV: skip to Final Tap"
+                  >
+                    ⚡ FT
+                  </button>
+                </>
               )}
               {newGameConfirm ? (
                 <div className="flex items-center gap-2">
