@@ -608,10 +608,10 @@ export default function PlayView() {
     setBuzzWindowTs(Date.now())
   }, [activeQuestion, doubleTapTeamId, buzzWindowTs])
 
-  // Buzz window countdown (45s from when host opened buzzer)
+  // Buzz window countdown (25s from when host opened buzzer)
   useEffect(() => {
     if (!buzzWindowTs) { setBuzzWindowRemaining(null); return }
-    const BUZZ_WINDOW = 45
+    const BUZZ_WINDOW = 25
     const tick = () => {
       const remaining = Math.max(0, Math.floor(
         (buzzWindowTs + BUZZ_WINDOW * 1000 - Date.now()) / 1000
@@ -1757,8 +1757,8 @@ export default function PlayView() {
 
   // Active question — buzz phase (question visible, waiting for buzz)
   const buzzWindowClosed = buzzWindowRemaining === 0
-  const buzzTimerLow = (buzzWindowRemaining ?? 45) <= 10
-  const buzzWindowPct = ((buzzWindowRemaining ?? 45) / 45) * 100
+  const buzzTimerLow = (buzzWindowRemaining ?? 25) <= 10
+  const buzzWindowPct = ((buzzWindowRemaining ?? 25) / 25) * 100
 
   return (
     <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-5">

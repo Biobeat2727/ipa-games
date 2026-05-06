@@ -337,10 +337,10 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     return () => clearInterval(id)
   }, [judgeStartTime])
 
-  // Buzz window countdown (45s from when host opened buzzer)
+  // Buzz window countdown (25s from when host opened buzzer)
   useEffect(() => {
     if (!buzzOpenedAt) { setBuzzWindowRemaining(null); return }
-    const BUZZ_WINDOW = 45
+    const BUZZ_WINDOW = 25
     const tick = () => {
       const remaining = Math.max(0, Math.floor(
         (buzzOpenedAt + BUZZ_WINDOW * 1000 - Date.now()) / 1000
@@ -1223,7 +1223,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                   <div className="w-full h-1.5 bg-gray-800 rounded-full overflow-hidden">
                     <div
                       className={`h-full rounded-full transition-all duration-500 ${buzzWindowRemaining <= 10 ? 'bg-red-500' : 'bg-yellow-400'}`}
-                      style={{ width: `${(buzzWindowRemaining / 45) * 100}%` }}
+                      style={{ width: `${(buzzWindowRemaining / 25) * 100}%` }}
                     />
                   </div>
                 </div>
