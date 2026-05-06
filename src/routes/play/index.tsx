@@ -90,6 +90,7 @@ export default function PlayView() {
   const [buzzing, setBuzzing]                 = useState(false)
   const [timerPayload, setTimerPayload]         = useState<TimerPayload | null>(null)
   const [buzzWindowTs, setBuzzWindowTs]         = useState<number | null>(null)
+  const [buzzWindowRemaining, setBuzzWindowRemaining] = useState<number | null>(null)
   const [timeRemaining, setTimeRemaining]       = useState<number | null>(null)
   const [responseText, setResponseText]       = useState('')
   const [responseSubmitted, setResponseSubmitted] = useState(false)
@@ -606,6 +607,21 @@ export default function PlayView() {
     setBuzzWindowTs(Date.now())
   }, [activeQuestion, doubleTapTeamId, buzzWindowTs])
 
+  // Buzz window countdown (45s from when host opened buzzer)
+  useEffect(() => {
+    if (!buzzWindowTs) { setBuzzWindowRemaining(null); return }
+    const BUZZ_WINDOW = 45
+    const tick = () => {
+      const remaining = Math.max(0, Math.floor(
+        (buzzWindowTs + BUZZ_WINDOW * 1000 - Date.now()) / 1000
+      ))
+      setBuzzWindowRemaining(remaining)
+    }
+    tick()
+    const id = setInterval(tick, 500)
+    return () => clearInterval(id)
+  }, [buzzWindowTs])
+
   // Timer countdown
   useEffect(() => {
     if (!timerPayload) { setTimeRemaining(null); return }
@@ -789,6 +805,7 @@ export default function PlayView() {
 
   async function handleSubmitBuzz() {
     if (!myTeam || !room?.current_question_id || hasBuzzed || buzzing) return
+    if (buzzWindowRemaining === 0) return
     setBuzzing(true)
     const qId = room.current_question_id
     const { data: buzz, error: err } = await supabase
@@ -1731,39 +1748,68 @@ export default function PlayView() {
   }
 
   // Active question — buzz phase (question visible, waiting for buzz)
+  const buzzWindowClosed = buzzWindowRemaining === 0
+  const buzzTimerLow = (buzzWindowRemaining ?? 45) <= 10
+  const buzzWindowPct = ((buzzWindowRemaining ?? 45) / 45) * 100
+
   return (
     <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-5">
       {scoreOverlayEl}
       {scoreChip}
       <div className="max-w-sm mx-auto w-full flex flex-col" style={{ minHeight: 'calc(100vh - 2.5rem)' }}>
-        <div className="bg-gray-900 rounded-2xl p-5 mb-6 pt-14">
+        <div className="bg-gray-900 rounded-2xl p-5 mb-4 pt-14">
           <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The answer</p>
           <p className="text-2xl font-bold leading-snug">{activeQuestion.answer}</p>
           {activeQuestion.point_value && (
             <p className="text-yellow-400 font-mono text-sm mt-3 font-semibold">{activeQuestion.point_value} pts</p>
           )}
         </div>
-        <div className="flex-1 flex flex-col justify-end pb-4">
-          <button
-            onClick={handleBuzzSubmitClick}
-            disabled={buzzing}
-            className="relative overflow-hidden w-full py-8 rounded-2xl font-black text-2xl bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:bg-red-900 text-white transition-colors shadow-[0_0_40px_rgba(220,38,38,0.5)]"
-          >
-            {ripples.map(r => (
-              <span
-                key={r.id}
-                className="absolute rounded-full bg-white pointer-events-none"
-                style={{
-                  left: r.x - 24,
-                  top: r.y - 24,
-                  width: 48,
-                  height: 48,
-                  animation: 'buzz-ripple 0.9s ease-out forwards',
-                }}
+
+        {/* Buzz window countdown bar */}
+        {buzzWindowRemaining !== null && (
+          <div className="mb-4">
+            <div className="flex justify-between items-center mb-1">
+              <p className="text-xs text-gray-500 uppercase tracking-wider">Buzz window</p>
+              <span className={`font-mono font-black text-lg tabular-nums ${buzzTimerLow ? 'text-red-400' : 'text-white'}`}>
+                {buzzWindowRemaining}s
+              </span>
+            </div>
+            <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${buzzTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
+                style={{ width: `${buzzWindowPct}%` }}
               />
-            ))}
-            {buzzing ? '…' : 'BUZZ!'}
-          </button>
+            </div>
+          </div>
+        )}
+
+        <div className="flex-1 flex flex-col justify-end pb-4">
+          {buzzWindowClosed ? (
+            <div className="w-full py-8 rounded-2xl font-black text-xl bg-gray-800 text-gray-500 text-center">
+              Buzz window closed
+            </div>
+          ) : (
+            <button
+              onClick={handleBuzzSubmitClick}
+              disabled={buzzing}
+              className="relative overflow-hidden w-full py-8 rounded-2xl font-black text-2xl bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:bg-red-900 text-white transition-colors shadow-[0_0_40px_rgba(220,38,38,0.5)]"
+            >
+              {ripples.map(r => (
+                <span
+                  key={r.id}
+                  className="absolute rounded-full bg-white pointer-events-none"
+                  style={{
+                    left: r.x - 24,
+                    top: r.y - 24,
+                    width: 48,
+                    height: 48,
+                    animation: 'buzz-ripple 0.9s ease-out forwards',
+                  }}
+                />
+              ))}
+              {buzzing ? '…' : 'BUZZ!'}
+            </button>
+          )}
         </div>
       </div>
     </div>
