@@ -416,6 +416,7 @@ export default function PlayView() {
       // First DT broadcast (tile tap, before wager) — observers show the reveal animation
       if (p.doubleTapPending && p.selectorTeamId) {
         setDoubleTapTeamId(p.selectorTeamId)
+        sessionStorage.setItem('dtWager', JSON.stringify({ selectorTeamId: p.selectorTeamId }))
         if (p.selectorTeamId !== myTeamRef.current?.id) {
           setDtRevealForObserver(true)
         } else {
@@ -425,6 +426,7 @@ export default function PlayView() {
       }
 
       // Real preview (post-wager or normal question)
+      sessionStorage.removeItem('dtWager')
       setPreviewInfo(p)
       if (p.doubleTapWager !== undefined && p.selectorTeamId) {
         setDoubleTapTeamId(p.selectorTeamId)
@@ -446,6 +448,7 @@ export default function PlayView() {
     ch.subscribe('question_deactivated', () => {
       dtAutoBuzzedRef.current = null
       sessionStorage.removeItem('buzzWindow')
+      sessionStorage.removeItem('dtWager')
       setDtRevealForObserver(false)
       setDtTeammateWaiting(false)
       setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
@@ -530,6 +533,7 @@ export default function PlayView() {
         setDoubleTapTeamId(null)
         setDtRevealForObserver(false)
         setDtTeammateWaiting(false)
+        sessionStorage.removeItem('dtWager')
         loadBoard(r.id, status === 'round_2' ? 2 : 1)
         return
       }
@@ -579,6 +583,7 @@ export default function PlayView() {
     })
     ch.subscribe('lobby_closed', () => {
       clearPlayerSession()
+      sessionStorage.removeItem('dtWager')
       setPreviewInfo(null); setActiveQuestion(null); setCurrentTurnTeamId(null)
       setTimerPayload(null); setBuzzWindowTs(null); setHasBuzzed(false); setMyBuzzId(null); setBuzzPosition(null); setBuzzResult(null)
       setDoubleTapTeamId(null); setDtRevealForObserver(false); setDtTeammateWaiting(false)
@@ -646,6 +651,22 @@ export default function PlayView() {
     } catch {}
     setBuzzWindowTs(Date.now())
   }, [activeQuestion, doubleTapTeamId, buzzWindowTs])
+
+  // Fallback: if page was refreshed during DT wager phase, restore the waiting screen from sessionStorage.
+  useEffect(() => {
+    if (activeQuestion || doubleTapTeamId || !myTeam || !room || room.current_question_id) return
+    try {
+      const saved = sessionStorage.getItem('dtWager')
+      if (!saved) return
+      const { selectorTeamId } = JSON.parse(saved) as { selectorTeamId: string }
+      setDoubleTapTeamId(selectorTeamId)
+      if (selectorTeamId === myTeam.id) {
+        setDtTeammateWaiting(true)
+      } else {
+        setDtRevealForObserver(true)
+      }
+    } catch {}
+  }, [activeQuestion, doubleTapTeamId, myTeam?.id, room?.current_question_id]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Buzz window countdown (25s from when host opened buzzer)
   useEffect(() => {
