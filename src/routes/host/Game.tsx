@@ -38,6 +38,8 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const [dtPendingTeamId, setDtPendingTeamId] = useState<string | null>(null)
   const [pendingDeactivation, setPendingDeactivation] = useState(false)
   const [newGameConfirm, setNewGameConfirm] = useState(false)
+  const [buzzOpenedAt, setBuzzOpenedAt]     = useState<number | null>(null)
+  const [buzzWindowRemaining, setBuzzWindowRemaining] = useState<number | null>(null)
 
   const broadcastRef        = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
   const activationStartTsRef = useRef<number | null>(null)
@@ -335,6 +337,21 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     return () => clearInterval(id)
   }, [judgeStartTime])
 
+  // Buzz window countdown (45s from when host opened buzzer)
+  useEffect(() => {
+    if (!buzzOpenedAt) { setBuzzWindowRemaining(null); return }
+    const BUZZ_WINDOW = 45
+    const tick = () => {
+      const remaining = Math.max(0, Math.floor(
+        (buzzOpenedAt + BUZZ_WINDOW * 1000 - Date.now()) / 1000
+      ))
+      setBuzzWindowRemaining(remaining)
+    }
+    tick()
+    const id = setInterval(tick, 500)
+    return () => clearInterval(id)
+  }, [buzzOpenedAt])
+
   // Reset expiry guard when a new question phase begins
   useEffect(() => {
     if (fjPhase === 'question') fjExpiryInProgress.current = false
@@ -363,6 +380,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       if (doubleTapWager === null) {
         const startTs = Date.now()
         activationStartTsRef.current = startTs
+        setBuzzOpenedAt(startTs)
         // Timer is now player-side (10s from buzz) — no host judgeStartTime for regular questions
         broadcastRef.current?.publish('question_activated', {
           question_id: questionId,
@@ -370,6 +388,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         })
       } else {
         activationStartTsRef.current = null
+        setBuzzOpenedAt(null)
         broadcastRef.current?.publish('question_activated', {
           question_id: questionId,
           double_tap_team_id: currentTurnTeamId,
@@ -389,6 +408,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       .from('rooms').update({ current_question_id: null }).eq('id', roomId)
     if (!error) {
       activationStartTsRef.current = null
+      setBuzzOpenedAt(null)
       setRoom(prev => ({ ...prev, current_question_id: null }))
       setDoubleTapWager(null)
       setPendingDeactivation(false)
@@ -1191,7 +1211,23 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                   </button>
                 </div>
               </div>
-              <p className="text-lg font-bold mt-3 mb-4 leading-snug">{activeQuestion.answer}</p>
+              <p className="text-lg font-bold mt-3 mb-3 leading-snug">{activeQuestion.answer}</p>
+              {buzzWindowRemaining !== null && doubleTapWager === null && (
+                <div className="mb-4">
+                  <div className="flex justify-between items-center mb-1">
+                    <p className="text-xs text-gray-500 uppercase tracking-wider">Buzz window</p>
+                    <span className={`font-mono font-black text-sm tabular-nums ${buzzWindowRemaining <= 10 ? 'text-red-400' : 'text-gray-300'}`}>
+                      {buzzWindowRemaining}s
+                    </span>
+                  </div>
+                  <div className="w-full h-1.5 bg-gray-800 rounded-full overflow-hidden">
+                    <div
+                      className={`h-full rounded-full transition-all duration-500 ${buzzWindowRemaining <= 10 ? 'bg-red-500' : 'bg-yellow-400'}`}
+                      style={{ width: `${(buzzWindowRemaining / 45) * 100}%` }}
+                    />
+                  </div>
+                </div>
+              )}
               <div className="border-t border-gray-800 pt-3">
                 <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">Expected response</p>
                 <p className="text-green-400 font-semibold">{activeQuestion.correct_question}</p>
