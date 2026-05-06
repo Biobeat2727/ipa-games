@@ -37,6 +37,7 @@ interface PreviewInfo {
   pointValue: number | null
   startTs: number
   doubleTapWager?: number
+  answer?: string
 }
 
 // ── Quip cycler component ─────────────────────────────────────
@@ -910,6 +911,7 @@ export default function PlayView() {
       pointValue:   q?.point_value ?? null,
       startTs:      Date.now(),
       ...(wager !== null ? { doubleTapWager: wager } : {}),
+      answer:       q?.answer ?? '',
     }
     const rect = elOrRect instanceof HTMLElement ? elOrRect.getBoundingClientRect() : elOrRect
     setTileRect(rect)
@@ -1544,8 +1546,14 @@ export default function PlayView() {
               {previewInfo.categoryName}
             </p>
             {previewInfo.pointValue != null && !previewInfo.doubleTapWager && (
-              <p className="text-yellow-400 font-mono font-black text-3xl mb-8">
+              <p className="text-yellow-400 font-mono font-black text-3xl mb-6">
                 ${previewInfo.pointValue}
+              </p>
+            )}
+            {previewInfo.answer && (
+              <p className="text-white font-semibold leading-snug mb-8 max-w-md"
+                style={{ fontSize: 'clamp(1.1rem, 4vw, 1.5rem)' }}>
+                {previewInfo.answer}
               </p>
             )}
             <p className="text-gray-500 text-sm animate-pulse">Waiting for host…</p>
