@@ -567,6 +567,22 @@ export default function PlayView() {
       const isActive = active_team_ids ? active_team_ids.includes(myId) : true
       setFjSubPhase(isActive ? 'wager' : 'done')
     })
+    ch.subscribe('fj_wager_locked', async ({ data }) => {
+      const { team_id, wager_id } = data as { team_id: string; wager_id?: string }
+      if (team_id !== myTeamRef.current?.id) return
+      // Teammate locked in a wager — sync wager_id and flip to locked screen
+      if (wager_id) {
+        setFjWagerId(wager_id)
+      } else if (!fjWagerIdRef.current) {
+        // Fallback: fetch from DB if wager_id wasn't in the broadcast
+        const roomId = roomRef.current?.id
+        if (roomId) {
+          const { data: w } = await supabase.from('wagers').select('id').eq('team_id', team_id).eq('room_id', roomId).maybeSingle()
+          if (w) setFjWagerId(w.id)
+        }
+      }
+      setFjSubPhase(prev => prev === 'wager' ? 'wager_locked' : prev)
+    })
     ch.subscribe('fj_timer_expired', () => {
       // Auto-submit whatever the player has typed
       const wagerId = fjWagerIdRef.current
@@ -1021,12 +1037,19 @@ export default function PlayView() {
     if (!wager || err) return
     setFjWagerId(wager.id)
     setFjSubPhase('wager_locked')
-    broadcastRef.current?.publish('fj_wager_locked', { team_id: myTeam.id })
+    broadcastRef.current?.publish('fj_wager_locked', { team_id: myTeam.id, wager_id: wager.id })
   }
 
   async function handleSubmitFJResponse() {
-    const wagerId = fjWagerId
-    if (!wagerId || !fjResponse.trim()) return
+    if (!fjResponse.trim() || !myTeam || !room) return
+    let wagerId = fjWagerId
+    if (!wagerId) {
+      // Teammate who didn't submit the wager — fetch it from DB
+      const { data: w } = await supabase.from('wagers').select('id').eq('team_id', myTeam.id).eq('room_id', room.id).maybeSingle()
+      if (!w) return
+      wagerId = w.id
+      setFjWagerId(w.id)
+    }
     await supabase.from('wagers').update({
       response: fjResponse.trim(),
       submitted_at: new Date().toISOString(),
