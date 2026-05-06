@@ -422,6 +422,7 @@ export default function PlayView() {
           selectorTeamId: p.selectorTeamId,
           questionId: p.questionId,
           isInitiator: existingDt?.isInitiator === true,
+          roomId: roomRef.current?.id,
         }))
         if (p.selectorTeamId !== myTeamRef.current?.id) {
           setDtRevealForObserver(true)
@@ -664,7 +665,8 @@ export default function PlayView() {
     try {
       const saved = sessionStorage.getItem('dtWager')
       if (!saved) return
-      const { selectorTeamId, questionId: savedQId, isInitiator } = JSON.parse(saved) as { selectorTeamId: string; questionId: string; isInitiator: boolean }
+      const { selectorTeamId, questionId: savedQId, isInitiator, roomId: savedRoomId } = JSON.parse(saved) as { selectorTeamId: string; questionId: string; isInitiator: boolean; roomId?: string }
+      if (savedRoomId && savedRoomId !== room.id) { sessionStorage.removeItem('dtWager'); return }
       setDoubleTapTeamId(selectorTeamId)
       if (selectorTeamId === myTeam.id && isInitiator) {
         setDoubleTapPendingQ({ questionId: savedQId, rect: new DOMRect() })
@@ -951,7 +953,7 @@ export default function PlayView() {
       const team = myTeamRef.current
       if (team) {
         // Mark this device as the initiator BEFORE broadcasting so the echo doesn't overwrite the flag.
-        sessionStorage.setItem('dtWager', JSON.stringify({ selectorTeamId: team.id, questionId, isInitiator: true }))
+        sessionStorage.setItem('dtWager', JSON.stringify({ selectorTeamId: team.id, questionId, isInitiator: true, roomId: room.id }))
         broadcastRef.current?.publish('question_preview', {
           questionId,
           categoryName: cat?.name ?? '',
