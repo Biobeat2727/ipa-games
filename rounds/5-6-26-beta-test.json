@@ -1,0 +1,99 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "categories": [
+        {
+          "name": "Hold My Beer",
+          "questions": [
+            { "point_value": 100, "answer": "This president, shot during a campaign speech in 1912, refused to go to the hospital and finished his 90-minute address before seeking medical help.", "correct_question": "Who is Theodore Roosevelt?" },
+            { "point_value": 200, "answer": "In 1974, this daredevil attempted to jump the Snake River Canyon in Idaho on a rocket-powered 'Skycycle.'", "correct_question": "Who is Evel Knievel?" },
+            { "point_value": 300, "answer": "This boxer, who famously said 'Float like a butterfly, sting like a bee,' shocked the world in 1964 by defeating Sonny Liston as a massive underdog to claim the heavyweight title.", "correct_question": "Who is Muhammad Ali?" },
+            { "point_value": 400, "answer": "This Cuban-born revolutionary crossed the Atlantic in 1965 to help lead guerrilla uprisings in Africa and Bolivia, abandoning a cushy government post to keep fighting.", "correct_question": "Who is Che Guevara?" },
+            { "point_value": 500, "answer": "This Viking explorer is widely credited as the first European to reach North America, doing so nearly 500 years before Columbus.", "correct_question": "Who is Leif Erikson?" }
+          ]
+        },
+        {
+          "name": "Blockbuster Night",
+          "questions": [
+            { "point_value": 100, "answer": "This 1994 film follows an ex-con named Andy Dufresne who befriends a fellow prisoner named Red while serving time at Shawshank prison.", "correct_question": "What is The Shawshank Redemption?" },
+            { "point_value": 200, "answer": "Tom Hanks delivered the line 'Life is like a box of chocolates' in this 1994 Best Picture winner.", "correct_question": "What is Forrest Gump?" },
+            { "point_value": 300, "answer": "This director's credits include Jaws, E.T., Schindler's List, and the Indiana Jones franchise.", "correct_question": "Who is Steven Spielberg?" },
+            { "point_value": 400, "answer": "The 1980 horror film where Jack Nicholson's character types 'All work and no play makes Jack a dull boy' over and over was directed by Stanley Kubrick.", "correct_question": "What is The Shining?" },
+            { "point_value": 500, "answer": "The 1941 Orson Welles film widely considered the greatest ever made centers on a reporter investigating the life of the fictional media mogul Charles Foster Kane.", "correct_question": "What is Citizen Kane?" }
+          ]
+        },
+        {
+          "name": "What's on Tap",
+          "questions": [
+            { "point_value": 100, "answer": "This dark Irish stout, brewed since 1759, is famous for its creamy head that drinkers have made a game out of called \"Splitting the G\".", "correct_question": "What is Guinness?" },
+            { "point_value": 200, "answer": "IPAs get their bitter, hoppy punch from this cone-shaped flowering plant, also used as a natural preservative in beer.", "correct_question": "What are hops?" },
+            { "point_value": 300, "answer": "This Pacific Northwest city is home to more craft breweries per capita than almost anywhere in the U.S., earning the nickname 'Beervana.'", "correct_question": "What is Portland (Oregon)?" },
+            { "point_value": 400, "answer": "This term describes a beer fermented at cooler temperatures using bottom-fermenting yeast, producing a crisper, cleaner flavor than its ale counterpart.", "correct_question": "What is a lager?" },
+            { "point_value": 500, "answer": "Brewers use this term for the thick, sugary liquid produced after mashing grain — before hops are added and fermentation begins, it tastes something like unfiltered barley tea.", "correct_question": "What is wort?" }
+          ]
+        },
+        {
+          "name": "Press Start",
+          "questions": [
+            { "point_value": 100, "answer": "This iconic 1980 Namco arcade game was so popular in Japan that it reportedly caused a national shortage of 100-yen coins.", "correct_question": "What is Pac-Man?" },
+            { "point_value": 200, "answer": "Atari's 1972 table tennis arcade game is widely considered the first commercially successful video game.", "correct_question": "What is Pong?" },
+            { "point_value": 300, "answer": "This handheld Nintendo console launched in 1989 and turned the Game Boy into a cultural phenomenon with a certain block-stacking puzzle game.", "correct_question": "What is the Game Boy?" },
+            { "point_value": 400, "answer": "The original Xbox launched in 2001 alongside this sci-fi shooter franchise, which became the console's killer app and remains its flagship series.", "correct_question": "What is Halo?" },
+            { "point_value": 500, "answer": "This 1999 N64 game featuring Link was the first 3D entry in its franchise and is often cited as the highest-rated video game ever reviewed.", "correct_question": "What is Ocarina of Time?" }
+          ]
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "categories": [
+        {
+          "name": "That's So 2000s",
+          "questions": [
+            { "point_value": 200, "answer": "Paris Hilton made this two-word phrase her signature catchphrase, often said while posing for cameras in the mid-2000s.", "correct_question": "What is 'That's hot'?" },
+            { "point_value": 400, "answer": "This video-sharing website, launched in 2005, hosted the very first upload — a clip of co-founder Jawed Karim at the zoo.", "correct_question": "What is YouTube?" },
+            { "point_value": 600, "answer": "Released in 2001, this Apple device came with a scroll wheel and was marketed with the slogan '1,000 songs in your pocket.'", "correct_question": "What is the iPod?" },
+            { "point_value": 800, "answer": "This rapper's 2003 debut album 'Get Rich or Die Tryin'' sold one million copies in its first four days, the fastest-selling debut in music history at the time.", "correct_question": "Who is 50 Cent?" },
+            { "point_value": 1000, "answer": "In 2007, this social networking site overtook MySpace in U.S. unique monthly visitors, marking a definitive shift in the social media landscape.", "correct_question": "What is Facebook?" }
+          ]
+        },
+        {
+          "name": "One Hit, One Wonder",
+          "questions": [
+            { "point_value": 200, "answer": "This Australian duo's 1981 hit 'Down Under' is an iconic anthem about Vegemite sandwiches and wandering — their only U.S. top 40 entry.", "correct_question": "Who is Men at Work?" },
+            { "point_value": 400, "answer": "Los Del Rio's 1996 line-dance craze, was sparked by this song which spent 14 weeks at #1, making it one of the longest-running #1 singles ever.", "correct_question": "What is 'Macarena'?" },
+            { "point_value": 600, "answer": "This one-named Norwegian singer topped charts worldwide in 1997 with the bouncy Europop debut of \"Barbie Girl.\" Her follow-up singles barely caused a ripple.", "correct_question": "Who is Aqua?" },
+            { "point_value": 800, "answer": "This 'Ice Ice Baby' rapper was the first hip-hop artist to top the Billboard Hot 100, but his follow-up singles never cracked the top 40 again.", "correct_question": "Who is Vanilla Ice?" },
+            { "point_value": 1000, "answer": "This band's 1982 single 'Tainted Love' reached #1 in 17 countries, yet they never cracked the U.S. top 40 again despite releasing albums throughout the decade.", "correct_question": "What is Soft Cell?" }
+          ]
+        },
+        {
+          "name": "Famous Last Words",
+          "questions": [
+            { "point_value": 200, "answer": "The Wizard of Oz ends with Dorothy clicking her heels and repeating this six-word phrase three times before waking up in Kansas.", "correct_question": "What is 'There's no place like home'?" },
+            { "point_value": 400, "answer": "After being fatally shot at the Ford Theatre, this President’s last recorded words were reportedly a response to his wife, saying, \"She won't think anything about it.\"", "correct_question": "Who is Abraham Lincoln?" },
+            { "point_value": 600, "answer": "Julius Caesar's last words, as written by Shakespeare, were spoken in Latin and accusingly addressed to this man.", "correct_question": "What is Brutus?" },
+            { "point_value": 800, "answer": "This prolific inventor and founder of GE reportedly came out of a coma, looked at his wife, and said, \"It is very beautiful over there.\"", "correct_question": "Who is Thomas Edison?" },
+            { "point_value": 1000, "answer": "Nathan Hale's famous final statement before his 1776 execution expressed regret that he had only one of these to give for his country.", "correct_question": "What is a life?" }
+          ]
+        },
+        {
+          "name": "Fermented & Famous",
+          "questions": [
+            { "point_value": 200, "answer": "Winston Churchill was famously devoted to this bubbly French wine, once saying 'in victory, I deserve it; in defeat, I need it.'", "correct_question": "What is Champagne?" },
+            { "point_value": 400, "answer": "Don McLean drove his Chevy to the levee, but the levee was dry — yet 'the good ol' boys were drinking whiskey and rye' in this 1971 epic song.", "correct_question": "What is 'American Pie'?" },
+            { "point_value": 600, "answer": "The 1969 Woodstock festival's original poster promised 'An Aquarian Exposition' — and while the music was free, festivalgoers paid $1.50 for a cup of this fermented apple drink.", "correct_question": "What is cider?" },
+            { "point_value": 800, "answer": "Ben Franklin is often misquoted as calling this drink 'proof that God loves us,' but he actually wrote that line about wine in a letter to André Morellet.", "correct_question": "What is beer?" },
+            { "point_value": 1000, "answer": "The 1814 London Beer Flood, in which a brewery tank ruptured and killed eight people, involved this specific style of dark ale.", "correct_question": "What is porter?" }
+          ]
+        }
+      ]
+    }
+  ],
+  "final_jeopardy": {
+    "category": "HUMAN BIOLOGY",
+    "answer": "It's the only internal organ in the human body capable of completely regenerating itself — regrowing to full size even after up to 75% has been removed.",
+    "correct_question": "What is the liver?"
+  }
+}

@@ -106,6 +106,7 @@ export default function PlayView() {
   const [previewInfo, setPreviewInfo]         = useState<PreviewInfo | null>(null)
   const [doubleTapTeamId, setDoubleTapTeamId] = useState<string | null>(null)
   const [dtRevealForObserver, setDtRevealForObserver] = useState(false)
+  const [dtTeammateWaiting, setDtTeammateWaiting] = useState(false)
 
   // UI state
   const [showScoreOverlay, setShowScoreOverlay] = useState(false)
@@ -417,6 +418,8 @@ export default function PlayView() {
         setDoubleTapTeamId(p.selectorTeamId)
         if (p.selectorTeamId !== myTeamRef.current?.id) {
           setDtRevealForObserver(true)
+        } else {
+          setDtTeammateWaiting(true)
         }
         return // don't show previewInfo yet — wait for the real preview after wager
       }
@@ -426,6 +429,7 @@ export default function PlayView() {
       if (p.doubleTapWager !== undefined && p.selectorTeamId) {
         setDoubleTapTeamId(p.selectorTeamId)
         setDtRevealForObserver(false) // transition to preview overlay
+        setDtTeammateWaiting(false)
       }
     })
     ch.subscribe('question_activated', ({ data }) => {
@@ -443,6 +447,7 @@ export default function PlayView() {
       dtAutoBuzzedRef.current = null
       sessionStorage.removeItem('buzzWindow')
       setDtRevealForObserver(false)
+      setDtTeammateWaiting(false)
       setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
       setActiveQuestion(null)
       setHasBuzzed(false)
@@ -524,6 +529,7 @@ export default function PlayView() {
         setBuzzResult(null)
         setDoubleTapTeamId(null)
         setDtRevealForObserver(false)
+        setDtTeammateWaiting(false)
         loadBoard(r.id, status === 'round_2' ? 2 : 1)
         return
       }
@@ -575,7 +581,7 @@ export default function PlayView() {
       clearPlayerSession()
       setPreviewInfo(null); setActiveQuestion(null); setCurrentTurnTeamId(null)
       setTimerPayload(null); setBuzzWindowTs(null); setHasBuzzed(false); setMyBuzzId(null); setBuzzPosition(null); setBuzzResult(null)
-      setDoubleTapTeamId(null); setDtRevealForObserver(false)
+      setDoubleTapTeamId(null); setDtRevealForObserver(false); setDtTeammateWaiting(false)
       setRoom(null); setMyTeam(null)
       setFjSubPhase(null)
       setPhase('no_lobby')
@@ -1429,6 +1435,20 @@ export default function PlayView() {
           <p className="text-8xl mb-4">🍺</p>
           <p className="text-5xl font-black text-amber-400 leading-none mb-2">DOUBLE TAP!</p>
           <p className="text-amber-200 text-xl font-semibold">{dtName} is wagering!</p>
+        </div>
+      </div>
+    )
+  }
+
+  // Teammates of the tile-clicker see the reveal too while the clicker wagers
+  if (dtTeammateWaiting) {
+    return (
+      <div className="min-h-screen bg-amber-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreChip}
+        <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
+          <p className="text-8xl mb-4">🍺</p>
+          <p className="text-5xl font-black text-amber-400 leading-none mb-2">DOUBLE TAP!</p>
+          <p className="text-amber-200 text-xl font-semibold">Your team is wagering!</p>
         </div>
       </div>
     )
