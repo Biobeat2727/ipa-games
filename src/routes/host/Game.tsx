@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { ablyClient } from '../../lib/ably'
 import { clearHostSession } from '../../lib/session'
-import type { Buzz, Question, Room, Team, Wager } from '../../lib/types'
+import type { Buzz, Question, Room, ScoreSnapshot, Team, Wager } from '../../lib/types'
+import ScoreHistoryChart from '../../components/ScoreHistoryChart'
 
 const RESPONSE_SECONDS = 40
 
@@ -62,6 +63,9 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   // Score adjustment
   const [editingScoreTeamId, setEditingScoreTeamId] = useState<string | null>(null)
   const [editingScoreValue, setEditingScoreValue]   = useState('')
+
+  // Round intermission (score history graph between rounds)
+  const [intermissionSnapshots, setIntermissionSnapshots] = useState<ScoreSnapshot[] | null>(null)
 
   // ── Setup ────────────────────────────────────────────────
 
@@ -664,12 +668,26 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     broadcastRef.current?.publish('score_update', { teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })) })
   }
 
-  async function transitionToRound2() {
+  async function showRoundIntermission() {
+    // Snapshot current scores before transitioning
+    const snapshot: ScoreSnapshot = {
+      label: 'Round 1',
+      scores: teams.map(t => ({ team_id: t.id, score: scores.get(t.id) ?? t.score })),
+    }
+    const snapshots = [snapshot]
+    // Persist snapshots to DB for refresh survival
+    await supabase.from('rooms').update({ score_snapshots: snapshots }).eq('id', roomId)
+    setIntermissionSnapshots(snapshots)
+    broadcastRef.current?.publish('round_intermission', { snapshots })
+  }
+
+  async function beginRound2() {
     // Capture turn assignment before the async gap so it doesn't go stale
     const firstTeamId = currentTurnTeamId
     const { error } = await supabase
       .from('rooms').update({ status: 'round_2' }).eq('id', roomId)
     if (!error) {
+      setIntermissionSnapshots(null)
       setRoom(prev => ({ ...prev, status: 'round_2' }))
       broadcastRef.current?.publish('game_state_change', { status: 'round_2' })
       assignTurn(firstTeamId)
@@ -1048,6 +1066,49 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
             </div>
           )
 
+        ) : intermissionSnapshots ? (
+          // ── Round Intermission (score history graph) ──────
+          <div className="flex-1 flex flex-col gap-4 p-5">
+            <div className="text-center">
+              <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">Round 1 Complete</p>
+              <p className="text-xl font-black text-white">Score History</p>
+              <p className="text-gray-500 text-xs mt-1">Players are seeing this on their phones</p>
+            </div>
+            <div className="flex-1 min-h-0">
+              <ScoreHistoryChart
+                snapshots={intermissionSnapshots}
+                teamNames={new Map(teams.map(t => [t.id, t.name]))}
+                teamIds={teams.map(t => t.id)}
+              />
+            </div>
+            <div className="space-y-2">
+              <div className="w-full space-y-1">
+                <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">First pick for Round 2</p>
+                {sortedTeams.map(team => (
+                  <button
+                    key={team.id}
+                    onClick={() => setCurrentTurnTeamId(
+                      team.id === currentTurnTeamId ? null : team.id
+                    )}
+                    className={`w-full px-4 py-2 rounded-xl text-sm font-bold transition-colors flex items-center justify-between ${
+                      team.id === currentTurnTeamId
+                        ? 'bg-yellow-400 text-gray-950'
+                        : 'bg-gray-800 hover:bg-gray-700 text-white'
+                    }`}
+                  >
+                    <span>{team.name}</span>
+                    <span className="font-mono text-xs opacity-70">{scores.get(team.id) ?? 0}</span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={beginRound2}
+                className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+              >
+                Begin Round 2 →
+              </button>
+            </div>
+          </div>
         ) : !activeQuestion ? (
           previewInfo ? (
             // ── Category preview ────────────────────────
@@ -1163,10 +1224,10 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
               </div>
 
               <button
-                onClick={transitionToRound2}
+                onClick={showRoundIntermission}
                 className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
               >
-                Start Round 2 →
+                Show Scores &amp; Start Round 2 →
               </button>
             </div>
           ) : (

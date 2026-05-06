@@ -10,6 +10,11 @@ export type WagerStatus = 'pending' | 'correct' | 'wrong'
 // Row types (mirror the DB schema exactly)
 // ============================================================
 
+export type ScoreSnapshot = {
+  label: string
+  scores: Array<{ team_id: string; score: number }>
+}
+
 export type Room = {
   id: string
   code: string
@@ -17,6 +22,7 @@ export type Room = {
   status: RoomStatus
   current_question_id: string | null
   current_turn_team_id?: string | null
+  score_snapshots?: ScoreSnapshot[]
   created_at: string
 }
 

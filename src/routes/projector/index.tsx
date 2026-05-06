@@ -1,9 +1,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { ablyClient } from '../../lib/ably'
-import type { Buzz, Question, Room, Team } from '../../lib/types'
+import type { Buzz, Question, Room, ScoreSnapshot, Team } from '../../lib/types'
 import AnimatedScore from '../../components/AnimatedScore'
 import { playRoundTransition } from '../../lib/sounds'
+import ScoreHistoryChart from '../../components/ScoreHistoryChart'
 
 interface TimerPayload {
   start_timestamp: number
@@ -57,6 +58,9 @@ export default function ProjectorView() {
   const [roundSplash, setRoundSplash]           = useState<string | null>(null)
   const [doubleTapSplash, setDoubleTapSplash]   = useState(false)
   const [scoreDeltas, setScoreDeltas]           = useState<Array<{ id: string; teamId: string; delta: number }>>([])
+
+  // Round intermission
+  const [intermissionSnapshots, setIntermissionSnapshots] = useState<ScoreSnapshot[] | null>(null)
 
   // Final Jeopardy state
   const [fjCategoryName, setFjCategoryName]   = useState('')
@@ -304,11 +308,16 @@ export default function ProjectorView() {
       const { team_id } = data as { team_id: string | null }
       setCurrentTurnTeamId(team_id)
     })
+    ch.subscribe('round_intermission', ({ data }) => {
+      const { snapshots } = data as { snapshots: ScoreSnapshot[] }
+      setIntermissionSnapshots(snapshots)
+    })
     // Fired by the host when the game starts — transition from lobby to board
     ch.subscribe('game_state_change', ({ data }) => {
       const { status, fj_category } = data as { status?: string; fj_category?: string }
       if (fj_category) setFjCategoryName(fj_category)
       if (status === 'round_2') {
+        setIntermissionSnapshots(null)
         setRoundSplash('ROUND 2')
         playRoundTransition()
         setTimeout(() => setRoundSplash(null), 2500)
@@ -732,6 +741,49 @@ export default function ProjectorView() {
           <p className="text-amber-200 font-bold mt-4" style={{ fontSize: 'clamp(1.5rem, 4vw, 3rem)' }}>
             A player is wagering…
           </p>
+        </div>
+      </div>
+    )
+  }
+
+  // Round intermission — score history graph
+  if (intermissionSnapshots) {
+    const teamIds  = sortedTeams.map(t => t.id)
+    const teamNameMap = new Map(teams.map(t => [t.id, t.name]))
+    return (
+      <div className="h-screen bg-gray-950 text-white flex flex-col p-8 gap-6">
+        <div className="text-center shrink-0">
+          <p className="text-gray-500 uppercase tracking-[0.4em] mb-2"
+            style={{ fontSize: 'clamp(1rem, 2vw, 1.5rem)' }}>
+            Round 1 Complete
+          </p>
+          <p className="font-black text-yellow-400"
+            style={{ fontSize: 'clamp(3rem, 8vw, 6rem)' }}>
+            Score History
+          </p>
+        </div>
+        <div className="flex-1 min-h-0">
+          <ScoreHistoryChart
+            snapshots={intermissionSnapshots}
+            teamNames={teamNameMap}
+            teamIds={teamIds}
+          />
+        </div>
+        <div className="shrink-0 flex justify-center gap-8 flex-wrap">
+          {sortedTeams.map((team, i) => (
+            <div key={team.id} className="text-center">
+              <p className="text-gray-400" style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1.25rem)' }}>
+                #{i + 1} {team.name}
+              </p>
+              <AnimatedScore
+                value={scores.get(team.id) ?? team.score}
+                className={`font-mono font-black tabular-nums block ${
+                  (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
+                }`}
+                style={{ fontSize: 'clamp(1.5rem, 3vw, 2.5rem)' }}
+              />
+            </div>
+          ))}
         </div>
       </div>
     )

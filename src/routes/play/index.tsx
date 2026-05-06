@@ -7,10 +7,11 @@ import {
   getTeamId,
   setTeamId,
 } from '../../lib/session'
-import type { Buzz, Player, QuestionPublic, Room, Team } from '../../lib/types'
+import type { Buzz, Player, QuestionPublic, Room, ScoreSnapshot, Team } from '../../lib/types'
 import AnimatedScore from '../../components/AnimatedScore'
 import Confetti from '../../components/Confetti'
 import ScoreOverlay from '../../components/ScoreOverlay'
+import ScoreHistoryChart from '../../components/ScoreHistoryChart'
 import { QUIPS } from '../../lib/quips'
 import {
   playBuzz,
@@ -131,6 +132,10 @@ export default function PlayView() {
   const [fjTimerStart, setFjTimerStart]       = useState<number | null>(null)
   const [fjTimeRemaining, setFjTimeRemaining] = useState<number | null>(null)
   const [fjFinalScores, setFjFinalScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
+
+  // Round intermission (score history graph)
+  const [intermissionSnapshots, setIntermissionSnapshots] = useState<ScoreSnapshot[] | null>(null)
+
   const fjResponseRef = useRef('')
   const fjWagerIdRef  = useRef<string | null>(null)
   useEffect(() => { fjResponseRef.current = fjResponse }, [fjResponse])
@@ -496,6 +501,10 @@ export default function PlayView() {
       const { team_id } = data as { team_id: string | null }
       setCurrentTurnTeamId(team_id)
     })
+    ch.subscribe('round_intermission', ({ data }) => {
+      const { snapshots } = data as { snapshots: ScoreSnapshot[] }
+      setIntermissionSnapshots(snapshots)
+    })
     ch.subscribe('game_state_change', ({ data }) => {
       const { status, fj_category } = data as { status: string; fj_category?: string }
       const r = roomRef.current
@@ -503,6 +512,7 @@ export default function PlayView() {
       setRoom({ ...r, status: status as Room['status'] })
       if (status === 'round_1' || status === 'round_2') {
         // New round — wipe all mid-game state
+        setIntermissionSnapshots(null)
         setPreviewInfo(null)
         setActiveQuestion(null)
         setCurrentTurnTeamId(null)
@@ -1323,6 +1333,42 @@ export default function PlayView() {
         <button onClick={handleLeave} className="mt-6 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors">
           Leave
         </button>
+      </div>
+    )
+  }
+
+  // ── Round intermission — score history graph between rounds ──
+
+  if (intermissionSnapshots) {
+    const teamIds = allTeamScores.map(t => t.id)
+    const teamNameMap = new Map(allTeamScores.map(t => [t.id, t.name]))
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col p-5">
+        <div className="text-center mb-4">
+          <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">Round 1 Complete</p>
+          <p className="text-2xl font-black text-yellow-400">Score History</p>
+          <p className="text-gray-500 text-sm mt-1">Waiting for host to start Round 2…</p>
+        </div>
+        <div className="flex-1 min-h-[50vh]">
+          <ScoreHistoryChart
+            snapshots={intermissionSnapshots}
+            teamNames={teamNameMap}
+            teamIds={teamIds}
+          />
+        </div>
+        <div className="mt-4 space-y-2">
+          {[...allTeamScores].sort((a, b) => b.score - a.score).map((t, i) => (
+            <div key={t.id} className={`flex items-center gap-3 rounded-xl px-4 py-3 ${
+              t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'bg-gray-900'
+            }`}>
+              <span className="text-gray-600 font-mono text-sm w-5 text-right shrink-0">{i + 1}</span>
+              <span className="flex-1 font-bold truncate">{t.name}</span>
+              <span className={`font-mono font-black tabular-nums ${t.score < 0 ? 'text-red-400' : 'text-yellow-400'}`}>
+                {t.score.toLocaleString()}
+              </span>
+            </div>
+          ))}
+        </div>
       </div>
     )
   }
