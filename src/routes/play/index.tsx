@@ -1440,20 +1440,6 @@ export default function PlayView() {
     )
   }
 
-  // Teammates of the tile-clicker see the reveal too while the clicker wagers
-  if (dtTeammateWaiting) {
-    return (
-      <div className="min-h-screen bg-amber-950 text-white flex flex-col items-center justify-center p-6 text-center">
-        {scoreChip}
-        <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
-          <p className="text-8xl mb-4">🍺</p>
-          <p className="text-5xl font-black text-amber-400 leading-none mb-2">DOUBLE TAP!</p>
-          <p className="text-amber-200 text-xl font-semibold">Your team is wagering!</p>
-        </div>
-      </div>
-    )
-  }
-
   if (doubleTapStep === 'wager' && doubleTapPendingQ) {
     const roundFloor = room?.status === 'round_2' ? 2000 : 500
     const maxWager = Math.max(myScore, roundFloor)
@@ -1485,6 +1471,20 @@ export default function PlayView() {
           >
             Lock In: {wagerVal} pts
           </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Teammates of the tile-clicker see the reveal too while the clicker wagers
+  if (dtTeammateWaiting) {
+    return (
+      <div className="min-h-screen bg-amber-950 text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreChip}
+        <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
+          <p className="text-8xl mb-4">🍺</p>
+          <p className="text-5xl font-black text-amber-400 leading-none mb-2">DOUBLE TAP!</p>
+          <p className="text-amber-200 text-xl font-semibold">Your team is wagering!</p>
         </div>
       </div>
     )
