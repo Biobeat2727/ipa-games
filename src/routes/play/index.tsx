@@ -148,10 +148,12 @@ export default function PlayView() {
   const dtAutoBuzzedRef        = useRef<string | null>(null) // tracks question ID already auto-buzzed
   const phaseRef               = useRef<Phase>(phase)
   const pendingSwReloadRef     = useRef(false)
+  const timerBuzzIdRef         = useRef<string | null>(null) // buzz_id from timerPayload for teammate matching
 
   useEffect(() => { responseSubmittedRef.current = responseSubmitted }, [responseSubmitted])
   useEffect(() => { responseTextRef.current = responseText }, [responseText])
   useEffect(() => { myBuzzIdRef.current = myBuzzId }, [myBuzzId])
+  useEffect(() => { timerBuzzIdRef.current = timerPayload?.buzz_id ?? null }, [timerPayload])
   useEffect(() => { myTeamRef.current = myTeam }, [myTeam])
   useEffect(() => { roomRef.current = room }, [room])
   useEffect(() => { currentTurnTeamIdRef.current = currentTurnTeamId }, [currentTurnTeamId])
@@ -455,9 +457,12 @@ export default function PlayView() {
       // Set buzz feedback via broadcast (reliable) — fires before question_deactivated clears myBuzzId
       if (msg.winning_team_id && msg.winning_team_id === myTeamRef.current?.id) {
         setBuzzResult('correct')
-      } else if (msg.wrong_buzz_id && msg.wrong_buzz_id === myBuzzIdRef.current) {
+      } else if (msg.wrong_buzz_id && (
+        msg.wrong_buzz_id === myBuzzIdRef.current ||
+        msg.wrong_buzz_id === timerBuzzIdRef.current
+      )) {
         setBuzzResult('wrong')
-        setTimerPayload(null) // prevent answer box from reappearing after timer expires
+        setTimerPayload(null) // prevent answer box / "Time's up!" from persisting for whole team
       }
       // Grey out the answered question immediately without waiting for a board reload
       if (msg.answered_question_id) {
