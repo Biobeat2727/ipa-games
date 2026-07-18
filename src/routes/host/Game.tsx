@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { ablyClient } from '../../lib/ably'
+import { ablyClient, serverNow, getClockOffsetMs } from '../../lib/ably'
 import { clearHostSession } from '../../lib/session'
 import type { Buzz, Question, Room, ScoreSnapshot, Team, Wager } from '../../lib/types'
 import ScoreHistoryChart from '../../components/ScoreHistoryChart'
@@ -351,8 +351,9 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     if (!buzzOpenedAt) { setBuzzWindowRemaining(null); return }
     const BUZZ_WINDOW = 25
     const tick = () => {
+      // buzzOpenedAt is server-clock time — compare against serverNow(), not Date.now()
       const remaining = Math.max(0, Math.floor(
-        (buzzOpenedAt + BUZZ_WINDOW * 1000 - Date.now()) / 1000
+        (buzzOpenedAt + BUZZ_WINDOW * 1000 - serverNow()) / 1000
       ))
       setBuzzWindowRemaining(remaining)
     }
@@ -405,11 +406,13 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
       if (doubleTapWager === null) {
         // Schedule the reveal for a shared future instant. buzz_opened_at doubles as the
         // reveal timestamp AND the start of the 25s buzz window, so both stay in sync.
-        const revealAt = Date.now() + REVEAL_BUFFER_MS
+        // serverNow() (Ably server clock) — NOT Date.now() — so devices with skewed OS
+        // clocks still reveal together; each player also computes its delay via serverNow().
+        const revealAt = serverNow() + REVEAL_BUFFER_MS
         activationStartTsRef.current = revealAt
         setBuzzOpenedAt(revealAt)
         // Timer is now player-side (10s from buzz) — no host judgeStartTime for regular questions
-        console.log(`[BUZZER host] publish t=${Date.now()} revealAt=${revealAt} (buffer=${REVEAL_BUFFER_MS}ms)`)
+        console.log(`[BUZZER host] publish serverNow=${serverNow()} revealAt=${revealAt} clkOffset=${Math.round(getClockOffsetMs())}ms (buffer=${REVEAL_BUFFER_MS}ms)`)
         broadcastRef.current?.publish('question_activated', {
           question_id: questionId,
           question: publicQuestion,

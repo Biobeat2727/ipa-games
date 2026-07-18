@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { ablyClient } from '../../lib/ably'
+import { ablyClient, serverNow, getClockOffsetMs } from '../../lib/ably'
 import {
   clearPlayerSession,
   getSessionId,
@@ -197,9 +197,15 @@ export default function PlayView() {
 
   useEffect(() => {
     if (!debugOn) return
-    const el = document.getElementById('buzzer-debug')
-    if (el) el.textContent =
-      `recv delay: ${dbgRecvDelay ?? '—'}ms\nreveal t:   ${dbgReveal?.t ?? '—'}\npath:       ${dbgReveal?.path ?? '—'}`
+    const render = () => {
+      const el = document.getElementById('buzzer-debug')
+      if (el) el.textContent =
+        `clk offset: ${Math.round(getClockOffsetMs())}ms\nrecv delay: ${dbgRecvDelay ?? '—'}ms\nreveal t:   ${dbgReveal?.t ?? '—'}\npath:       ${dbgReveal?.path ?? '—'}`
+    }
+    render()
+    // Re-render each second so the clock offset appears once the async sync lands.
+    const id = setInterval(render, 1000)
+    return () => clearInterval(id)
   }, [debugOn, dbgRecvDelay, dbgReveal])
   useEffect(() => { currentTurnTeamIdRef.current = currentTurnTeamId }, [currentTurnTeamId])
   useEffect(() => { phaseRef.current = phase }, [phase])
@@ -412,8 +418,8 @@ export default function PlayView() {
           supabase.from('buzzes').select().eq('question_id', qId).eq('team_id', myTeam!.id).maybeSingle(),
         ])
         if (cancelled || revealClaimRef.current === qId) return
-        console.log(`[BUZZER reveal FALLBACK-DB] t=${Date.now()} qId=${qId}`)
-        if (debugOn) setDbgReveal({ t: Date.now(), path: 'FALLBACK-DB' })
+        console.log(`[BUZZER reveal FALLBACK-DB] serverT=${serverNow()} qId=${qId}`)
+        if (debugOn) setDbgReveal({ t: serverNow(), path: 'FALLBACK-DB' })
         setActiveQuestion(question ?? null)
         if (existingBuzz) {
           setHasBuzzed(true)
@@ -508,8 +514,10 @@ export default function PlayView() {
         return
       }
 
-      console.log(`[BUZZER recv] t=${Date.now()} buzz_opened_at=${buzz_opened_at} delay=${buzz_opened_at ? buzz_opened_at - Date.now() : 'n/a'} hasQuestion=${!!question}`)
-      if (debugOn) setDbgRecvDelay(buzz_opened_at ? buzz_opened_at - Date.now() : null)
+      // Delay measured against the shared server clock, so a skewed OS clock no longer
+      // shifts this device's reveal earlier/later than everyone else's.
+      console.log(`[BUZZER recv] serverNow=${serverNow()} buzz_opened_at=${buzz_opened_at} delay=${buzz_opened_at ? buzz_opened_at - serverNow() : 'n/a'} clkOffset=${Math.round(getClockOffsetMs())}ms hasQuestion=${!!question}`)
+      if (debugOn) setDbgRecvDelay(buzz_opened_at ? buzz_opened_at - serverNow() : null)
 
       // Claim this reveal immediately so the DB fallback path stands down, even though
       // the visible flip is deferred to buzz_opened_at below.
@@ -540,11 +548,12 @@ export default function PlayView() {
         setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
         // Reveal straight from the broadcast payload — no DB fetch in the critical path.
         if (question) setActiveQuestion(question)
-        console.log(`[BUZZER reveal SCHEDULED] t=${Date.now()} (target was ${buzz_opened_at})`)
-        if (debugOn) setDbgReveal({ t: Date.now(), path: 'SCHEDULED' })
+        // serverNow() so reveal timestamps are directly comparable across devices
+        console.log(`[BUZZER reveal SCHEDULED] serverT=${serverNow()} (target was ${buzz_opened_at})`)
+        if (debugOn) setDbgReveal({ t: serverNow(), path: 'SCHEDULED' })
       }
 
-      const delay = buzz_opened_at ? Math.max(0, buzz_opened_at - Date.now()) : 0
+      const delay = buzz_opened_at ? Math.max(0, buzz_opened_at - serverNow()) : 0
       if (delay > 0) revealTimerRef.current = setTimeout(reveal, delay)
       else reveal()
     })
@@ -790,7 +799,7 @@ export default function PlayView() {
         if (questionId === activeQuestion.id) { setBuzzWindowTs(ts); return }
       }
     } catch {}
-    setBuzzWindowTs(Date.now())
+    setBuzzWindowTs(serverNow()) // buzzWindowTs is server-clock time
   }, [activeQuestion, doubleTapTeamId, buzzWindowTs])
 
   // Fallback: if page was refreshed during DT wager phase, restore the appropriate screen from sessionStorage.
@@ -819,8 +828,9 @@ export default function PlayView() {
     if (!buzzWindowTs) { setBuzzWindowRemaining(null); return }
     const BUZZ_WINDOW = 25
     const tick = () => {
+      // buzzWindowTs is server-clock time — compare against serverNow(), not Date.now()
       const remaining = Math.max(0, Math.floor(
-        (buzzWindowTs + BUZZ_WINDOW * 1000 - Date.now()) / 1000
+        (buzzWindowTs + BUZZ_WINDOW * 1000 - serverNow()) / 1000
       ))
       setBuzzWindowRemaining(remaining)
     }
