@@ -40,7 +40,6 @@ export async function syncServerClock(): Promise<void> {
   if (samples.length === 0) return
   const best = samples.reduce((a, b) => (b.rtt < a.rtt ? b : a))
   clockOffsetMs = best.offset
-  console.log(`[CLOCK] offset=${Math.round(best.offset)}ms rtt=${best.rtt}ms (${samples.length} samples)`)
 }
 
 /** Shared time base for cross-device scheduling. Use instead of Date.now()

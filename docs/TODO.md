@@ -23,6 +23,28 @@
 
 ---
 
+## 🔬 Buzzer Timing Beta-Test Tool (kept in permanently, DEV-only)
+
+Host scoreboard header has a **🔬 Timing ON/OFF** toggle (gated by `import.meta.env.DEV`,
+same pattern as `⚡ Graph`/`⚡ FT` — invisible in production builds). Flip it on before
+activating a question and every connected player self-reports its buzzer reveal timing
+back to the host automatically — no manual per-phone reading required. Useful for
+validating reveal simultaneity at real event scale (20+ devices, real venue wifi) without
+walking around collecting numbers.
+
+How it works: the toggle rides a `debugTiming: true` flag inline on the existing
+`question_activated` broadcast (no separate sync mechanism, so late joiners get it too).
+Each player publishes a `buzz_debug_report` the instant it reveals — including devices
+that fell to the FALLBACK-DB path (missed the live broadcast entirely), which is the
+failure case most worth seeing. Host renders a live table (team, device id, clock offset,
+receive delay, time-since-first-reveal, path) sorted by reveal time, with the spread
+(worst − best) auto-computed and flagged red past 100ms.
+
+Code: `debugTimingMode`/`debugReports` state + table render in `src/routes/host/Game.tsx`;
+`debugTimingRef` + `buzz_debug_report` publish in `src/routes/play/index.tsx`.
+
+---
+
 ## ✅ Ably Clock-Offset Correction (buzzer reveal simultaneity) — BUILT 2026-07-17
 
 **Status:** implemented on branch `buzzer-reveal-sync-test` after real-device testing

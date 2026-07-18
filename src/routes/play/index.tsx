@@ -108,13 +108,6 @@ export default function PlayView() {
   // actually appears locks this device out of buzzing for the current question.
   const [preBuzzTaps, setPreBuzzTaps]         = useState(0)
   const [buzzLockedOut, setBuzzLockedOut]     = useState(false)
-
-  // TEMP debug: on-screen buzzer-timing readout, shown only with ?debug=1 in the URL.
-  // Lets a phone (no console access) report its own reveal timestamp for cross-device
-  // comparison. Remove before production.
-  const debugOn = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1'
-  const [dbgRecvDelay, setDbgRecvDelay] = useState<number | null>(null)
-  const [dbgReveal, setDbgReveal]       = useState<{ t: number; path: string } | null>(null)
   const [myScore, setMyScore]                 = useState(0)
   const [allTeamScores, setAllTeamScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
@@ -176,8 +169,9 @@ export default function PlayView() {
   const timerBuzzIdRef         = useRef<string | null>(null) // buzz_id from timerPayload for teammate matching
   const revealClaimRef         = useRef<string | null>(null) // question id whose reveal is owned by the Ably broadcast path
   const revealTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null) // pending scheduled reveal
-  // TEMP debug: remembers the last-seen debugTiming flag so even a device that fell to
-  // the FALLBACK-DB path (missed the broadcast entirely) still knows to self-report.
+  // Beta-test timing tool (host-toggled, see docs): remembers the last-seen debugTiming
+  // flag so even a device that fell to the FALLBACK-DB path (missed the broadcast
+  // entirely) still knows to self-report via buzz_debug_report.
   const debugTimingRef         = useRef(false)
 
   useEffect(() => { responseSubmittedRef.current = responseSubmitted }, [responseSubmitted])
@@ -186,30 +180,6 @@ export default function PlayView() {
   useEffect(() => { timerBuzzIdRef.current = timerPayload?.buzz_id ?? null }, [timerPayload])
   useEffect(() => { myTeamRef.current = myTeam }, [myTeam])
   useEffect(() => { roomRef.current = room }, [room])
-
-  // TEMP debug badge (?debug=1) — imperative DOM node so it shows over every phase's
-  // render branch without touching each return. Remove before production.
-  useEffect(() => {
-    if (!debugOn) return
-    const el = document.createElement('div')
-    el.id = 'buzzer-debug'
-    el.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:rgba(0,0,0,0.85);color:#22c55e;font:11px/1.4 monospace;padding:4px 7px;pointer-events:none;white-space:pre;border-bottom-right-radius:6px'
-    document.body.appendChild(el)
-    return () => { el.remove() }
-  }, [debugOn])
-
-  useEffect(() => {
-    if (!debugOn) return
-    const render = () => {
-      const el = document.getElementById('buzzer-debug')
-      if (el) el.textContent =
-        `clk offset: ${Math.round(getClockOffsetMs())}ms\nrecv delay: ${dbgRecvDelay ?? '—'}ms\nreveal t:   ${dbgReveal?.t ?? '—'}\npath:       ${dbgReveal?.path ?? '—'}`
-    }
-    render()
-    // Re-render each second so the clock offset appears once the async sync lands.
-    const id = setInterval(render, 1000)
-    return () => clearInterval(id)
-  }, [debugOn, dbgRecvDelay, dbgReveal])
   useEffect(() => { currentTurnTeamIdRef.current = currentTurnTeamId }, [currentTurnTeamId])
   useEffect(() => { phaseRef.current = phase }, [phase])
 
@@ -421,8 +391,6 @@ export default function PlayView() {
           supabase.from('buzzes').select().eq('question_id', qId).eq('team_id', myTeam!.id).maybeSingle(),
         ])
         if (cancelled || revealClaimRef.current === qId) return
-        console.log(`[BUZZER reveal FALLBACK-DB] serverT=${serverNow()} qId=${qId}`)
-        if (debugOn) setDbgReveal({ t: serverNow(), path: 'FALLBACK-DB' })
         if (debugTimingRef.current) {
           broadcastRef.current?.publish('buzz_debug_report', {
             team: myTeamRef.current?.name ?? '?',
@@ -514,7 +482,7 @@ export default function PlayView() {
       const { question_id, question, double_tap_team_id, buzz_opened_at, debugTiming } = data as {
         question_id: string; question?: QuestionPublic; double_tap_team_id?: string; buzz_opened_at?: number; debugTiming?: boolean
       }
-      // TEMP debug: remember whether this question is being timing-tracked, so even the
+      // Remember whether this question is being timing-tracked, so even the
       // FALLBACK-DB path below (which never sees this payload) knows to self-report.
       debugTimingRef.current = !!debugTiming
 
@@ -532,10 +500,9 @@ export default function PlayView() {
       }
 
       // Delay measured against the shared server clock, so a skewed OS clock no longer
-      // shifts this device's reveal earlier/later than everyone else's.
+      // shifts this device's reveal earlier/later than everyone else's. Also fed into
+      // the buzz_debug_report below (beta-test timing tool).
       const recvDelay = buzz_opened_at ? buzz_opened_at - serverNow() : null
-      console.log(`[BUZZER recv] serverNow=${serverNow()} buzz_opened_at=${buzz_opened_at} delay=${recvDelay ?? 'n/a'} clkOffset=${Math.round(getClockOffsetMs())}ms hasQuestion=${!!question}`)
-      if (debugOn) setDbgRecvDelay(recvDelay)
 
       // Claim this reveal immediately so the DB fallback path stands down, even though
       // the visible flip is deferred to buzz_opened_at below.
@@ -566,9 +533,6 @@ export default function PlayView() {
         setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
         // Reveal straight from the broadcast payload — no DB fetch in the critical path.
         if (question) setActiveQuestion(question)
-        // serverNow() so reveal timestamps are directly comparable across devices
-        console.log(`[BUZZER reveal SCHEDULED] serverT=${serverNow()} (target was ${buzz_opened_at})`)
-        if (debugOn) setDbgReveal({ t: serverNow(), path: 'SCHEDULED' })
         if (debugTimingRef.current) {
           broadcastRef.current?.publish('buzz_debug_report', {
             team: myTeamRef.current?.name ?? '?',

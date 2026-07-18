@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { ablyClient, serverNow, getClockOffsetMs } from '../../lib/ably'
+import { ablyClient, serverNow } from '../../lib/ably'
 import { clearHostSession } from '../../lib/session'
 import type { Buzz, Question, Room, ScoreSnapshot, Team, Wager } from '../../lib/types'
 import ScoreHistoryChart from '../../components/ScoreHistoryChart'
@@ -47,9 +47,9 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const [buzzOpenedAt, setBuzzOpenedAt]     = useState<number | null>(null)
   const [buzzWindowRemaining, setBuzzWindowRemaining] = useState<number | null>(null)
 
-  // TEMP debug: buzzer-timing telemetry. Toggle broadcasts `debugTiming` inline on
-  // question_activated so every connected player self-reports its reveal numbers back
-  // via `buzz_debug_report` — no per-device manual reading needed. Strip before production.
+  // Beta-test tool (DEV-only, gated by the 🔬 Timing button below): toggle broadcasts
+  // `debugTiming` inline on question_activated so every connected player self-reports
+  // its reveal numbers back via `buzz_debug_report` — no per-device manual reading needed.
   const [debugTimingMode, setDebugTimingMode] = useState(false)
   const [debugReports, setDebugReports] = useState<Array<{
     team: string; device: string; clkOffset: number; recvDelay: number | null; revealT: number; path: string
@@ -424,7 +424,6 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
         activationStartTsRef.current = revealAt
         setBuzzOpenedAt(revealAt)
         // Timer is now player-side (10s from buzz) — no host judgeStartTime for regular questions
-        console.log(`[BUZZER host] publish serverNow=${serverNow()} revealAt=${revealAt} clkOffset=${Math.round(getClockOffsetMs())}ms (buffer=${REVEAL_BUFFER_MS}ms)`)
         broadcastRef.current?.publish('question_activated', {
           question_id: questionId,
           question: publicQuestion,
