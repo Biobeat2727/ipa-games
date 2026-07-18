@@ -23,9 +23,18 @@
 
 ---
 
-## 🕒 Deferred: Ably Clock-Offset Correction (buzzer reveal simultaneity)
+## ✅ Ably Clock-Offset Correction (buzzer reveal simultaneity) — BUILT 2026-07-17
 
-**Status:** NOT built — deferred on purpose. Only add if real-device testing shows a *specific* device consistently revealing the buzzer early or late vs the others (the signature of a wrong OS clock). If phone+laptop reveal looks tight, you never need this.
+**Status:** implemented on branch `buzzer-reveal-sync-test` after real-device testing
+proved the need: laptop/phone/desktop OS clocks measured 130–190ms apart (recv delays of
+530/584ms against a 450ms buffer — impossible without skew), staggering the scheduled
+reveal by exactly that skew. Implementation: `syncServerClock()` / `serverNow()` in
+`src/lib/ably.ts` (3 sequential `ablyClient.time()` samples, lowest-RTT wins, re-sync on
+every Ably `connected`). Host schedules `revealAt = serverNow() + buffer`; players compute
+reveal delay and buzz-window countdowns via `serverNow()`. Failed sync degrades gracefully
+(offset stays at last value; initially 0 = local clock).
+
+Original design sketch kept below for reference:
 
 **Context — what's already built (pieces 1 & 2):**
 - `question_activated` carries the public `question` inline (no per-device DB fetch in the reveal path). Host: `activateQuestion` in `src/routes/host/Game.tsx`.
