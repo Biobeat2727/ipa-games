@@ -176,6 +176,9 @@ export default function PlayView() {
   const timerBuzzIdRef         = useRef<string | null>(null) // buzz_id from timerPayload for teammate matching
   const revealClaimRef         = useRef<string | null>(null) // question id whose reveal is owned by the Ably broadcast path
   const revealTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null) // pending scheduled reveal
+  // TEMP debug: remembers the last-seen debugTiming flag so even a device that fell to
+  // the FALLBACK-DB path (missed the broadcast entirely) still knows to self-report.
+  const debugTimingRef         = useRef(false)
 
   useEffect(() => { responseSubmittedRef.current = responseSubmitted }, [responseSubmitted])
   useEffect(() => { responseTextRef.current = responseText }, [responseText])
@@ -420,6 +423,16 @@ export default function PlayView() {
         if (cancelled || revealClaimRef.current === qId) return
         console.log(`[BUZZER reveal FALLBACK-DB] serverT=${serverNow()} qId=${qId}`)
         if (debugOn) setDbgReveal({ t: serverNow(), path: 'FALLBACK-DB' })
+        if (debugTimingRef.current) {
+          broadcastRef.current?.publish('buzz_debug_report', {
+            team: myTeamRef.current?.name ?? '?',
+            device: ablyClient.auth.clientId?.slice(0, 6) ?? '?',
+            clkOffset: Math.round(getClockOffsetMs()),
+            recvDelay: null, // broadcast was missed entirely — no receive event to measure
+            revealT: serverNow(),
+            path: 'FALLBACK-DB',
+          })
+        }
         setActiveQuestion(question ?? null)
         if (existingBuzz) {
           setHasBuzzed(true)
@@ -498,9 +511,13 @@ export default function PlayView() {
       }
     })
     ch.subscribe('question_activated', ({ data }) => {
-      const { question_id, question, double_tap_team_id, buzz_opened_at } = data as {
-        question_id: string; question?: QuestionPublic; double_tap_team_id?: string; buzz_opened_at?: number
+      const { question_id, question, double_tap_team_id, buzz_opened_at, debugTiming } = data as {
+        question_id: string; question?: QuestionPublic; double_tap_team_id?: string; buzz_opened_at?: number; debugTiming?: boolean
       }
+      // TEMP debug: remember whether this question is being timing-tracked, so even the
+      // FALLBACK-DB path below (which never sees this payload) knows to self-report.
+      debugTimingRef.current = !!debugTiming
+
       // Defensive: without the inline payload we can't reveal from the broadcast, so
       // don't claim it — just advance current_question_id and let the DB fallback fetch.
       if (!question) {
@@ -516,8 +533,9 @@ export default function PlayView() {
 
       // Delay measured against the shared server clock, so a skewed OS clock no longer
       // shifts this device's reveal earlier/later than everyone else's.
-      console.log(`[BUZZER recv] serverNow=${serverNow()} buzz_opened_at=${buzz_opened_at} delay=${buzz_opened_at ? buzz_opened_at - serverNow() : 'n/a'} clkOffset=${Math.round(getClockOffsetMs())}ms hasQuestion=${!!question}`)
-      if (debugOn) setDbgRecvDelay(buzz_opened_at ? buzz_opened_at - serverNow() : null)
+      const recvDelay = buzz_opened_at ? buzz_opened_at - serverNow() : null
+      console.log(`[BUZZER recv] serverNow=${serverNow()} buzz_opened_at=${buzz_opened_at} delay=${recvDelay ?? 'n/a'} clkOffset=${Math.round(getClockOffsetMs())}ms hasQuestion=${!!question}`)
+      if (debugOn) setDbgRecvDelay(recvDelay)
 
       // Claim this reveal immediately so the DB fallback path stands down, even though
       // the visible flip is deferred to buzz_opened_at below.
@@ -551,6 +569,16 @@ export default function PlayView() {
         // serverNow() so reveal timestamps are directly comparable across devices
         console.log(`[BUZZER reveal SCHEDULED] serverT=${serverNow()} (target was ${buzz_opened_at})`)
         if (debugOn) setDbgReveal({ t: serverNow(), path: 'SCHEDULED' })
+        if (debugTimingRef.current) {
+          broadcastRef.current?.publish('buzz_debug_report', {
+            team: myTeamRef.current?.name ?? '?',
+            device: ablyClient.auth.clientId?.slice(0, 6) ?? '?',
+            clkOffset: Math.round(getClockOffsetMs()),
+            recvDelay,
+            revealT: serverNow(),
+            path: 'SCHEDULED',
+          })
+        }
       }
 
       const delay = buzz_opened_at ? Math.max(0, buzz_opened_at - serverNow()) : 0

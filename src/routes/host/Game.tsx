@@ -47,6 +47,14 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
   const [buzzOpenedAt, setBuzzOpenedAt]     = useState<number | null>(null)
   const [buzzWindowRemaining, setBuzzWindowRemaining] = useState<number | null>(null)
 
+  // TEMP debug: buzzer-timing telemetry. Toggle broadcasts `debugTiming` inline on
+  // question_activated so every connected player self-reports its reveal numbers back
+  // via `buzz_debug_report` — no per-device manual reading needed. Strip before production.
+  const [debugTimingMode, setDebugTimingMode] = useState(false)
+  const [debugReports, setDebugReports] = useState<Array<{
+    team: string; device: string; clkOffset: number; recvDelay: number | null; revealT: number; path: string
+  }>>([])
+
   const broadcastRef        = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
   const activationStartTsRef = useRef<number | null>(null)
 
@@ -119,6 +127,9 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     ch.subscribe('fj_wager_locked', ({ data }) => {
       const { team_id } = data as { team_id: string }
       setFjWagerStatus(prev => new Map([...prev, [team_id, true]]))
+    })
+    ch.subscribe('buzz_debug_report', ({ data }) => {
+      setDebugReports(prev => [...prev, data as typeof prev[number]])
     })
     // Auto-assign first turn when the channel connects
     ch.on('attached', () => {
@@ -384,6 +395,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     if (!error) {
       setRoom(prev => ({ ...prev, current_question_id: questionId }))
       setPreviewInfo(null)
+      setDebugReports([]) // fresh table per question
 
       // Send the question's PUBLIC fields inline so players/projector can reveal the
       // buzzer straight from the broadcast — no per-device DB round-trip in the critical
@@ -417,6 +429,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
           question_id: questionId,
           question: publicQuestion,
           buzz_opened_at: revealAt,
+          debugTiming: debugTimingMode || undefined,
         })
       } else {
         // Double Tap: no buzz window, selected team auto-buzzes — reveal immediately.
@@ -426,6 +439,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
           question_id: questionId,
           question: publicQuestion,
           double_tap_team_id: currentTurnTeamId,
+          debugTiming: debugTimingMode || undefined,
         })
       }
     } else console.error('activateQuestion failed:', error)
@@ -797,6 +811,13 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                     title="DEV: skip to Final Tap"
                   >
                     ⚡ FT
+                  </button>
+                  <button
+                    onClick={() => setDebugTimingMode(v => !v)}
+                    className={`text-xs transition-colors ${debugTimingMode ? 'text-green-400 hover:text-green-300' : 'text-gray-600 hover:text-gray-400'}`}
+                    title="DEV: players self-report buzzer reveal timing on next question"
+                  >
+                    🔬 Timing {debugTimingMode ? 'ON' : 'OFF'}
                   </button>
                 </>
               )}
@@ -1336,6 +1357,40 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                       style={{ width: `${(buzzWindowRemaining / 25) * 100}%` }}
                     />
                   </div>
+                </div>
+              )}
+              {debugTimingMode && (
+                <div className="mb-4 bg-black/40 rounded-lg p-3 border border-green-900">
+                  <p className="text-xs text-green-500 uppercase tracking-wider mb-2 font-semibold">
+                    🔬 Reveal timing ({debugReports.length} reported)
+                  </p>
+                  {debugReports.length === 0 ? (
+                    <p className="text-xs text-gray-600">Waiting for player reports…</p>
+                  ) : (() => {
+                    const times = debugReports.map(r => r.revealT)
+                    const spread = Math.max(...times) - Math.min(...times)
+                    const min = Math.min(...times)
+                    return (
+                      <>
+                        <p className="text-xs mb-2">
+                          <span className="text-gray-500">spread across {debugReports.length}: </span>
+                          <span className={`font-mono font-bold ${spread > 100 ? 'text-red-400' : 'text-green-400'}`}>{spread}ms</span>
+                        </p>
+                        <div className="font-mono text-[10px] leading-relaxed max-h-32 overflow-y-auto">
+                          {[...debugReports].sort((a, b) => a.revealT - b.revealT).map((r, i) => (
+                            <div key={i} className={`flex gap-2 ${r.path === 'FALLBACK-DB' ? 'text-orange-400' : 'text-gray-400'}`}>
+                              <span className="w-16 truncate">{r.team}</span>
+                              <span className="w-10">{r.device}</span>
+                              <span className="w-14">+{r.revealT - min}ms</span>
+                              <span className="w-16">clk {r.clkOffset}ms</span>
+                              <span className="w-16">recv {r.recvDelay ?? '—'}ms</span>
+                              <span>{r.path}</span>
+                            </div>
+                          ))}
+                        </div>
+                      </>
+                    )
+                  })()}
                 </div>
               )}
               <div className="border-t border-gray-800 pt-3">
