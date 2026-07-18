@@ -12,6 +12,7 @@ import AnimatedScore from '../../components/AnimatedScore'
 import Confetti from '../../components/Confetti'
 import ScoreOverlay from '../../components/ScoreOverlay'
 import ScoreHistoryChart from '../../components/ScoreHistoryChart'
+import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
 import { QUIPS } from '../../lib/quips'
 import {
   playBuzz,
@@ -40,6 +41,11 @@ interface PreviewInfo {
   doubleTapWager?: number
   answer?: string
 }
+
+// How long the DB-driven reveal path waits for the Ably broadcast to claim a reveal
+// before falling back to its own fetch. Covers missed broadcasts and page refreshes,
+// while giving the (near-instant) broadcast time to win on a normal live activation.
+const REVEAL_FALLBACK_GRACE_MS = 500
 
 // ── Quip cycler component ─────────────────────────────────────
 
@@ -98,6 +104,17 @@ export default function PlayView() {
   const [responseSubmitted, setResponseSubmitted] = useState(false)
   const [buzzPosition, setBuzzPosition]       = useState<number | null>(null)
   const [buzzResult, setBuzzResult]           = useState<'correct' | 'wrong' | null>(null)
+  // Anti-spam: taps landing on the pre-buzzer (preview) screen. 3+ before the buzzer
+  // actually appears locks this device out of buzzing for the current question.
+  const [preBuzzTaps, setPreBuzzTaps]         = useState(0)
+  const [buzzLockedOut, setBuzzLockedOut]     = useState(false)
+
+  // TEMP debug: on-screen buzzer-timing readout, shown only with ?debug=1 in the URL.
+  // Lets a phone (no console access) report its own reveal timestamp for cross-device
+  // comparison. Remove before production.
+  const debugOn = typeof window !== 'undefined' && new URLSearchParams(window.location.search).get('debug') === '1'
+  const [dbgRecvDelay, setDbgRecvDelay] = useState<number | null>(null)
+  const [dbgReveal, setDbgReveal]       = useState<{ t: number; path: string } | null>(null)
   const [myScore, setMyScore]                 = useState(0)
   const [allTeamScores, setAllTeamScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
@@ -157,6 +174,8 @@ export default function PlayView() {
   const phaseRef               = useRef<Phase>(phase)
   const pendingSwReloadRef     = useRef(false)
   const timerBuzzIdRef         = useRef<string | null>(null) // buzz_id from timerPayload for teammate matching
+  const revealClaimRef         = useRef<string | null>(null) // question id whose reveal is owned by the Ably broadcast path
+  const revealTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null) // pending scheduled reveal
 
   useEffect(() => { responseSubmittedRef.current = responseSubmitted }, [responseSubmitted])
   useEffect(() => { responseTextRef.current = responseText }, [responseText])
@@ -164,6 +183,24 @@ export default function PlayView() {
   useEffect(() => { timerBuzzIdRef.current = timerPayload?.buzz_id ?? null }, [timerPayload])
   useEffect(() => { myTeamRef.current = myTeam }, [myTeam])
   useEffect(() => { roomRef.current = room }, [room])
+
+  // TEMP debug badge (?debug=1) — imperative DOM node so it shows over every phase's
+  // render branch without touching each return. Remove before production.
+  useEffect(() => {
+    if (!debugOn) return
+    const el = document.createElement('div')
+    el.id = 'buzzer-debug'
+    el.style.cssText = 'position:fixed;top:0;left:0;z-index:99999;background:rgba(0,0,0,0.85);color:#22c55e;font:11px/1.4 monospace;padding:4px 7px;pointer-events:none;white-space:pre;border-bottom-right-radius:6px'
+    document.body.appendChild(el)
+    return () => { el.remove() }
+  }, [debugOn])
+
+  useEffect(() => {
+    if (!debugOn) return
+    const el = document.getElementById('buzzer-debug')
+    if (el) el.textContent =
+      `recv delay: ${dbgRecvDelay ?? '—'}ms\nreveal t:   ${dbgReveal?.t ?? '—'}\npath:       ${dbgReveal?.path ?? '—'}`
+  }, [debugOn, dbgRecvDelay, dbgReveal])
   useEffect(() => { currentTurnTeamIdRef.current = currentTurnTeamId }, [currentTurnTeamId])
   useEffect(() => { phaseRef.current = phase }, [phase])
 
@@ -353,10 +390,14 @@ export default function PlayView() {
     if (room.status !== 'lobby' && phase === 'lobby') setPhase('game')
 
     if (room.current_question_id) {
+      const qId = room.current_question_id
+      // The Ably `question_activated` handler owns the reveal for live activations
+      // (it schedules the buzzer for a shared instant). This DB path is only a fallback
+      // for refreshes and missed broadcasts, so it stands down if Ably has claimed qId.
+      if (revealClaimRef.current === qId) return
+
       let cancelled = false
       async function loadQuestion() {
-        const qId = room!.current_question_id!
-
         // New question — clear all state from previous question first
         setTimerPayload(null)
         setBuzzResult(null)
@@ -370,7 +411,9 @@ export default function PlayView() {
           supabase.from('questions_public').select().eq('id', qId).single(),
           supabase.from('buzzes').select().eq('question_id', qId).eq('team_id', myTeam!.id).maybeSingle(),
         ])
-        if (cancelled) return
+        if (cancelled || revealClaimRef.current === qId) return
+        console.log(`[BUZZER reveal FALLBACK-DB] t=${Date.now()} qId=${qId}`)
+        if (debugOn) setDbgReveal({ t: Date.now(), path: 'FALLBACK-DB' })
         setActiveQuestion(question ?? null)
         if (existingBuzz) {
           setHasBuzzed(true)
@@ -389,8 +432,12 @@ export default function PlayView() {
           if (existingBuzz.response) { setResponseText(existingBuzz.response); setResponseSubmitted(true) }
         }
       }
-      loadQuestion()
-      return () => { cancelled = true }
+      // Give the broadcast a moment to win the race before falling back to a DB fetch.
+      const graceTimer = setTimeout(() => {
+        if (revealClaimRef.current === qId) return
+        loadQuestion()
+      }, REVEAL_FALLBACK_GRACE_MS)
+      return () => { cancelled = true; clearTimeout(graceTimer) }
     } else {
       // Question cleared — reset question state; keep buzzResult so feedback stays visible
       setActiveQuestion(null)
@@ -432,8 +479,11 @@ export default function PlayView() {
         return // don't show previewInfo yet — wait for the real preview after wager
       }
 
-      // Real preview (post-wager or normal question)
+      // Real preview (post-wager or normal question) — fresh question, so reset the
+      // anti-spam tap counter and any lockout carried over from a prior question.
       sessionStorage.removeItem('dtWager')
+      setPreBuzzTaps(0)
+      setBuzzLockedOut(false)
       setPreviewInfo(p)
       if (p.doubleTapWager !== undefined && p.selectorTeamId) {
         setDoubleTapTeamId(p.selectorTeamId)
@@ -442,22 +492,72 @@ export default function PlayView() {
       }
     })
     ch.subscribe('question_activated', ({ data }) => {
-      const { question_id, double_tap_team_id, buzz_opened_at } = data as { question_id: string; double_tap_team_id?: string; buzz_opened_at?: number }
-      setPreviewInfo(null)
-      setDoubleTapTeamId(double_tap_team_id ?? null)
-      setBuzzWindowTs(buzz_opened_at ?? null)
-      // Persist so the buzz-window countdown survives a page refresh
-      if (buzz_opened_at) {
-        sessionStorage.setItem('buzzWindow', JSON.stringify({ questionId: question_id, ts: buzz_opened_at }))
+      const { question_id, question, double_tap_team_id, buzz_opened_at } = data as {
+        question_id: string; question?: QuestionPublic; double_tap_team_id?: string; buzz_opened_at?: number
       }
-      setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
+      // Defensive: without the inline payload we can't reveal from the broadcast, so
+      // don't claim it — just advance current_question_id and let the DB fallback fetch.
+      if (!question) {
+        setPreviewInfo(null)
+        setDoubleTapTeamId(double_tap_team_id ?? null)
+        setBuzzWindowTs(buzz_opened_at ?? null)
+        if (buzz_opened_at) {
+          sessionStorage.setItem('buzzWindow', JSON.stringify({ questionId: question_id, ts: buzz_opened_at }))
+        }
+        setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
+        return
+      }
+
+      console.log(`[BUZZER recv] t=${Date.now()} buzz_opened_at=${buzz_opened_at} delay=${buzz_opened_at ? buzz_opened_at - Date.now() : 'n/a'} hasQuestion=${!!question}`)
+      if (debugOn) setDbgRecvDelay(buzz_opened_at ? buzz_opened_at - Date.now() : null)
+
+      // Claim this reveal immediately so the DB fallback path stands down, even though
+      // the visible flip is deferred to buzz_opened_at below.
+      revealClaimRef.current = question_id
+      if (revealTimerRef.current) clearTimeout(revealTimerRef.current)
+
+      // The actual flip to the buzz screen. For regular questions this is scheduled for
+      // buzz_opened_at (a shared future instant) so every device reveals simultaneously,
+      // bounded by clock accuracy rather than per-device network latency. DT has no buzz
+      // window (buzz_opened_at is null) so it reveals immediately.
+      const reveal = () => {
+        setPreviewInfo(null)
+        setDoubleTapTeamId(double_tap_team_id ?? null)
+        setBuzzWindowTs(buzz_opened_at ?? null)
+        // New question — clear per-question state (buzzLockedOut is intentionally kept:
+        // it was set during the preview and must carry into the buzz phase).
+        setTimerPayload(null)
+        setBuzzResult(null)
+        setHasBuzzed(false)
+        setMyBuzzId(null)
+        setBuzzPosition(null)
+        setResponseText('')
+        setResponseSubmitted(false)
+        // Persist so the buzz-window countdown survives a page refresh
+        if (buzz_opened_at) {
+          sessionStorage.setItem('buzzWindow', JSON.stringify({ questionId: question_id, ts: buzz_opened_at }))
+        }
+        setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
+        // Reveal straight from the broadcast payload — no DB fetch in the critical path.
+        if (question) setActiveQuestion(question)
+        console.log(`[BUZZER reveal SCHEDULED] t=${Date.now()} (target was ${buzz_opened_at})`)
+        if (debugOn) setDbgReveal({ t: Date.now(), path: 'SCHEDULED' })
+      }
+
+      const delay = buzz_opened_at ? Math.max(0, buzz_opened_at - Date.now()) : 0
+      if (delay > 0) revealTimerRef.current = setTimeout(reveal, delay)
+      else reveal()
     })
     ch.subscribe('question_deactivated', () => {
       dtAutoBuzzedRef.current = null
+      revealClaimRef.current = null
+      if (revealTimerRef.current) { clearTimeout(revealTimerRef.current); revealTimerRef.current = null }
       sessionStorage.removeItem('buzzWindow')
       sessionStorage.removeItem('dtWager')
       setDtRevealForObserver(false)
       setDtTeammateWaiting(false)
+      setPreBuzzTaps(0)
+      setBuzzLockedOut(false)
       setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
       setActiveQuestion(null)
       setHasBuzzed(false)
@@ -492,6 +592,13 @@ export default function PlayView() {
       const mine = msg.teams.find(t => t.id === myTeamRef.current?.id)
       if (mine) setMyScore(mine.score)
       setAllTeamScores(msg.teams)
+      // Someone buzzed in and answered (right or wrong) → lift a spam lockout so a
+      // locked-out device can buzz on the reopened window, per the "until another
+      // player answers" rule.
+      if (msg.winning_team_id || msg.wrong_buzz_id) {
+        setBuzzLockedOut(false)
+        setPreBuzzTaps(0)
+      }
       // Set buzz feedback via broadcast (reliable) — fires before question_deactivated clears myBuzzId
       if (msg.winning_team_id && msg.winning_team_id === myTeamRef.current?.id) {
         setBuzzResult('correct')
@@ -540,6 +647,10 @@ export default function PlayView() {
         setDoubleTapTeamId(null)
         setDtRevealForObserver(false)
         setDtTeammateWaiting(false)
+        setPreBuzzTaps(0)
+        setBuzzLockedOut(false)
+        revealClaimRef.current = null
+        if (revealTimerRef.current) { clearTimeout(revealTimerRef.current); revealTimerRef.current = null }
         sessionStorage.removeItem('dtWager')
         loadBoard(r.id, status === 'round_2' ? 2 : 1)
         return
@@ -610,6 +721,9 @@ export default function PlayView() {
       setPreviewInfo(null); setActiveQuestion(null); setCurrentTurnTeamId(null)
       setTimerPayload(null); setBuzzWindowTs(null); setHasBuzzed(false); setMyBuzzId(null); setBuzzPosition(null); setBuzzResult(null)
       setDoubleTapTeamId(null); setDtRevealForObserver(false); setDtTeammateWaiting(false)
+      setPreBuzzTaps(0); setBuzzLockedOut(false)
+      revealClaimRef.current = null
+      if (revealTimerRef.current) { clearTimeout(revealTimerRef.current); revealTimerRef.current = null }
       setRoom(null); setMyTeam(null)
       setFjSubPhase(null)
       setPhase('no_lobby')
@@ -626,7 +740,11 @@ export default function PlayView() {
     })
 
     broadcastRef.current = ch
-    return () => { ch.unsubscribe(); broadcastRef.current = null }
+    return () => {
+      ch.unsubscribe()
+      broadcastRef.current = null
+      if (revealTimerRef.current) { clearTimeout(revealTimerRef.current); revealTimerRef.current = null }
+    }
   }, [phase, room?.id, loadBoard])
 
   // Load board + team names when entering game phase
@@ -895,6 +1013,7 @@ export default function PlayView() {
   async function handleSubmitBuzz() {
     if (!myTeam || !room?.current_question_id || hasBuzzed || buzzing) return
     if (buzzWindowRemaining === 0) return
+    if (buzzLockedOut) return // spam-tapped the preview screen — sit this question out
     setBuzzing(true)
     const qId = room.current_question_id
     const { data: buzz, error: err } = await supabase
@@ -927,6 +1046,17 @@ export default function PlayView() {
     }
     setTimerPayload(payload)
     broadcastRef.current?.publish('timer_start', payload)
+  }
+
+  // Anti-spam: count taps on the pre-buzzer (preview) screen. 3 taps before the buzzer
+  // appears = this device is locked out of buzzing until another player answers.
+  function handlePreBuzzTap() {
+    if (buzzLockedOut) return
+    setPreBuzzTaps(n => {
+      const next = n + 1
+      if (next >= 3) setBuzzLockedOut(true)
+      return next
+    })
   }
 
   function handleBuzzSubmitClick(e: React.MouseEvent<HTMLButtonElement>) {
@@ -1575,16 +1705,11 @@ export default function PlayView() {
         {boardCategories.length > 0 ? (
           <div className="flex-1 px-2 pb-2 overflow-auto">
             <div
-              className="grid gap-1"
+              className="grid gap-1.5"
               style={{ gridTemplateColumns: `repeat(${boardCategories.length}, minmax(0, 1fr))` }}
             >
               {boardCategories.map(cat => (
-                <div key={cat.id} className="bg-blue-900 rounded px-1 py-2 text-center">
-                  <p className="font-black uppercase leading-tight text-white"
-                    style={{ fontSize: 'clamp(0.65rem, 3vw, 0.9rem)' }}>
-                    {cat.name}
-                  </p>
-                </div>
+                <TapHeader key={cat.id} categoryName={cat.name} />
               ))}
               {pointValues.flatMap(pv =>
                 boardCategories.map(cat => {
@@ -1599,12 +1724,12 @@ export default function PlayView() {
                         style={{ perspective: '600px', filter: 'drop-shadow(0 6px 20px rgba(0,0,0,0.7))' }}>
                         <div className="relative h-full w-full"
                           style={{ transformStyle: 'preserve-3d', animation: 'card-flip 0.6s ease-in-out forwards' }}>
-                          <div className="absolute inset-0 rounded flex items-center justify-center font-mono font-black text-yellow-400"
+                          <div className="absolute inset-0 rounded flex items-center justify-center font-mono font-black text-amber-950"
                             style={{
                               backfaceVisibility: 'hidden',
                               fontSize: 'clamp(1rem, 4vw, 1.4rem)',
-                              background: 'linear-gradient(145deg, #2563eb 0%, #1e40af 60%, #1a3899 100%)',
-                              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.12)',
+                              background: 'linear-gradient(145deg, #fcd34d 0%, #f59e0b 60%, #c2650a 100%)',
+                              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.25)',
                             }}>
                             ${pv}
                           </div>
@@ -1612,36 +1737,30 @@ export default function PlayView() {
                             style={{
                               backfaceVisibility: 'hidden',
                               transform: 'rotateY(180deg)',
-                              background: 'linear-gradient(145deg, #1e3a8a 0%, #172554 60%, #0f1c46 100%)',
+                              background: 'linear-gradient(180deg, #92400e 0%, #78350f 55%, #451a03 100%)',
                             }}>
-                            <p className="font-black uppercase text-white leading-tight"
+                            <p className="font-black uppercase text-amber-50 leading-tight"
                               style={{ fontSize: 'clamp(0.55rem, 2.5vw, 0.75rem)' }}>
                               {cat.name}
                             </p>
                           </div>
-                          <div style={{ position: 'absolute', top: 0, left: '100%', width: '4px', height: '100%', background: '#0a153a', transform: 'rotateY(90deg)', transformOrigin: 'left center' }} />
-                          <div style={{ position: 'absolute', top: 0, right: '100%', width: '4px', height: '100%', background: '#0a153a', transform: 'rotateY(-90deg)', transformOrigin: 'right center' }} />
+                          <div style={{ position: 'absolute', top: 0, left: '100%', width: '4px', height: '100%', background: '#2b1608', transform: 'rotateY(90deg)', transformOrigin: 'left center' }} />
+                          <div style={{ position: 'absolute', top: 0, right: '100%', width: '4px', height: '100%', background: '#2b1608', transform: 'rotateY(-90deg)', transformOrigin: 'right center' }} />
                         </div>
                       </div>
                     )
                   }
 
                   return (
-                    <button
-                      key={q.id}
-                      onClick={(e) => isMyTurnNow && !answered && handleSelectQuestion(q.id, e.currentTarget)}
-                      disabled={answered || !isMyTurnNow}
-                      className={`h-20 rounded font-mono font-black transition-colors relative overflow-hidden ${
-                        answered
-                          ? 'bg-gray-900/30 text-gray-800 cursor-default'
-                          : isMyTurnNow
-                            ? 'bg-blue-800 hover:bg-blue-700 active:bg-blue-600 text-yellow-400'
-                            : 'bg-blue-900/60 text-blue-400 cursor-default'
-                      }`}
-                      style={{ fontSize: 'clamp(1rem, 4vw, 1.4rem)' }}
-                    >
-                      {answered ? '' : `$${pv}`}
-                    </button>
+                    <div key={q.id} className="h-20">
+                      <BeerGlass
+                        pointValue={pv}
+                        state={answered ? 'empty' : 'full'}
+                        disabled={!isMyTurnNow}
+                        dimmed={!answered && !isMyTurnNow}
+                        onClick={(e) => isMyTurnNow && !answered && handleSelectQuestion(q.id, e.currentTarget)}
+                      />
+                    </div>
                   )
                 })
               )}
@@ -1660,7 +1779,8 @@ export default function PlayView() {
 
         {/* Preview overlay */}
         {previewInfo && (
-          <div className="fixed inset-0 z-50 bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center"
+          <div onClick={handlePreBuzzTap}
+            className="fixed inset-0 z-50 bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center"
             style={tileRect ? (() => {
               const vw = window.innerWidth, vh = window.innerHeight
               const scaleX = tileRect.width  / vw
@@ -1704,6 +1824,11 @@ export default function PlayView() {
               </p>
             )}
             <p className="text-gray-500 text-sm animate-pulse">Waiting for host…</p>
+            {buzzLockedOut ? (
+              <p className="text-red-400 text-sm font-bold mt-3">🔒 Too many early taps — you're locked out of this one</p>
+            ) : preBuzzTaps > 0 ? (
+              <p className="text-amber-400 text-xs font-semibold mt-3">Easy — tapping before the buzzer opens will lock you out</p>
+            ) : null}
             <QuipCycler />
           </div>
         )}
@@ -1939,7 +2064,12 @@ export default function PlayView() {
         )}
 
         <div className="flex-1 flex flex-col justify-end pb-4">
-          {buzzWindowClosed ? (
+          {buzzLockedOut ? (
+            <div className="w-full py-8 rounded-2xl font-black text-xl bg-gray-800 text-red-400/80 text-center leading-snug">
+              🔒 Locked out
+              <span className="block text-sm font-medium text-gray-500 mt-1">You tapped too early — wait for another team to answer</span>
+            </div>
+          ) : buzzWindowClosed ? (
             <div className="w-full py-8 rounded-2xl font-black text-xl bg-gray-800 text-gray-500 text-center">
               Buzz window closed
             </div>

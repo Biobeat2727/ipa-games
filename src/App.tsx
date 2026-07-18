@@ -2,6 +2,7 @@ import { Routes, Route, Navigate } from 'react-router-dom'
 import PlayView from './routes/play'
 import HostView from './routes/host'
 import ProjectorView from './routes/projector'
+import TapPreview from './routes/preview/TapPreview'
 
 function PlayWithLandscapeGuard() {
   return (
@@ -22,6 +23,7 @@ export default function App() {
       <Route path="/play" element={<PlayWithLandscapeGuard />} />
       <Route path="/host" element={<HostView />} />
       <Route path="/projector" element={<ProjectorView />} />
+      <Route path="/preview" element={<TapPreview />} />
       <Route path="*" element={<Navigate to="/play" replace />} />
     </Routes>
   )

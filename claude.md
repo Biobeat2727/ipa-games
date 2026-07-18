@@ -32,6 +32,7 @@ React + Vite, TypeScript, Tailwind CSS, Supabase (Postgres + Realtime), Vercel, 
 - Buzz button: full-width, impossible to miss
 - Server-generated timestamps for all buzzes
 - 6-char room codes, exclude ambiguous chars (0, O, 1, I, l)
+- Board visual theme: bar tap wall — categories are tap handles, point-value tiles are beer glasses (full = unanswered, empty = answered). Component: `src/components/TapCategoryColumn.tsx` (`TapHeader`, `BeerGlass`). Details in `docs/views.md`.
 
 ## Known Issues
 

@@ -7,6 +7,11 @@ import ScoreHistoryChart from '../../components/ScoreHistoryChart'
 
 const RESPONSE_SECONDS = 40
 
+// Buzzer reveal is scheduled this many ms in the future so every device flips to
+// the buzz screen at the same shared wall-clock instant, instead of "whenever the
+// broadcast happens to arrive." Must comfortably exceed worst-case Ably delivery.
+const REVEAL_BUFFER_MS = 450
+
 type CategoryRow = {
   id: string
   name: string
@@ -378,23 +383,45 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
     if (!error) {
       setRoom(prev => ({ ...prev, current_question_id: questionId }))
       setPreviewInfo(null)
+
+      // Send the question's PUBLIC fields inline so players/projector can reveal the
+      // buzzer straight from the broadcast — no per-device DB round-trip in the critical
+      // path (that fetch was the biggest, most erratic source of reveal-timing skew).
+      // NB: strip `correct_question` — players must never receive the answer over the wire.
+      const q = categories.flatMap(c => c.questions).find(x => x.id === questionId)
+      const publicQuestion = q && {
+        id: q.id,
+        category_id: q.category_id,
+        answer: q.answer,
+        point_value: q.point_value,
+        is_answered: q.is_answered,
+        answered_by_team_id: q.answered_by_team_id,
+        is_double_tap: q.is_double_tap,
+      }
+
       // For regular questions, record activation time so the answer timer continues
       // from when the buzzer opened (not from when the team buzzed).
       // Also send buzz_opened_at in question_activated so players can show the countdown.
       if (doubleTapWager === null) {
-        const startTs = Date.now()
-        activationStartTsRef.current = startTs
-        setBuzzOpenedAt(startTs)
+        // Schedule the reveal for a shared future instant. buzz_opened_at doubles as the
+        // reveal timestamp AND the start of the 25s buzz window, so both stay in sync.
+        const revealAt = Date.now() + REVEAL_BUFFER_MS
+        activationStartTsRef.current = revealAt
+        setBuzzOpenedAt(revealAt)
         // Timer is now player-side (10s from buzz) — no host judgeStartTime for regular questions
+        console.log(`[BUZZER host] publish t=${Date.now()} revealAt=${revealAt} (buffer=${REVEAL_BUFFER_MS}ms)`)
         broadcastRef.current?.publish('question_activated', {
           question_id: questionId,
-          buzz_opened_at: startTs,
+          question: publicQuestion,
+          buzz_opened_at: revealAt,
         })
       } else {
+        // Double Tap: no buzz window, selected team auto-buzzes — reveal immediately.
         activationStartTsRef.current = null
         setBuzzOpenedAt(null)
         broadcastRef.current?.publish('question_activated', {
           question_id: questionId,
+          question: publicQuestion,
           double_tap_team_id: currentTurnTeamId,
         })
       }

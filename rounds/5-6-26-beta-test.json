@@ -16,7 +16,7 @@
         {
           "name": "Blockbuster Night",
           "questions": [
-            { "point_value": 100, "answer": "This 1994 film follows an ex-con named Andy Dufresne who befriends a fellow prisoner named Red while serving time at Shawshank prison.", "correct_question": "What is The Shawshank Redemption?" },
+            { "point_value": 100, "answer": "This 1994 film follows an ex-con named Andy Dufresne who befriends a fellow prisoner named Red while serving time at a prison.", "correct_question": "What is The Shawshank Redemption?" },
             { "point_value": 200, "answer": "Tom Hanks delivered the line 'Life is like a box of chocolates' in this 1994 Best Picture winner.", "correct_question": "What is Forrest Gump?" },
             { "point_value": 300, "answer": "This director's credits include Jaws, E.T., Schindler's List, and the Indiana Jones franchise.", "correct_question": "Who is Steven Spielberg?" },
             { "point_value": 400, "answer": "The 1980 horror film where Jack Nicholson's character types 'All work and no play makes Jack a dull boy' over and over was directed by Stanley Kubrick.", "correct_question": "What is The Shining?" },

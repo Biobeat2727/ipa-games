@@ -5,6 +5,7 @@ import type { Buzz, Question, Room, ScoreSnapshot, Team } from '../../lib/types'
 import AnimatedScore from '../../components/AnimatedScore'
 import { playRoundTransition } from '../../lib/sounds'
 import ScoreHistoryChart from '../../components/ScoreHistoryChart'
+import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
 
 interface TimerPayload {
   start_timestamp: number
@@ -807,7 +808,7 @@ export default function ProjectorView() {
   if (!activeQuestion && categories.length > 0) {
     const roundLabel = room.status === 'round_2' ? 'Round 2' : 'Round 1'
     return (
-      <div className="h-screen bg-blue-950 text-white flex flex-col overflow-hidden p-3 gap-2">
+      <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden p-3 gap-2">
         {/* Score bar */}
         <div className="flex items-center justify-between shrink-0 px-3 py-1">
           <div>
@@ -854,39 +855,22 @@ export default function ProjectorView() {
         <div
           className="flex-1 grid gap-2"
           style={{
-            gridTemplateColumns: `repeat(${categories.length}, 1fr)`,
+            gridTemplateColumns: `repeat(${categories.length}, minmax(0, 1fr))`,
             gridTemplateRows: `auto repeat(${pointValues.length}, 1fr)`,
           }}
         >
           {/* Category headers */}
           {categories.map(cat => (
-            <div key={cat.id}
-              className="bg-blue-900 border-2 border-blue-700 rounded-xl flex items-center justify-center p-3 text-center"
-            >
-              <p className="font-black uppercase tracking-wide leading-tight"
-                style={{ fontSize: 'clamp(0.75rem, 1.8vw, 1.4rem)' }}>
-                {cat.name}
-              </p>
-            </div>
+            <TapHeader key={cat.id} categoryName={cat.name} />
           ))}
           {/* Value cells */}
           {pointValues.map(pv =>
             categories.map(cat => {
               const q        = cat.questions.find(q => q.point_value === pv)
-              const answered = q?.is_answered ?? false
+              if (!q) return <div key={`${cat.id}-${pv}`} className="rounded-xl bg-gray-900/20" />
+              const answered = q.is_answered
               return (
-                <div key={`${cat.id}-${pv}`}
-                  className={`rounded-xl flex items-center justify-center ${
-                    answered ? 'bg-blue-950/40' : 'bg-blue-800 border-2 border-blue-600'
-                  }`}
-                >
-                  {!answered && (
-                    <p className="font-black text-yellow-400 font-mono tabular-nums"
-                      style={{ fontSize: 'clamp(1.25rem, 3.5vw, 3rem)' }}>
-                      {pv}
-                    </p>
-                  )}
-                </div>
+                <BeerGlass key={`${cat.id}-${pv}`} pointValue={pv} state={answered ? 'empty' : 'full'} disabled />
               )
             })
           )}
