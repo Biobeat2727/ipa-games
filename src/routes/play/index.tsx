@@ -94,6 +94,7 @@ export default function PlayView() {
   // Game state
   const [activeQuestion, setActiveQuestion]   = useState<QuestionPublic | null>(null)
   const [hasBuzzed, setHasBuzzed]             = useState(false)
+  const [buzzWasMine, setBuzzWasMine]         = useState(false)
   const [myBuzzId, setMyBuzzId]               = useState<string | null>(null)
   const [buzzing, setBuzzing]                 = useState(false)
   const [timerPayload, setTimerPayload]         = useState<TimerPayload | null>(null)
@@ -137,6 +138,7 @@ export default function PlayView() {
   const [fjCategoryName, setFjCategoryName]   = useState('')
   const [fjWagerInput, setFjWagerInput]       = useState('')
   const [fjWagerId, setFjWagerId]             = useState<string | null>(null)
+  const [fjLockedWagerAmount, setFjLockedWagerAmount] = useState<number | null>(null)
   const [fjQuestion, setFjQuestion]           = useState<QuestionPublic | null>(null)
   const [fjResponse, setFjResponse]           = useState('')
   const [fjResponseSubmitted, setFjResponseSubmitted] = useState(false)
@@ -182,6 +184,9 @@ export default function PlayView() {
   useEffect(() => { roomRef.current = room }, [room])
   useEffect(() => { currentTurnTeamIdRef.current = currentTurnTeamId }, [currentTurnTeamId])
   useEffect(() => { phaseRef.current = phase }, [phase])
+
+  // Whether this phone won the team's current buzz claim is per-question state.
+  useEffect(() => { setBuzzWasMine(false) }, [activeQuestion?.id])
 
   // SW update: reload immediately if not mid-game, otherwise defer until game ends
   useEffect(() => {
@@ -658,7 +663,7 @@ export default function PlayView() {
       }
       if (status === 'final_jeopardy') {
         setFjCategoryName(fj_category ?? 'Final Jeopardy')
-        setFjWagerInput(''); setFjWagerId(null); setFjQuestion(null)
+        setFjWagerInput(''); setFjWagerId(null); setFjLockedWagerAmount(null); setFjQuestion(null)
         setFjResponse(''); setFjResponseSubmitted(false)
         setFjTimerStart(null); setFjTimeRemaining(null); setFjFinalScores([])
         setFjSubPhase('incoming')
@@ -680,17 +685,26 @@ export default function PlayView() {
       setFjSubPhase(isActive ? 'wager' : 'done')
     })
     ch.subscribe('fj_wager_locked', async ({ data }) => {
-      const { team_id, wager_id } = data as { team_id: string; wager_id?: string }
+      const { team_id, wager_id, amount } = data as { team_id: string; wager_id?: string; amount?: number }
       if (team_id !== myTeamRef.current?.id) return
       // Teammate locked in a wager — sync wager_id and flip to locked screen
       if (wager_id) {
         setFjWagerId(wager_id)
+        if (amount !== undefined) {
+          setFjLockedWagerAmount(amount)
+        } else {
+          const { data: w } = await supabase.from('wagers').select('amount').eq('id', wager_id).single()
+          if (w) setFjLockedWagerAmount(w.amount)
+        }
       } else if (!fjWagerIdRef.current) {
         // Fallback: fetch from DB if wager_id wasn't in the broadcast
         const roomId = roomRef.current?.id
         if (roomId) {
-          const { data: w } = await supabase.from('wagers').select('id').eq('team_id', team_id).eq('room_id', roomId).maybeSingle()
-          if (w) setFjWagerId(w.id)
+          const { data: w } = await supabase.from('wagers').select('id, amount').eq('team_id', team_id).eq('room_id', roomId).maybeSingle()
+          if (w) {
+            setFjWagerId(w.id)
+            setFjLockedWagerAmount(w.amount)
+          }
         }
       }
       setFjSubPhase(prev => prev === 'wager' ? 'wager_locked' : prev)
@@ -703,7 +717,7 @@ export default function PlayView() {
         supabase.from('wagers').update({
           response: resp || null,
           submitted_at: new Date().toISOString(),
-        }).eq('id', wagerId).then(() => {})
+        }).eq('id', wagerId).is('submitted_at', null).then(() => {})
       }
       setFjResponseSubmitted(true)
       setFjSubPhase('reviewing')
@@ -860,16 +874,15 @@ export default function PlayView() {
     const team = myTeamRef.current
     if (!team) return
     ;(async () => {
-      const { data: buzz } = await supabase
-        .from('buzzes')
-        .insert({ question_id: qId, team_id: team.id, status: 'pending' })
-        .select().single()
-      if (!buzz) return
+      const claim = await claimTeamBuzz(qId, team.id)
+      if (!claim) return
+      const { buzz, created } = claim
       setMyBuzzId(buzz.id)
       setHasBuzzed(true)
+      setBuzzWasMine(created)
       // Set timer locally so the answer box appears immediately without waiting for host broadcast
       setTimerPayload({
-        start_timestamp: Date.now(),
+        start_timestamp: new Date(buzz.buzzed_at).getTime(),
         duration_seconds: 40,
         team_id: team.id,
         buzz_id: buzz.id,
@@ -967,6 +980,28 @@ export default function PlayView() {
 
   // ── Actions ───────────────────────────────────────────────
 
+  async function claimTeamBuzz(questionId: string, teamId: string): Promise<{ buzz: Buzz; created: boolean } | null> {
+    const { data: createdBuzz, error: insertError } = await supabase
+      .from('buzzes')
+      .insert({ question_id: questionId, team_id: teamId, status: 'pending' })
+      .select()
+      .single()
+
+    if (createdBuzz) return { buzz: createdBuzz, created: true }
+    if (insertError?.code !== '23505') return null
+
+    // Another teammate won the simultaneous insert. The unique database index
+    // guarantees there is only one canonical row for the whole team.
+    const { data: existingBuzz } = await supabase
+      .from('buzzes')
+      .select()
+      .eq('question_id', questionId)
+      .eq('team_id', teamId)
+      .single()
+
+    return existingBuzz ? { buzz: existingBuzz, created: false } : null
+  }
+
   async function handleJoinLobby() {
     if (!room) return
     const { data: teamData } = await supabase
@@ -1018,15 +1053,9 @@ export default function PlayView() {
     if (buzzLockedOut) return // spam-tapped the preview screen — sit this question out
     setBuzzing(true)
     const qId = room.current_question_id
-    const { data: buzz, error: err } = await supabase
-      .from('buzzes')
-      .insert({
-        question_id: qId,
-        team_id: myTeam.id,
-        status: 'pending',
-      })
-      .select().single()
-    if (!buzz || err) { setBuzzing(false); return }
+    const claim = await claimTeamBuzz(qId, myTeam.id)
+    if (!claim) { setBuzzing(false); return }
+    const { buzz, created } = claim
     // Count buzzes at or before ours to get queue position
     const { count } = await supabase
       .from('buzzes')
@@ -1035,8 +1064,21 @@ export default function PlayView() {
       .lte('buzzed_at', buzz.buzzed_at)
     setMyBuzzId(buzz.id)
     setHasBuzzed(true)
+    setBuzzWasMine(created)
     setBuzzPosition(count)
     setBuzzing(false)
+
+    if (!created) {
+      // Adopt the team's existing buzz without sending a second timer event.
+      setTimerPayload({
+        start_timestamp: new Date(buzz.buzzed_at).getTime(),
+        duration_seconds: 15,
+        team_id: myTeam.id,
+        buzz_id: buzz.id,
+        team_name: myTeam.name,
+      })
+      return
+    }
     // Start 10s answer timer locally and broadcast for projector
     const startTs = Date.now()
     const payload: TimerPayload = {
@@ -1076,11 +1118,25 @@ export default function PlayView() {
   async function handleSubmitResponse() {
     const buzzId = myBuzzId ?? timerPayload?.buzz_id
     if (!buzzId || !responseText.trim()) return
-    responseSubmittedRef.current = true // guard before await to prevent race
-    await supabase.from('buzzes').update({
+    responseSubmittedRef.current = true // guard before await to prevent duplicate taps on this phone
+    const { data: submitted, error: submitError } = await supabase.from('buzzes').update({
       response: responseText.trim(),
       response_submitted_at: new Date().toISOString(),
-    }).eq('id', buzzId)
+    }).eq('id', buzzId).is('response_submitted_at', null).select().maybeSingle()
+
+    if (submitError) {
+      responseSubmittedRef.current = false
+      return
+    }
+
+    if (!submitted) {
+      const { data: existing } = await supabase
+        .from('buzzes').select('response').eq('id', buzzId).single()
+      if (existing?.response) setResponseText(existing.response)
+      setResponseSubmitted(true)
+      return
+    }
+
     setResponseSubmitted(true)
     broadcastRef.current?.publish('team_answer_submitted', {
       team_id: myTeam?.id,
@@ -1163,13 +1219,29 @@ export default function PlayView() {
   async function handleSubmitWager() {
     if (!myTeam || !room) return
     const amount = Math.max(0, Math.min(Math.max(0, myScore), parseInt(fjWagerInput) || 0))
-    const { data: wager, error: err } = await supabase
+    const { data: wager, error: insertError } = await supabase
       .from('wagers').insert({ team_id: myTeam.id, room_id: room.id, amount, status: 'pending' })
       .select().single()
-    if (!wager || err) return
-    setFjWagerId(wager.id)
+
+    let teamWager = wager
+    if (!teamWager && insertError?.code === '23505') {
+      const { data: existing } = await supabase
+        .from('wagers').select().eq('team_id', myTeam.id).eq('room_id', room.id).single()
+      teamWager = existing
+    }
+    if (!teamWager) return
+
+    setFjWagerId(teamWager.id)
+    setFjWagerInput(String(teamWager.amount))
+    setFjLockedWagerAmount(teamWager.amount)
     setFjSubPhase('wager_locked')
-    broadcastRef.current?.publish('fj_wager_locked', { team_id: myTeam.id, wager_id: wager.id })
+    if (wager) {
+      broadcastRef.current?.publish('fj_wager_locked', {
+        team_id: myTeam.id,
+        wager_id: teamWager.id,
+        amount: teamWager.amount,
+      })
+    }
   }
 
   async function handleSubmitFJResponse() {
@@ -1182,10 +1254,14 @@ export default function PlayView() {
       wagerId = w.id
       setFjWagerId(w.id)
     }
-    await supabase.from('wagers').update({
+    const { data: submitted } = await supabase.from('wagers').update({
       response: fjResponse.trim(),
       submitted_at: new Date().toISOString(),
-    }).eq('id', wagerId)
+    }).eq('id', wagerId).is('submitted_at', null).select().maybeSingle()
+    if (!submitted) {
+      const { data: existing } = await supabase.from('wagers').select('response').eq('id', wagerId).single()
+      if (existing?.response) setFjResponse(existing.response)
+    }
     setFjResponseSubmitted(true)
   }
 
@@ -1425,7 +1501,10 @@ export default function PlayView() {
         {scoreOverlayEl}
         {scoreChip}
         <div className="w-3 h-3 rounded-full bg-green-400 mb-6 animate-pulse" />
-        <p className="text-2xl font-black text-white mb-2">Wager locked in</p>
+        <p className="text-2xl font-black text-white mb-2">Team wager locked in</p>
+        {fjLockedWagerAmount !== null && (
+          <p className="text-5xl font-mono font-black text-yellow-400 mb-3">{fjLockedWagerAmount} pts</p>
+        )}
         <p className="text-gray-400 text-sm">Waiting for other teams…</p>
         <p className="text-blue-400 text-xs uppercase tracking-widest mt-10">{fjCategoryName}</p>
         <QuipCycler />
@@ -1911,7 +1990,7 @@ export default function PlayView() {
         {scoreChip}
         <div className="max-w-sm mx-auto w-full flex flex-col flex-1 pt-8">
           <div className="flex items-center justify-between mb-2">
-            <p className="text-yellow-400 font-black text-xl">{hasBuzzed ? "You're in! Type fast!" : 'Teammate buzzed! Type fast!'}</p>
+            <p className="text-yellow-400 font-black text-xl">{buzzWasMine ? "You're in! Type fast!" : 'Teammate buzzed! Type fast!'}</p>
             <span className={`font-mono text-4xl font-black tabular-nums ${ansTimerLow ? 'text-red-400' : 'text-white'}`}>
               {ansTimer}
             </span>
@@ -1999,7 +2078,7 @@ export default function PlayView() {
         {scoreChip}
         <div className="w-3 h-3 rounded-full bg-yellow-400 mb-6 animate-pulse" />
         <p className="text-2xl font-black text-white mb-2">
-          {responseSubmitted ? 'Response submitted' : 'Buzzed in!'}
+          {responseSubmitted ? 'Response submitted' : buzzWasMine ? 'Buzzed in!' : 'Your teammate already buzzed'}
         </p>
         <p className="text-gray-500 text-sm">Waiting for the host…</p>
         {responseText && (
