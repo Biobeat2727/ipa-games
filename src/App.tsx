@@ -3,6 +3,8 @@ import PlayView from './routes/play'
 import HostView from './routes/host'
 import ProjectorView from './routes/projector'
 import TapPreview from './routes/preview/TapPreview'
+import ErrorBoundary from './components/ErrorBoundary'
+import ConnectionBanner from './components/ConnectionBanner'
 
 function PlayWithLandscapeGuard() {
   return (
@@ -20,9 +22,24 @@ function PlayWithLandscapeGuard() {
 export default function App() {
   return (
     <Routes>
-      <Route path="/play" element={<PlayWithLandscapeGuard />} />
-      <Route path="/host" element={<HostView />} />
-      <Route path="/projector" element={<ProjectorView />} />
+      <Route path="/play" element={
+        <ErrorBoundary>
+          <ConnectionBanner />
+          <PlayWithLandscapeGuard />
+        </ErrorBoundary>
+      } />
+      <Route path="/host" element={
+        <ErrorBoundary>
+          <ConnectionBanner />
+          <HostView />
+        </ErrorBoundary>
+      } />
+      <Route path="/projector" element={
+        <ErrorBoundary>
+          <ConnectionBanner />
+          <ProjectorView />
+        </ErrorBoundary>
+      } />
       <Route path="/preview" element={<TapPreview />} />
       <Route path="*" element={<Navigate to="/play" replace />} />
     </Routes>

@@ -33,8 +33,67 @@
   100% { transform: scale(1); opacity: 1; }
 }
 
+@keyframes pop-in {
+  0%   { transform: scale(0); opacity: 0; }
+  60%  { transform: scale(1.25); opacity: 1; }
+  100% { transform: scale(1); opacity: 1; }
+}
+
+@keyframes shake-x {
+  0%, 100% { transform: translateX(0); }
+  20%      { transform: translateX(-10px); }
+  40%      { transform: translateX(9px); }
+  60%      { transform: translateX(-6px); }
+  80%      { transform: translateX(4px); }
+}
+
+@keyframes buzz-glow {
+  0%, 100% { box-shadow: 0 0 40px rgba(220, 38, 38, 0.45); }
+  50%      { box-shadow: 0 0 75px rgba(220, 38, 38, 0.85); }
+}
+
+@keyframes timer-pulse {
+  0%, 100% { transform: scale(1); }
+  50%      { transform: scale(1.12); }
+}
+
+@keyframes slide-up-in {
+  0%   { opacity: 0; transform: translateY(18px); }
+  100% { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes banner-drop {
+  0%   { transform: translateY(-100%); }
+  100% { transform: translateY(0); }
+}
+
+/* Bump chart: line draws left→right, then labels fade in */
+@keyframes bump-draw {
+  to { stroke-dashoffset: 0; }
+}
+
+@keyframes bump-label-in {
+  0%   { opacity: 0; transform: translateX(8px); }
+  100% { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes trophy-float {
+  0%, 100% { transform: translateY(0) rotate(-2deg); }
+  50%      { transform: translateY(-10px) rotate(2deg); }
+}
+
 .score-chip-pulse {
   animation: score-pulse 0.5s ease-out;
+}
+
+/* Accessibility: collapse all animation for users who ask for reduced motion */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.01ms !important;
+    animation-delay: 0s !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+  }
 }
 
 /* Play route — landscape orientation warning (shown only on narrow landscape, i.e. phones rotated) */

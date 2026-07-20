@@ -81,6 +81,20 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   // Round intermission (score history graph between rounds)
   const [intermissionSnapshots, setIntermissionSnapshots] = useState<ScoreSnapshot[] | null>(null)
 
+  // Per-judgment score history — the data behind the intermission bump chart.
+  // Every score-changing judgment appends one snapshot; persisted to
+  // rooms.score_snapshots so a host page refresh doesn't lose the round's story.
+  const scoreHistoryRef = useRef<ScoreSnapshot[]>(initialRoom.score_snapshots ?? [])
+
+  function recordScoreSnapshot(updatedScores: Map<string, number>) {
+    const snap: ScoreSnapshot = {
+      label: `#${scoreHistoryRef.current.length + 1}`,
+      scores: teams.map(t => ({ team_id: t.id, score: updatedScores.get(t.id) ?? t.score })),
+    }
+    scoreHistoryRef.current = [...scoreHistoryRef.current, snap]
+    supabase.from('rooms').update({ score_snapshots: scoreHistoryRef.current }).eq('id', roomId).then(() => {})
+  }
+
   // ── Setup ────────────────────────────────────────────────
 
   useEffect(() => {
@@ -523,6 +537,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
     const updatedScores = new Map([...scores, [buzz.team_id, newScore]])
     setScores(updatedScores)
+    recordScoreSnapshot(updatedScores)
 
     // Compute updated categories inline so we can check round completion immediately
     const nextCategories = categories.map(cat => ({
@@ -566,6 +581,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
     const updatedScores = new Map([...scores, [buzz.team_id, newScore]])
     setScores(updatedScores)
+    recordScoreSnapshot(updatedScores)
     setBuzzes(prev => prev.map(b => b.id === buzz.id ? { ...b, status: 'wrong' } : b))
 
     // Compute updated categories inline so we can check round completion when questionDone
@@ -695,6 +711,21 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     }
   }
 
+  // A team in the reveal order with NO wager row (players never locked one in —
+  // dead phone, wifi drop, walked out) would otherwise strand the review on
+  // "Loading review…" with no way forward. Skip them: no score change, move on.
+  function skipFJTeam() {
+    const nextIdx = fjReviewIdx + 1
+    if (nextIdx >= fjRevealOrder.length) {
+      finishGame(new Map(scores))
+    } else {
+      setFjReviewIdx(nextIdx)
+      const nextId = fjRevealOrder[nextIdx]
+      const nextWager = fjWagers.find(w => w.team_id === nextId)
+      broadcastRef.current?.publish('fj_answer_reveal', { team_id: nextId, team_name: teamName(nextId), response: nextWager?.response ?? null })
+    }
+  }
+
   async function finishGame(finalScores: Map<string, number>) {
     await supabase.from('rooms').update({ status: 'finished', current_question_id: null }).eq('id', roomId)
     setRoom(prev => ({ ...prev, status: 'finished', current_question_id: null }))
@@ -713,24 +744,47 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   }
 
   async function showRoundIntermission() {
-    // Snapshot current scores before transitioning
-    const snapshot: ScoreSnapshot = {
-      label: 'Round 1',
-      scores: teams.map(t => ({ team_id: t.id, score: scores.get(t.id) ?? t.score })),
+    // The full per-judgment history is the chart's story. Fallback: if nothing was
+    // recorded (shouldn't happen in a played round), snapshot the current scores.
+    let snapshots = scoreHistoryRef.current
+    if (snapshots.length === 0) {
+      snapshots = [{
+        label: 'Round 1',
+        scores: teams.map(t => ({ team_id: t.id, score: scores.get(t.id) ?? t.score })),
+      }]
+      scoreHistoryRef.current = snapshots
+      await supabase.from('rooms').update({ score_snapshots: snapshots }).eq('id', roomId)
     }
-    const snapshots = [snapshot]
-    // Persist snapshots to DB for refresh survival
-    await supabase.from('rooms').update({ score_snapshots: snapshots }).eq('id', roomId)
     setIntermissionSnapshots(snapshots)
     broadcastRef.current?.publish('round_intermission', { snapshots })
   }
 
   function devShowGraph() {
     if (teams.length === 0) { alert('DEV: No teams in this room yet — join some first.'); return }
-    const snapshots: ScoreSnapshot[] = [{
-      label: 'Round 1',
-      scores: teams.map(t => ({ team_id: t.id, score: scores.get(t.id) ?? t.score })),
-    }]
+    // Use the real history when the round has one; otherwise synthesize a dramatic
+    // random-walk story ending at the real current scores, so the chart can be
+    // previewed without judging 15 questions. Fake data is display-only — it is
+    // never written to scoreHistoryRef or the DB.
+    let snapshots = scoreHistoryRef.current
+    if (snapshots.length < 2) {
+      const STEPS = 10
+      const finals  = new Map(teams.map(t => [t.id, scores.get(t.id) ?? t.score]))
+      const running = new Map(teams.map(t => [t.id, 0]))
+      snapshots = Array.from({ length: STEPS }, (_, idx) => {
+        const i = idx + 1
+        teams.forEach(t => {
+          const target = finals.get(t.id) ?? 0
+          const cur    = running.get(t.id) ?? 0
+          const drift  = (target - cur) / (STEPS - i + 1)
+          const noise  = (Math.random() - 0.5) * 500
+          running.set(t.id, i === STEPS ? target : Math.round((cur + drift + noise) / 50) * 50)
+        })
+        return {
+          label: `#${i}`,
+          scores: teams.map(t => ({ team_id: t.id, score: running.get(t.id) ?? 0 })),
+        }
+      })
+    }
     setIntermissionSnapshots(snapshots)
     broadcastRef.current?.publish('round_intermission', { snapshots })
   }
@@ -1060,9 +1114,30 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
           ) : fjPhase === 'review' ? (() => {
             const reviewTeamId = fjRevealOrder[fjReviewIdx]
             const reviewWager  = fjWagers.find(w => w.team_id === reviewTeamId)
-            if (!reviewTeamId || !reviewWager) return (
+            if (!reviewTeamId) return (
               <div className="flex-1 flex items-center justify-center">
                 <p className="text-gray-600">Loading review…</p>
+              </div>
+            )
+            if (!reviewWager) return (
+              <div className="flex-1 flex flex-col gap-4">
+                <div className="bg-gray-900 rounded-xl px-4 py-3 border border-gray-800">
+                  <p className="text-xs text-gray-500 uppercase tracking-widest">
+                    Team {fjReviewIdx + 1} of {fjRevealOrder.length}
+                  </p>
+                </div>
+                <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 flex-1 flex flex-col">
+                  <p className="text-2xl font-black mb-1">{teamName(reviewTeamId)}</p>
+                  <p className="text-gray-500 text-sm">
+                    Never locked in a wager — nothing to judge. Their score stays as-is.
+                  </p>
+                </div>
+                <button
+                  onClick={skipFJTeam}
+                  className="py-5 rounded-2xl font-black text-xl bg-gray-800 hover:bg-gray-700 active:bg-gray-900 transition-colors"
+                >
+                  Skip Team →
+                </button>
               </div>
             )
             return (

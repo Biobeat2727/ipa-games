@@ -11,7 +11,7 @@ import type { Buzz, Player, QuestionPublic, Room, ScoreSnapshot, Team } from '..
 import AnimatedScore from '../../components/AnimatedScore'
 import Confetti from '../../components/Confetti'
 import ScoreOverlay from '../../components/ScoreOverlay'
-import ScoreHistoryChart from '../../components/ScoreHistoryChart'
+import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
 import { QUIPS } from '../../lib/quips'
 import {
@@ -46,6 +46,13 @@ interface PreviewInfo {
 // before falling back to its own fetch. Covers missed broadcasts and page refreshes,
 // while giving the (near-instant) broadcast time to win on a normal live activation.
 const REVEAL_FALLBACK_GRACE_MS = 500
+
+// "1st" / "2nd" / "3rd" / "11th" — handles the 11-13 special cases correctly
+function ordinal(n: number): string {
+  const s = ['th', 'st', 'nd', 'rd']
+  const v = n % 100
+  return n + (s[(v - 20) % 10] || s[v] || s[0])
+}
 
 // ── Quip cycler component ─────────────────────────────────────
 
@@ -109,6 +116,11 @@ export default function PlayView() {
   // actually appears locks this device out of buzzing for the current question.
   const [preBuzzTaps, setPreBuzzTaps]         = useState(0)
   const [buzzLockedOut, setBuzzLockedOut]     = useState(false)
+  // Buzz insert failed (flaky wifi) — surface it loudly so the player retries
+  // instead of silently believing they're in the queue.
+  const [buzzFailed, setBuzzFailed]           = useState(false)
+  // Brief full-screen splash on the phone when Round 2 opens
+  const [playerRoundSplash, setPlayerRoundSplash] = useState(false)
   const [myScore, setMyScore]                 = useState(0)
   const [allTeamScores, setAllTeamScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
@@ -526,6 +538,7 @@ export default function PlayView() {
         // it was set during the preview and must carry into the buzz phase).
         setTimerPayload(null)
         setBuzzResult(null)
+        setBuzzFailed(false)
         setHasBuzzed(false)
         setMyBuzzId(null)
         setBuzzPosition(null)
@@ -564,6 +577,7 @@ export default function PlayView() {
       setDtTeammateWaiting(false)
       setPreBuzzTaps(0)
       setBuzzLockedOut(false)
+      setBuzzFailed(false)
       setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
       setActiveQuestion(null)
       setHasBuzzed(false)
@@ -639,8 +653,15 @@ export default function PlayView() {
       if (!r) return
       setRoom({ ...r, status: status as Room['status'] })
       if (status === 'round_1' || status === 'round_2') {
+        // Round 2 opener — quick splash on every phone so the room flips together
+        if (status === 'round_2') {
+          setPlayerRoundSplash(true)
+          navigator.vibrate?.([80, 40, 80])
+          setTimeout(() => setPlayerRoundSplash(false), 2600)
+        }
         // New round — wipe all mid-game state
         setIntermissionSnapshots(null)
+        setBuzzFailed(false)
         setPreviewInfo(null)
         setActiveQuestion(null)
         setCurrentTurnTeamId(null)
@@ -793,6 +814,16 @@ export default function PlayView() {
     const id = setTimeout(() => setBuzzResult(null), 2500)
     return () => clearTimeout(id)
   }, [buzzResult])
+
+  // Game over: the winning team's phones get confetti + a victory buzz
+  useEffect(() => {
+    if (fjSubPhase !== 'done' || fjFinalScores.length === 0) return
+    const winner = [...fjFinalScores].sort((a, b) => b.score - a.score)[0]
+    if (winner && winner.id === myTeamRef.current?.id) {
+      setShowConfetti(true)
+      navigator.vibrate?.([100, 50, 100, 50, 300])
+    }
+  }, [fjSubPhase, fjFinalScores])
 
   // Fallback: if question loads but buzz_opened_at broadcast was missed (e.g. refresh or DB poll),
   // restore from sessionStorage if it matches, otherwise start from now.
@@ -990,8 +1021,6 @@ export default function PlayView() {
     if (createdBuzz) return { buzz: createdBuzz, created: true }
     if (insertError?.code !== '23505') return null
 
-    // Another teammate won the simultaneous insert. The unique database index
-    // guarantees there is only one canonical row for the whole team.
     const { data: existingBuzz } = await supabase
       .from('buzzes')
       .select()
@@ -1054,8 +1083,16 @@ export default function PlayView() {
     setBuzzing(true)
     const qId = room.current_question_id
     const claim = await claimTeamBuzz(qId, myTeam.id)
-    if (!claim) { setBuzzing(false); return }
+    if (!claim) {
+      // The single worst silent failure at a live event: player thinks they're in
+      // the queue but the insert never landed. Tell them, buzz-able immediately.
+      setBuzzing(false)
+      setBuzzFailed(true)
+      navigator.vibrate?.([60, 40, 60])
+      return
+    }
     const { buzz, created } = claim
+    setBuzzFailed(false)
     // Count buzzes at or before ours to get queue position
     const { count } = await supabase
       .from('buzzes')
@@ -1069,7 +1106,6 @@ export default function PlayView() {
     setBuzzing(false)
 
     if (!created) {
-      // Adopt the team's existing buzz without sending a second timer event.
       setTimerPayload({
         start_timestamp: new Date(buzz.buzzed_at).getTime(),
         duration_seconds: 15,
@@ -1530,7 +1566,8 @@ export default function PlayView() {
         <div className="flex-1 flex flex-col p-5 max-w-sm mx-auto w-full">
           <div className="flex items-center justify-between mb-4 pt-3">
             <p className="text-blue-400 text-xs uppercase tracking-widest">Final Jeopardy</p>
-            <span className={`font-mono text-3xl font-black tabular-nums ${low ? 'text-red-400' : 'text-white'}`}>
+            <span className={`inline-block font-mono text-3xl font-black tabular-nums ${low ? 'text-red-400' : 'text-white'}`}
+              style={low ? { animation: 'timer-pulse 0.8s ease-in-out infinite' } : undefined}>
               {remaining}
             </span>
           </div>
@@ -1584,26 +1621,63 @@ export default function PlayView() {
   }
 
   if (fjSubPhase === 'done') {
-    const winner = [...fjFinalScores].sort((a, b) => b.score - a.score)[0]
-    const myEntry = fjFinalScores.find(t => t.id === myTeam?.id)
+    const finalStandings = [...fjFinalScores].sort((a, b) => b.score - a.score)
+    const winner   = finalStandings[0]
+    const myFinIdx = finalStandings.findIndex(t => t.id === myTeam?.id)
+    const myEntry  = myFinIdx >= 0 ? finalStandings[myFinIdx] : null
+    const iWon     = winner != null && winner.id === myTeam?.id
+    const medals   = ['🥇', '🥈', '🥉']
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="relative min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center overflow-y-auto">
         {scoreOverlayEl}
-        <p className="text-gray-500 text-xs uppercase tracking-widest mb-2">Game Over</p>
-        <p className="text-4xl font-black text-yellow-400 mb-8">{winner?.name ?? '?'} wins!</p>
-        {fjFinalScores.length > 0 && (
+        <Confetti active={showConfetti} onDone={() => setShowConfetti(false)} />
+        {iWon ? (
+          <>
+            <p className="text-6xl mb-4" style={{ animation: 'trophy-float 2.5s ease-in-out infinite' }}>🏆</p>
+            <p className="text-gray-500 text-xs uppercase tracking-widest mb-2"
+              style={{ animation: 'slide-up-in 0.4s ease-out both' }}>Game Over</p>
+            <p className="text-5xl font-black text-yellow-400 mb-2 leading-tight"
+              style={{ animation: 'pop-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both' }}>
+              Champions!
+            </p>
+            <p className="text-gray-300 font-semibold mb-8"
+              style={{ animation: 'slide-up-in 0.4s ease-out 0.4s both' }}>
+              {winner.name} takes the night 🍻
+            </p>
+          </>
+        ) : (
+          <>
+            <p className="text-gray-500 text-xs uppercase tracking-widest mb-2"
+              style={{ animation: 'slide-up-in 0.4s ease-out both' }}>Game Over</p>
+            <p className="text-3xl font-black text-yellow-400 mb-4"
+              style={{ animation: 'pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both' }}>
+              {winner?.name ?? '?'} wins!
+            </p>
+            {myEntry && (
+              <div className="mb-6" style={{ animation: 'slide-up-in 0.5s ease-out 0.3s both' }}>
+                <p className="text-gray-500 text-xs uppercase tracking-widest mb-0.5">You finished</p>
+                <p className="text-5xl font-black text-white leading-none">{ordinal(myFinIdx + 1)}</p>
+              </div>
+            )}
+          </>
+        )}
+        {finalStandings.length > 0 && (
           <div className="w-full max-w-xs space-y-2 mb-8">
-            {[...fjFinalScores].sort((a, b) => b.score - a.score).map((t, i) => (
-              <div key={t.id} className={`flex items-center gap-3 rounded-xl px-4 py-3 ${t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'bg-gray-900'}`}>
-                <span className="text-gray-600 font-mono w-5 text-center text-sm">{i + 1}</span>
-                <span className="flex-1 font-semibold text-left">{t.name}</span>
-                <span className={`font-mono font-black text-sm ${t.score < 0 ? 'text-red-400' : 'text-yellow-400'}`}>{t.score}</span>
+            {finalStandings.map((t, i) => (
+              <div key={t.id}
+                className={`flex items-center gap-3 rounded-xl px-4 py-3 ${t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'bg-gray-900'}`}
+                style={{ animation: `slide-up-in 0.4s ease-out ${0.5 + i * 0.1}s both` }}>
+                <span className="w-6 text-center shrink-0">
+                  {i < 3 ? medals[i] : <span className="text-gray-600 font-mono text-sm">{i + 1}</span>}
+                </span>
+                <span className="flex-1 font-semibold text-left truncate">{t.name}</span>
+                <span className={`font-mono font-black text-sm ${t.score < 0 ? 'text-red-400' : 'text-yellow-400'}`}>{t.score.toLocaleString()}</span>
               </div>
             ))}
           </div>
         )}
-        {myEntry && (
-          <p className="text-gray-400 text-sm">Your final score: <span className="text-white font-black">{myEntry.score}</span></p>
+        {myEntry && !iWon && (
+          <p className="text-gray-400 text-sm">Your final score: <span className="text-white font-black">{myEntry.score.toLocaleString()}</span></p>
         )}
         <button onClick={handleLeave} className="mt-6 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors">
           Leave
@@ -1617,26 +1691,64 @@ export default function PlayView() {
   if (intermissionSnapshots) {
     const teamIds = allTeamScores.map(t => t.id)
     const teamNameMap = new Map(allTeamScores.map(t => [t.id, t.name]))
+    const standings = [...allTeamScores].sort((a, b) => b.score - a.score)
+    const myIdx     = standings.findIndex(t => t.id === myTeam?.id)
+    const leader    = standings[0]
+    const myEntry   = myIdx >= 0 ? standings[myIdx] : null
+    const gap       = myEntry && leader ? leader.score - myEntry.score : 0
+    const medals    = ['🥇', '🥈', '🥉']
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col p-5">
-        <div className="text-center mb-4">
-          <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">Round 1 Complete</p>
-          <p className="text-2xl font-black text-yellow-400">Score History</p>
-          <p className="text-gray-500 text-sm mt-1">Waiting for host to start Round 2…</p>
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col p-5 overflow-y-auto">
+        <div className="text-center mb-3 shrink-0">
+          <p className="text-xs text-gray-500 uppercase tracking-widest mb-1"
+            style={{ animation: 'slide-up-in 0.4s ease-out both' }}>Round 1 in the books</p>
+          <p className="text-3xl font-black text-yellow-400"
+            style={{ animation: 'pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both' }}>
+            🍻 Halftime
+          </p>
         </div>
-        <div style={{ height: '45vh' }}>
+
+        {/* Personal rank hero — the thing each player actually wants to know */}
+        {myEntry && (
+          <div className="text-center mb-3 shrink-0"
+            style={{ animation: 'slide-up-in 0.5s ease-out 0.3s both' }}>
+            <p className="text-gray-500 text-xs uppercase tracking-widest mb-0.5">You're in</p>
+            <p className="text-5xl font-black text-white leading-none mb-1">{ordinal(myIdx + 1)}</p>
+            <p className="text-sm font-semibold">
+              {myIdx === 0 ? (
+                standings.length > 1 && standings[1].score === myEntry.score
+                  ? <span className="text-yellow-400">Tied for the lead!</span>
+                  : <span className="text-yellow-400">Leading by {(myEntry.score - (standings[1]?.score ?? 0)).toLocaleString()}</span>
+              ) : gap === 0 ? (
+                <span className="text-yellow-400">Tied with the leader!</span>
+              ) : (
+                <span className="text-gray-400">{gap.toLocaleString()} behind the leader</span>
+              )}
+            </p>
+          </div>
+        )}
+
+        <div className="shrink-0" style={{ height: '38vh', animation: 'slide-up-in 0.5s ease-out 0.45s both' }}>
           <ScoreHistoryChart
             snapshots={intermissionSnapshots}
             teamNames={teamNameMap}
             teamIds={teamIds}
+            highlightTeamId={myTeam?.id}
           />
         </div>
-        <div className="mt-4 space-y-2">
-          {[...allTeamScores].sort((a, b) => b.score - a.score).map((t, i) => (
-            <div key={t.id} className={`flex items-center gap-3 rounded-xl px-4 py-3 ${
-              t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'bg-gray-900'
-            }`}>
-              <span className="text-gray-600 font-mono text-sm w-5 text-right shrink-0">{i + 1}</span>
+
+        <div className="mt-3 space-y-2 shrink-0">
+          {standings.map((t, i) => (
+            <div key={t.id}
+              className={`flex items-center gap-3 rounded-xl px-4 py-3 ${
+                t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'bg-gray-900'
+              }`}
+              style={{ animation: `slide-up-in 0.4s ease-out ${0.55 + i * 0.08}s both` }}>
+              <span className="w-6 text-center shrink-0">
+                {i < 3 ? medals[i] : <span className="text-gray-600 font-mono text-sm">{i + 1}</span>}
+              </span>
+              <span className="w-2.5 h-2.5 rounded-full shrink-0"
+                style={{ background: getTeamColor(t.id, teamIds) }} />
               <span className="flex-1 font-bold truncate">{t.name}</span>
               <span className={`font-mono font-black tabular-nums ${t.score < 0 ? 'text-red-400' : 'text-yellow-400'}`}>
                 {t.score.toLocaleString()}
@@ -1644,6 +1756,11 @@ export default function PlayView() {
             </div>
           ))}
         </div>
+
+        <p className="text-center text-gray-500 text-sm mt-4 pb-4 shrink-0"
+          style={{ animation: `slide-up-in 0.4s ease-out ${0.6 + standings.length * 0.08}s both` }}>
+          Round 2 is coming — bigger points on the board. Refill while you can 🍺
+        </p>
       </div>
     )
   }
@@ -1656,10 +1773,13 @@ export default function PlayView() {
         {scoreOverlayEl}
         <Confetti active={showConfetti} onDone={() => setShowConfetti(false)} />
         {scoreChip}
-        <div className="text-8xl mb-6 leading-none">✓</div>
-        <p className="text-5xl font-black text-green-400 mb-3">Correct!</p>
+        <div className="text-8xl mb-6 leading-none"
+          style={{ animation: 'pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>✓</div>
+        <p className="text-5xl font-black text-green-400 mb-3"
+          style={{ animation: 'slide-up-in 0.4s ease-out 0.15s both' }}>Correct!</p>
         {activeQuestion?.point_value && (
-          <p className="text-green-300 text-xl font-semibold">+{activeQuestion.point_value} points</p>
+          <p className="text-green-300 text-xl font-semibold"
+            style={{ animation: 'slide-up-in 0.4s ease-out 0.3s both' }}>+{activeQuestion.point_value} points</p>
         )}
       </div>
     )
@@ -1670,12 +1790,16 @@ export default function PlayView() {
       <div className="relative min-h-screen bg-red-950 text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         {scoreChip}
-        <div className="text-8xl mb-6 leading-none">✗</div>
-        <p className="text-5xl font-black text-red-400 mb-3">Wrong!</p>
-        {activeQuestion?.point_value && (
-          <p className="text-red-300 text-xl font-semibold">−{activeQuestion.point_value} points</p>
-        )}
-        <p className="text-gray-500 text-sm mt-4">Waiting for other teams…</p>
+        <div style={{ animation: 'shake-x 0.5s ease-out 0.2s' }} className="flex flex-col items-center">
+          <div className="text-8xl mb-6 leading-none"
+            style={{ animation: 'pop-in 0.4s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>✗</div>
+          <p className="text-5xl font-black text-red-400 mb-3">Wrong!</p>
+          {activeQuestion?.point_value && (
+            <p className="text-red-300 text-xl font-semibold">−{activeQuestion.point_value} points</p>
+          )}
+        </div>
+        <p className="text-gray-500 text-sm mt-4"
+          style={{ animation: 'slide-up-in 0.4s ease-out 0.5s both' }}>Waiting for other teams…</p>
       </div>
     )
   }
@@ -1770,6 +1894,20 @@ export default function PlayView() {
       <div className="min-h-screen bg-gray-950 text-white flex flex-col">
         {scoreOverlayEl}
         {scoreChip}
+
+        {/* Round 2 opener splash — fires in sync with the projector */}
+        {playerRoundSplash && (
+          <div className="fixed inset-0 z-[90] bg-gray-950/95 flex flex-col items-center justify-center pointer-events-none text-center p-6">
+            <p className="text-6xl font-black text-yellow-400 mb-3"
+              style={{ animation: 'round-splash-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
+              ROUND 2
+            </p>
+            <p className="text-gray-300 font-semibold"
+              style={{ animation: 'slide-up-in 0.4s ease-out 0.3s both' }}>
+              Bigger points on the board 🍺
+            </p>
+          </div>
+        )}
 
         <div className="pt-16 pb-3 px-4 text-center shrink-0">
           {isMyTurnNow ? (
@@ -1933,7 +2071,8 @@ export default function PlayView() {
         <div className="max-w-sm mx-auto w-full flex flex-col flex-1 pt-8">
           <div className="flex items-center justify-between mb-2">
             <p className="text-yellow-400 font-black text-xl">Your turn!</p>
-            <span className={`font-mono text-4xl font-black tabular-nums ${dtTimerLow ? 'text-red-400' : 'text-white'}`}>
+            <span className={`inline-block font-mono text-4xl font-black tabular-nums ${dtTimerLow ? 'text-red-400' : 'text-white'}`}
+              style={dtTimerLow ? { animation: 'timer-pulse 0.8s ease-in-out infinite' } : undefined}>
               {dtTimer}
             </span>
           </div>
@@ -1991,7 +2130,8 @@ export default function PlayView() {
         <div className="max-w-sm mx-auto w-full flex flex-col flex-1 pt-8">
           <div className="flex items-center justify-between mb-2">
             <p className="text-yellow-400 font-black text-xl">{buzzWasMine ? "You're in! Type fast!" : 'Teammate buzzed! Type fast!'}</p>
-            <span className={`font-mono text-4xl font-black tabular-nums ${ansTimerLow ? 'text-red-400' : 'text-white'}`}>
+            <span className={`inline-block font-mono text-4xl font-black tabular-nums ${ansTimerLow ? 'text-red-400' : 'text-white'}`}
+              style={ansTimerLow ? { animation: 'timer-pulse 0.8s ease-in-out infinite' } : undefined}>
               {ansTimer}
             </span>
           </div>
@@ -2131,7 +2271,8 @@ export default function PlayView() {
           <div className="mb-4">
             <div className="flex justify-between items-center mb-1">
               <p className="text-xs text-gray-500 uppercase tracking-wider">Buzz window</p>
-              <span className={`font-mono font-black text-lg tabular-nums ${buzzTimerLow ? 'text-red-400' : 'text-white'}`}>
+              <span className={`inline-block font-mono font-black text-lg tabular-nums ${buzzTimerLow ? 'text-red-400' : 'text-white'}`}
+                style={buzzTimerLow ? { animation: 'timer-pulse 0.8s ease-in-out infinite' } : undefined}>
                 {buzzWindowRemaining}s
               </span>
             </div>
@@ -2145,6 +2286,12 @@ export default function PlayView() {
         )}
 
         <div className="flex-1 flex flex-col justify-end pb-4">
+          {buzzFailed && !buzzLockedOut && !buzzWindowClosed && (
+            <p className="text-red-400 text-center font-black text-sm mb-3"
+              style={{ animation: 'shake-x 0.5s ease-out' }}>
+              ⚠️ Buzz didn't go through — tap again!
+            </p>
+          )}
           {buzzLockedOut ? (
             <div className="w-full py-8 rounded-2xl font-black text-xl bg-gray-800 text-red-400/80 text-center leading-snug">
               🔒 Locked out
@@ -2158,7 +2305,8 @@ export default function PlayView() {
             <button
               onClick={handleBuzzSubmitClick}
               disabled={buzzing}
-              className="relative overflow-hidden w-full py-8 rounded-2xl font-black text-2xl bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:bg-red-900 text-white transition-colors shadow-[0_0_40px_rgba(220,38,38,0.5)]"
+              className="relative overflow-hidden w-full py-8 rounded-2xl font-black text-2xl bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:bg-red-900 text-white transition-colors"
+              style={{ animation: 'buzz-glow 1.6s ease-in-out infinite' }}
             >
               {ripples.map(r => (
                 <span

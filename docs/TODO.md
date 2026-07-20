@@ -2,6 +2,13 @@
 
 ## ✅ Resolved
 
+### Launch-readiness fixes + player-experience pass (2026-07-20)
+- **Error boundary**: `src/components/ErrorBoundary.tsx` wraps /play, /host, /projector — render crashes show a friendly reload screen instead of a white screen (session survives reload).
+- **Silent buzz failure**: failed buzz insert now shows "Buzz didn't go through — tap again!" + vibration instead of silently dropping the player.
+- **Connection-drop banner**: `src/components/ConnectionBanner.tsx` — amber "Reconnecting…" strip when Ably drops, green "Back online" flash on recovery.
+- **FJ review stuck on missing wager**: a team in the reveal order with no wager row used to strand the host on "Loading review…" forever. Now shows a "Skip Team →" card (no score change).
+- **Player-experience pass**: halftime intermission redesign (personal rank hero + medal standings + staggered reveals, player & projector), champion game-over screens (confetti on winning phones, final-rank hero for the rest, projector confetti bursts), Round 2 splash on phones, buzzer glow, pop-in/shake result animations, low-timer pulses, `prefers-reduced-motion` support.
+
 ### PWA Stale Cache — 404 on Real Devices
 - `vercel.json` added: SPA rewrite + `no-store` on `sw.js`/`registerSW.js`/`index.html`
 - `globIgnores: ['**/index.html']` in workbox — SW never serves stale HTML

@@ -3,8 +3,9 @@ import { supabase } from '../../lib/supabase'
 import { ablyClient } from '../../lib/ably'
 import type { Buzz, QuestionPublic, Room, ScoreSnapshot, Team } from '../../lib/types'
 import AnimatedScore from '../../components/AnimatedScore'
+import Confetti from '../../components/Confetti'
 import { playRoundTransition } from '../../lib/sounds'
-import ScoreHistoryChart from '../../components/ScoreHistoryChart'
+import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
 
 interface TimerPayload {
@@ -62,6 +63,10 @@ export default function ProjectorView() {
 
   // Round intermission
   const [intermissionSnapshots, setIntermissionSnapshots] = useState<ScoreSnapshot[] | null>(null)
+
+  // Winner celebration confetti (fires a few bursts when the game ends)
+  const [confettiActive, setConfettiActive] = useState(false)
+  const confettiBurstsRef = useRef(0)
 
   // Final Jeopardy state
   const [fjCategoryName, setFjCategoryName]   = useState('')
@@ -407,6 +412,14 @@ export default function ProjectorView() {
   }, [fjTimerStart])
 
 
+  // ── Winner confetti ───────────────────────────────────────
+
+  useEffect(() => {
+    if (room?.status !== 'finished') return
+    confettiBurstsRef.current = 0
+    setConfettiActive(true)
+  }, [room?.status])
+
   // ── Cleanup ───────────────────────────────────────────────
 
   useEffect(() => () => {
@@ -454,9 +467,12 @@ export default function ProjectorView() {
   if (feedbackTeam) {
     return (
       <div className="min-h-screen bg-green-900 text-white flex flex-col items-center justify-center text-center p-8">
-        <p className="font-black text-green-300 leading-none mb-6" style={{ fontSize: 'min(20vw, 16rem)' }}>✓</p>
-        <p className="font-black text-green-200 mb-4" style={{ fontSize: 'clamp(3rem, 8vw, 7rem)' }}>Correct!</p>
-        <p className="font-bold text-white" style={{ fontSize: 'clamp(2rem, 6vw, 5rem)' }}>{feedbackTeam}</p>
+        <p className="font-black text-green-300 leading-none mb-6"
+          style={{ fontSize: 'min(20vw, 16rem)', animation: 'pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>✓</p>
+        <p className="font-black text-green-200 mb-4"
+          style={{ fontSize: 'clamp(3rem, 8vw, 7rem)', animation: 'slide-up-in 0.4s ease-out 0.15s both' }}>Correct!</p>
+        <p className="font-bold text-white"
+          style={{ fontSize: 'clamp(2rem, 6vw, 5rem)', animation: 'slide-up-in 0.4s ease-out 0.3s both' }}>{feedbackTeam}</p>
       </div>
     )
   }
@@ -588,7 +604,7 @@ export default function ProjectorView() {
               {fjQuestion.answer}
             </p>
             <p className={`font-mono font-black tabular-nums leading-none ${low ? 'text-red-400' : 'text-gray-400'}`}
-              style={{ fontSize: 'clamp(5rem, 15vw, 12rem)' }}>
+              style={{ fontSize: 'clamp(5rem, 15vw, 12rem)', animation: low ? 'timer-pulse 0.8s ease-in-out infinite' : undefined }}>
               {rem}
             </p>
           </div>
@@ -652,11 +668,21 @@ export default function ProjectorView() {
     const winner = finalSorted[0]
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8 text-center">
-        <p className="text-gray-500 uppercase tracking-widest mb-4" style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)' }}>
+        <Confetti
+          active={confettiActive}
+          onDone={() => {
+            setConfettiActive(false)
+            // A few more bursts so the room gets a proper send-off
+            if (++confettiBurstsRef.current < 4) {
+              setTimeout(() => setConfettiActive(true), 900)
+            }
+          }}
+        />
+        <p className="text-gray-500 uppercase tracking-widest mb-4" style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)', animation: 'slide-up-in 0.5s ease-out both' }}>
           🏆 Winner 🏆
         </p>
         <p className="font-black text-yellow-400 leading-none mb-2"
-          style={{ fontSize: 'clamp(3.5rem, 14vw, 10rem)' }}>
+          style={{ fontSize: 'clamp(3.5rem, 14vw, 10rem)', animation: 'pop-in 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both' }}>
           {winner?.name ?? '—'}
         </p>
         <AnimatedScore
@@ -669,10 +695,11 @@ export default function ProjectorView() {
           {finalSorted.map((team, i) => (
             <div key={team.id} className={`flex items-center gap-4 rounded-2xl px-8 py-5 ${
               i === 0 ? 'bg-yellow-400/10 border-2 border-yellow-400/60' : 'bg-gray-900 border border-gray-800'
-            }`}>
-              <span className="text-gray-600 font-mono w-10 shrink-0 text-right"
+            }`}
+              style={{ animation: `slide-up-in 0.5s ease-out ${0.6 + i * 0.15}s both` }}>
+              <span className="w-12 shrink-0 text-right"
                 style={{ fontSize: 'clamp(1.25rem, 3vw, 2rem)' }}>
-                {i + 1}
+                {i < 3 ? ['🥇', '🥈', '🥉'][i] : <span className="text-gray-600 font-mono">{i + 1}</span>}
               </span>
               <span className="font-bold flex-1 text-left" style={{ fontSize: 'clamp(1.25rem, 3vw, 2rem)' }}>
                 {team.name}
@@ -742,12 +769,16 @@ export default function ProjectorView() {
       <div className="h-screen bg-gray-950 text-white flex flex-col p-8 gap-6">
         <div className="text-center shrink-0">
           <p className="text-gray-500 uppercase tracking-[0.4em] mb-2"
-            style={{ fontSize: 'clamp(1rem, 2vw, 1.5rem)' }}>
-            Round 1 Complete
+            style={{ fontSize: 'clamp(1rem, 2vw, 1.5rem)', animation: 'slide-up-in 0.4s ease-out both' }}>
+            Round 1 in the books
           </p>
           <p className="font-black text-yellow-400"
-            style={{ fontSize: 'clamp(3rem, 8vw, 6rem)' }}>
-            Score History
+            style={{ fontSize: 'clamp(3rem, 8vw, 6rem)', animation: 'pop-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s both' }}>
+            🍻 Halftime
+          </p>
+          <p className="text-gray-400 font-semibold"
+            style={{ fontSize: 'clamp(0.9rem, 1.8vw, 1.4rem)', animation: 'slide-up-in 0.4s ease-out 0.4s both' }}>
+            Round 2 up next — bigger points on the board
           </p>
         </div>
         <div className="flex-1 min-h-0">
@@ -759,9 +790,12 @@ export default function ProjectorView() {
         </div>
         <div className="shrink-0 flex justify-center gap-8 flex-wrap">
           {sortedTeams.map((team, i) => (
-            <div key={team.id} className="text-center">
-              <p className="text-gray-400" style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1.25rem)' }}>
-                #{i + 1} {team.name}
+            <div key={team.id} className="text-center"
+              style={{ animation: `slide-up-in 0.4s ease-out ${0.5 + i * 0.1}s both` }}>
+              <p className="text-gray-400 flex items-center justify-center gap-2" style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1.25rem)' }}>
+                <span className="inline-block rounded-full shrink-0"
+                  style={{ width: '0.7em', height: '0.7em', background: getTeamColor(team.id, sortedTeams.map(t => t.id)) }} />
+                {i < 3 ? ['🥇', '🥈', '🥉'][i] : `#${i + 1}`} {team.name}
               </p>
               <AnimatedScore
                 value={scores.get(team.id) ?? team.score}
@@ -904,7 +938,7 @@ export default function ProjectorView() {
                 {timerPayload!.team_name}
               </p>
               <p className={`font-mono font-black tabular-nums leading-none ${timerLow ? 'text-red-400' : 'text-gray-300'}`}
-                style={{ fontSize: 'clamp(4rem, 12vw, 9rem)' }}>
+                style={{ fontSize: 'clamp(4rem, 12vw, 9rem)', animation: timerLow ? 'timer-pulse 0.8s ease-in-out infinite' : undefined }}>
                 {remaining}
               </p>
             </div>
