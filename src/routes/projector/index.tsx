@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { ablyClient } from '../../lib/ably'
-import type { Buzz, Question, Room, ScoreSnapshot, Team } from '../../lib/types'
+import type { Buzz, QuestionPublic, Room, ScoreSnapshot, Team } from '../../lib/types'
 import AnimatedScore from '../../components/AnimatedScore'
 import { playRoundTransition } from '../../lib/sounds'
 import ScoreHistoryChart from '../../components/ScoreHistoryChart'
@@ -18,7 +18,7 @@ interface TimerPayload {
 type CategoryRow = {
   id: string
   name: string
-  questions: Question[]
+  questions: QuestionPublic[]
 }
 
 // Find the most recent active room created today (local midnight cutoff)
@@ -95,7 +95,7 @@ export default function ProjectorView() {
     if (roundCats.length === 0) { setCategories([]); return }
 
     const { data: questions } = await supabase
-      .from('questions').select().in('category_id', roundCats.map(c => c.id))
+      .from('questions_public').select().in('category_id', roundCats.map(c => c.id))
 
     setCategories(roundCats.map(cat => ({
       ...cat,
@@ -196,30 +196,6 @@ export default function ProjectorView() {
       .on('postgres_changes',
         { event: '*', schema: 'public', table: 'teams', filter: `room_id=eq.${roomId}` },
         refetchTeams)
-      .on('postgres_changes',
-        { event: 'UPDATE', schema: 'public', table: 'questions' },
-        payload => {
-          const q = payload.new as Question
-          if (q.is_answered && q.answered_by_team_id) {
-            const name = teamsRef.current.find(t => t.id === q.answered_by_team_id)?.name ?? ''
-            if (name) {
-              setFeedbackTeam(name)
-              if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current)
-              feedbackTimeoutRef.current = setTimeout(() => setFeedbackTeam(null), 2500)
-            }
-          }
-          // Guard: if this question is answered, clear it as the active question even if
-          // the rooms row hasn't propagated yet.
-          if (q.is_answered) {
-            setRoom(prev => prev?.current_question_id === q.id
-              ? { ...prev, current_question_id: null }
-              : prev)
-          }
-          setCategories(prev => prev.map(cat => ({
-            ...cat,
-            questions: cat.questions.map(old => old.id === q.id ? q : old),
-          })))
-        })
       .subscribe(status => {
         if (status === 'SUBSCRIBED') resyncAll()
       })
@@ -269,6 +245,7 @@ export default function ProjectorView() {
         teams: Array<{ id: string; score: number }>
         current_question_id?: string | null
         answered_question_id?: string
+        winning_team_id?: string
       }
       const newScoreMap = new Map(upd.teams.map(t => [t.id, t.score]))
       // Compute deltas for floating labels
@@ -303,6 +280,16 @@ export default function ProjectorView() {
             q.id === upd.answered_question_id ? { ...q, is_answered: true } : q
           ),
         })))
+      }
+      // Correct-answer feedback comes from the authenticated host broadcast. The
+      // projector intentionally cannot read the private questions table anymore.
+      if (upd.winning_team_id) {
+        const name = teamsRef.current.find(t => t.id === upd.winning_team_id)?.name ?? ''
+        if (name) {
+          setFeedbackTeam(name)
+          if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current)
+          feedbackTimeoutRef.current = setTimeout(() => setFeedbackTeam(null), 2500)
+        }
       }
     })
     ch.subscribe('turn_change', ({ data }) => {
