@@ -23,9 +23,10 @@ interface Props {
   roomId: string
   initialRoom: Room
   teams: Team[]
+  onSignOut: () => Promise<void>
 }
 
-export default function Game({ roomId, initialRoom, teams }: Props) {
+export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   const [room, setRoom]             = useState<Room>(initialRoom)
   const [categories, setCategories] = useState<CategoryRow[]>([])
   const [catIds, setCatIds]         = useState<string[]>([])
@@ -827,7 +828,7 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                     onClick={async () => {
                       setNewGameConfirm(false)
                       broadcastRef.current?.publish('lobby_closed', {})
-                      await supabase.from('rooms').update({ status: 'finished' }).neq('status', 'finished')
+                      await supabase.from('rooms').update({ status: 'finished' }).eq('id', roomId)
                       window.location.reload()
                     }}
                     className="text-xs text-red-400 hover:text-red-300 font-semibold transition-colors"
@@ -838,12 +839,20 @@ export default function Game({ roomId, initialRoom, teams }: Props) {
                   >Cancel</button>
                 </div>
               ) : (
-                <button
-                  onClick={() => setNewGameConfirm(true)}
-                  className="text-xs text-gray-600 hover:text-red-400 transition-colors"
-                >
-                  New Game
-                </button>
+                <div className="flex items-center gap-3">
+                  <button
+                    onClick={() => void onSignOut()}
+                    className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+                  >
+                    Sign out
+                  </button>
+                  <button
+                    onClick={() => setNewGameConfirm(true)}
+                    className="text-xs text-gray-600 hover:text-red-400 transition-colors"
+                  >
+                    New Game
+                  </button>
+                </div>
               )}
             </div>
           </div>

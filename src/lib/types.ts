@@ -98,6 +98,25 @@ export type Wager = {
 export type Database = {
   public: {
     Tables: {
+      authorized_hosts: {
+        Row: {
+          user_id: string
+          display_name: string | null
+          is_active: boolean
+          created_at: string
+        }
+        Insert: {
+          user_id: string
+          display_name?: string | null
+          is_active?: boolean
+          created_at?: string
+        }
+        Update: {
+          display_name?: string | null
+          is_active?: boolean
+        }
+        Relationships: []
+      }
       rooms: {
         Row: Room
         Insert: Omit<Room, 'id' | 'created_at' | 'current_question_id'> & { id?: string; created_at?: string; current_question_id?: string | null }

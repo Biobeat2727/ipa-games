@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
+import type { FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
 import { ablyClient } from '../../lib/ably'
 import { generateRoomCode } from '../../lib/roomCode'
@@ -7,22 +8,24 @@ import type { ContentJSON, ContentSummary } from '../../lib/content'
 import type { Room, Team } from '../../lib/types'
 import Game from './Game'
 
-type Phase = 'checking' | 'no_room' | 'creating' | 'lobby' | 'game' | 'error'
+type Phase = 'checking' | 'sign_in' | 'access_denied' | 'no_room' | 'creating' | 'lobby' | 'game' | 'error'
 
 // Find the most recent active room created today (local midnight cutoff)
-async function findActiveRoom(): Promise<Room | null> {
+async function findActiveRoom(hostId: string): Promise<Room | null> {
   const todayMidnight = new Date()
   todayMidnight.setHours(0, 0, 0, 0)
 
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('rooms')
     .select()
+    .eq('host_id', hostId)
     .neq('status', 'finished')
     .gte('created_at', todayMidnight.toISOString())
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
 
+  if (error) throw error
   return data ?? null
 }
 
@@ -32,6 +35,10 @@ export default function HostView() {
   const [teams, setTeams]        = useState<Team[]>([])
   const [playerCounts, setPlayerCounts] = useState<Map<string, number>>(new Map())
   const [error, setError]        = useState('')
+  const [hostUserId, setHostUserId] = useState<string | null>(null)
+  const [email, setEmail]        = useState('')
+  const [password, setPassword]  = useState('')
+  const [signingIn, setSigningIn] = useState(false)
 
   // Ref to the lobby broadcast channel so handleStartGame can fire game_state_change
   const lobbyBroadcastRef = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
@@ -65,20 +72,56 @@ export default function HostView() {
     setSummary(await getContentSummary(roomId))
   }, [])
 
-  // On mount: auto-resolve today's active room, or show "Create Lobby" button
+  const loadHostRoom = useCallback(async (userId: string) => {
+    const { data: host, error: hostError } = await supabase
+      .from('authorized_hosts')
+      .select('user_id')
+      .eq('user_id', userId)
+      .eq('is_active', true)
+      .maybeSingle()
+
+    if (hostError) {
+      throw new Error(`Host access could not be checked: ${hostError.message}`)
+    }
+    if (!host) {
+      setHostUserId(null)
+      setPhase('access_denied')
+      return
+    }
+
+    setHostUserId(userId)
+    const existing = await findActiveRoom(userId)
+    if (existing) {
+      setRoom(existing)
+      await Promise.all([fetchTeams(existing.id), fetchSummary(existing.id)])
+      setPhase(existing.status === 'lobby' ? 'lobby' : 'game')
+    } else {
+      setPhase('no_room')
+    }
+  }, [fetchTeams, fetchSummary])
+
+  // Supabase stores the browser session, so returning hosts stay signed in.
   useEffect(() => {
     async function init() {
-      const existing = await findActiveRoom()
-      if (existing) {
-        setRoom(existing)
-        await Promise.all([fetchTeams(existing.id), fetchSummary(existing.id)])
-        setPhase(existing.status === 'lobby' ? 'lobby' : 'game')
-      } else {
-        setPhase('no_room')
+      const { data, error: sessionError } = await supabase.auth.getSession()
+      if (sessionError) {
+        setError(sessionError.message)
+        setPhase('error')
+        return
+      }
+      if (!data.session?.user) {
+        setPhase('sign_in')
+        return
+      }
+      try {
+        await loadHostRoom(data.session.user.id)
+      } catch (err) {
+        setError(err instanceof Error ? err.message : 'Host setup could not be loaded.')
+        setPhase('error')
       }
     }
-    init()
-  }, [fetchTeams, fetchSummary])
+    void init()
+  }, [loadHostRoom])
 
   // Real-time team subscription (lobby only)
   useEffect(() => {
@@ -118,17 +161,30 @@ export default function HostView() {
   }, [room?.id, phase, fetchTeams])
 
   async function handleCreateRoom() {
+    if (!hostUserId) {
+      setPhase('sign_in')
+      return
+    }
     setPhase('creating')
 
-    // Retire any lingering active rooms so players always resolve to this new one
-    await supabase.from('rooms').update({ status: 'finished' }).neq('status', 'finished')
+    // Retire only this host's lingering rooms.
+    const { error: retireError } = await supabase
+      .from('rooms')
+      .update({ status: 'finished' })
+      .eq('host_id', hostUserId)
+      .neq('status', 'finished')
 
-    const hostId = crypto.randomUUID()
+    if (retireError) {
+      setError(retireError.message)
+      setPhase('error')
+      return
+    }
+
     let code = generateRoomCode()
 
     for (let attempt = 0; attempt < 10; attempt++) {
       const { data, error: err } = await supabase
-        .from('rooms').insert({ code, host_id: hostId, status: 'lobby' }).select().single()
+        .from('rooms').insert({ code, host_id: hostUserId, status: 'lobby' }).select().single()
 
       if (data) {
         setRoom(data)
@@ -143,6 +199,44 @@ export default function HostView() {
 
     setError('Could not generate a unique room code.')
     setPhase('error')
+  }
+
+  async function handleSignIn(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setSigningIn(true)
+    setError('')
+
+    const { data, error: signInError } = await supabase.auth.signInWithPassword({
+      email: email.trim(),
+      password,
+    })
+
+    if (signInError || !data.user) {
+      setError(signInError?.message ?? 'Sign-in failed.')
+      setSigningIn(false)
+      return
+    }
+
+    try {
+      await loadHostRoom(data.user.id)
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Host setup could not be loaded.')
+      setPhase('error')
+    } finally {
+      setSigningIn(false)
+    }
+  }
+
+  async function handleSignOut() {
+    await supabase.auth.signOut()
+    setHostUserId(null)
+    setRoom(null)
+    setTeams([])
+    setPlayerCounts(new Map())
+    setSummary(null)
+    setPassword('')
+    setError('')
+    setPhase('sign_in')
   }
 
   async function handleImport() {
@@ -202,6 +296,61 @@ export default function HostView() {
     )
   }
 
+  if (phase === 'sign_in') {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center p-6">
+        <form onSubmit={handleSignIn} className="w-full max-w-sm bg-gray-900 rounded-2xl p-6 space-y-5">
+          <div>
+            <h1 className="text-3xl font-black text-yellow-400">Tapped In!</h1>
+            <p className="text-gray-400 text-sm mt-1">Host sign in</p>
+          </div>
+          <div>
+            <label htmlFor="host-email" className="block text-sm font-semibold text-gray-300 mb-2">Email</label>
+            <input
+              id="host-email"
+              type="email"
+              autoComplete="email"
+              required
+              value={email}
+              onChange={event => setEmail(event.target.value)}
+              className="w-full rounded-xl bg-gray-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-yellow-400"
+            />
+          </div>
+          <div>
+            <label htmlFor="host-password" className="block text-sm font-semibold text-gray-300 mb-2">Password</label>
+            <input
+              id="host-password"
+              type="password"
+              autoComplete="current-password"
+              required
+              value={password}
+              onChange={event => setPassword(event.target.value)}
+              className="w-full rounded-xl bg-gray-800 px-4 py-3 text-white outline-none focus:ring-2 focus:ring-yellow-400"
+            />
+          </div>
+          {error && <p role="alert" className="text-sm text-red-400">{error}</p>}
+          <button
+            type="submit"
+            disabled={signingIn}
+            className="w-full py-3 rounded-xl text-lg font-black bg-yellow-400 text-gray-950 disabled:opacity-50"
+          >
+            {signingIn ? 'Signing in…' : 'Sign in'}
+          </button>
+        </form>
+      </div>
+    )
+  }
+
+  if (phase === 'access_denied') {
+    return (
+      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center gap-4 p-6 text-center">
+        <h1 className="text-2xl font-black text-yellow-400">Host access not enabled</h1>
+        <p className="max-w-md text-gray-400">This account is signed in, but it has not been approved to host games.</p>
+        <button onClick={() => void handleSignOut()} className="text-yellow-400 underline">Sign in with another account</button>
+      </div>
+    )
+  }
+
   if (phase === 'creating') {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
@@ -214,7 +363,7 @@ export default function HostView() {
     return (
       <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center gap-4">
         <p className="text-red-400">{error}</p>
-        <button onClick={handleNewGame} className="text-yellow-400 underline text-sm">Try again</button>
+        <button onClick={() => void handleSignOut()} className="text-yellow-400 underline text-sm">Return to sign in</button>
       </div>
     )
   }
@@ -230,12 +379,13 @@ export default function HostView() {
         >
           Create Lobby
         </button>
+        <button onClick={() => void handleSignOut()} className="text-sm text-gray-500 hover:text-gray-300">Sign out</button>
       </div>
     )
   }
 
   if (phase === 'game' && room) {
-    return <Game roomId={room.id} initialRoom={room} teams={teams} />
+    return <Game roomId={room.id} initialRoom={room} teams={teams} onSignOut={handleSignOut} />
   }
 
   // ── Lobby ─────────────────────────────────────────────────
@@ -253,6 +403,7 @@ export default function HostView() {
               Players join at <span className="text-white font-medium">tappedin.lol</span>
             </p>
           </div>
+          <button onClick={() => void handleSignOut()} className="text-sm text-gray-500 hover:text-gray-300">Sign out</button>
         </div>
 
         {/* Content */}
