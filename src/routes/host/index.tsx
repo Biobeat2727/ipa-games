@@ -42,6 +42,8 @@ export default function HostView() {
 
   // Ref to the lobby broadcast channel so handleStartGame can fire game_state_change
   const lobbyBroadcastRef = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
+  // Events and the polling fallback can overlap. Only the newest refresh may update the UI.
+  const lobbyRefreshSequenceRef = useRef(0)
 
   // Content import state
   const [summary, setSummary]         = useState<ContentSummary | null>(null)
@@ -51,21 +53,24 @@ export default function HostView() {
   const [importError, setImportError] = useState('')
 
   const fetchTeams = useCallback(async (roomId: string) => {
-    const { data: teamData } = await supabase
+    const refreshSequence = ++lobbyRefreshSequenceRef.current
+    const { data: teamData, error: teamsError } = await supabase
       .from('teams').select().eq('room_id', roomId).order('created_at', { ascending: true })
-    setTeams(teamData ?? [])
+    if (teamsError) return
 
+    const counts = new Map<string, number>()
     if (teamData?.length) {
-      const { data: playerData } = await supabase
+      const { data: playerData, error: playersError } = await supabase
         .from('players').select('team_id').in('team_id', teamData.map(t => t.id))
-      const counts = new Map<string, number>()
+      if (playersError) return
       for (const p of playerData ?? []) {
         counts.set(p.team_id, (counts.get(p.team_id) ?? 0) + 1)
       }
-      setPlayerCounts(counts)
-    } else {
-      setPlayerCounts(new Map())
     }
+
+    if (refreshSequence !== lobbyRefreshSequenceRef.current) return
+    setTeams(teamData ?? [])
+    setPlayerCounts(counts)
   }, [])
 
   const fetchSummary = useCallback(async (roomId: string) => {
@@ -136,7 +141,7 @@ export default function HostView() {
         { event: '*', schema: 'public', table: 'teams', filter: `room_id=eq.${roomId}` },
         () => fetchTeams(roomId))
       .on('postgres_changes',
-        { event: 'DELETE', schema: 'public', table: 'players' },
+        { event: '*', schema: 'public', table: 'players' },
         () => fetchTeams(roomId))
       .subscribe(status => {
         if (status === 'SUBSCRIBED') fetchTeams(roomId)

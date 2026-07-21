@@ -1182,7 +1182,28 @@ export default function PlayView() {
   }
 
   async function handleLeave() {
-    await supabase.from('players').delete({ count: 'exact' }).eq('session_id', getSessionId())
+    setLoading(true)
+    setError('')
+    const leavingTeamId = myTeam?.id ?? null
+    const { error: leaveError } = await supabase
+      .from('players')
+      .delete({ count: 'exact' })
+      .eq('session_id', getSessionId())
+    setLoading(false)
+
+    if (leaveError) {
+      setError('Could not leave the team. Check your connection and try again.')
+      return
+    }
+
+    // The database subscription is authoritative; this broadcast makes the host update
+    // immediately while the existing poll remains a recovery path for missed events.
+    if (room?.id) {
+      void ablyClient.channels.get(`room:${room.id}`).publish('player_left', {
+        team_id: leavingTeamId,
+      }).catch(() => undefined)
+    }
+
     clearPlayerSession()
     setMyTeam(null); setTeammates([])
     setActiveQuestion(null); setHasBuzzed(false)
@@ -1661,9 +1682,10 @@ export default function PlayView() {
             </ul>
           </div>
         )}
-        <button onClick={handleLeave} className="mt-8 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors">
-          Leave Team
+        <button onClick={handleLeave} disabled={loading} className="mt-8 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+          {loading ? 'Leaving…' : 'Leave Team'}
         </button>
+        {error && <p className="text-red-400 text-sm text-center mt-3">{error}</p>}
         <QuipCycler />
       </div>
     )
@@ -1894,9 +1916,10 @@ export default function PlayView() {
         {myEntry && !iWon && (
           <p className="text-gray-400 text-sm">Your final score: <span className="text-white font-black">{myEntry.score.toLocaleString()}</span></p>
         )}
-        <button onClick={handleLeave} className="mt-6 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors">
-          Leave
+        <button onClick={handleLeave} disabled={loading} className="mt-6 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+          {loading ? 'Leaving…' : 'Leave'}
         </button>
+        {error && <p className="text-red-400 text-sm text-center mt-3">{error}</p>}
       </div>
     )
   }
@@ -2215,10 +2238,11 @@ export default function PlayView() {
           </div>
         )}
 
-        <button onClick={handleLeave}
-          className="shrink-0 py-3 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors text-center w-full">
-          Leave Team
+        <button onClick={handleLeave} disabled={loading}
+          className="shrink-0 py-3 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors text-center w-full disabled:opacity-50 disabled:cursor-not-allowed">
+          {loading ? 'Leaving…' : 'Leave Team'}
         </button>
+        {error && <p className="shrink-0 text-red-400 text-sm text-center">{error}</p>}
 
         {/* Preview overlay */}
         {previewInfo && (

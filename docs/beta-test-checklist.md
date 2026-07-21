@@ -78,8 +78,9 @@ These are the minimum checks required before letting players join.
   appear on the team, and the host player count increases by one.
 - [ ] **LOB-07 — Multiple teams at once:** Several players create/join teams at nearly the
   same time. No team disappears, duplicates unexpectedly, or gains the wrong player.
-- [ ] **LOB-08 — Team count after leaving:** Close or leave a player session if supported.
-  Verify whether the host player count updates correctly. Record any stale count.
+- [ ] **LOB-08 — Team count after leaving:** Press Leave Team on a joined phone. The host
+  count drops by one promptly, the departing nickname disappears from teammates' phones, and
+  the player returns to team selection.
 - [ ] **LOB-09 — Delete team:** Host deletes a temporary team. It disappears from host and
   projector, and affected players are returned to a sensible join/waiting screen.
 - [ ] **LOB-10 — Cannot start too early:** Start Game remains disabled with missing content
@@ -92,6 +93,13 @@ These are the minimum checks required before letting players join.
   correct teams and imported content.
 - [ ] **LOB-14 — Old session cleanup:** After the old game is finished and a new lobby is
   created, a previously joined phone discovers the new lobby instead of reopening the old game.
+- [ ] **LOB-15 — Switch teams:** Leave one team and join another. The old team's count drops,
+  the new team's count rises, and the total number of players stays unchanged.
+- [ ] **LOB-16 — Rapid leave and rejoin:** Leave and immediately rejoin a team. After three
+  seconds, the host shows exactly one player for that phone—not zero or two.
+- [ ] **LOB-17 — Leave while offline:** Disconnect a joined phone, press Leave Team, and
+  confirm it stays on the team with a retry message. Reconnect, retry, and confirm the host
+  count then drops without requiring a host refresh.
 
 ---
 

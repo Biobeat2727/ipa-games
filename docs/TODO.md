@@ -3,6 +3,9 @@
 ## ✅ Resolved
 
 ### Launch-readiness fixes + player-experience pass (2026-07-20)
+- **Reliable lobby player counts**: host counts now refresh on every player database change,
+  join/leave broadcasts, and a recovery poll; stale overlapping refreshes are ignored. A failed
+  Leave Team request keeps the player in place with a retry message instead of desynchronizing.
 - **Error boundary**: `src/components/ErrorBoundary.tsx` wraps /play, /host, /projector — render crashes show a friendly reload screen instead of a white screen (session survives reload).
 - **Silent buzz failure**: failed buzz insert now shows "Buzz didn't go through — tap again!" + vibration instead of silently dropping the player.
 - **Connection-drop banner**: `src/components/ConnectionBanner.tsx` — amber "Reconnecting…" strip when Ably drops, green "Back online" flash on recovery.
@@ -18,12 +21,6 @@
 - `vercel.json` added: SPA rewrite + `no-store` on `sw.js`/`registerSW.js`/`index.html`
 - `globIgnores: ['**/index.html']` in workbox — SW never serves stale HTML
 - Refresh after any deploy now serves the latest version automatically
-
----
-
-## 🟡 Bugs
-
-- **Player count on host lobby** — doesn't update in realtime when players leave teams. Needs testing to confirm current state. (Low priority)
 
 ---
 

@@ -29,6 +29,7 @@ Additional scoped channels:
 | Event | Sender | Payload | Effect |
 |---|---|---|---|
 | `team_joined` | Player | `{}` | Host + other players on select_team refresh team list |
+| `player_left` | Player | `{ team_id }` | Host immediately refreshes lobby player counts |
 | `lobby_closed` | Host | `{}` | All clients kicked: players → `no_lobby`, projector → `waiting` |
 | `game_state_change` | Host | `{ status, fj_category?, active_team_ids? }` | All clients transition to new game state |
 
@@ -75,9 +76,13 @@ database trigger enforces the deadline using database time even if a phone clock
 
 ## Reliability Pattern
 
-**postgres_changes requires the table to be added to the Supabase realtime publication** (Dashboard → Database → Replication). Currently required for: `rooms`, `teams`, `questions`, `buzzes`, `wagers`.
+**postgres_changes requires the table to be added to the Supabase realtime publication** (Dashboard → Database → Replication). Currently required for: `rooms`, `teams`, `players`, `questions`, `buzzes`, `wagers`.
 
 **Broadcasts are the primary real-time path** for game events. postgres_changes is a secondary/fallback for data integrity.
+
+**Lobby count reliability:** The host refreshes counts after every `players` database change and
+after `team_joined` / `player_left` broadcasts. A three-second poll heals missed events. Refreshes
+carry an increasing sequence so an older, slower request cannot overwrite newer counts.
 
 **Key pattern for stable callbacks:** The projector uses `roomRef` (a ref synced to `room` state) inside `resyncAll` and `refetchTeams` so these `useCallback` functions never go stale inside effect closures. Both channels call `resyncAll()` in their `SUBSCRIBED` callbacks to catch any events missed during connection.
 
