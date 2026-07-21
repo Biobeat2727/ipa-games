@@ -265,10 +265,29 @@ export default function HostView() {
   async function handleStartGame() {
     if (!room) return
     const { error: err } = await supabase
-      .from('rooms').update({ status: 'round_1', current_question_id: null }).eq('id', room.id)
+      .from('rooms').update({
+        status: 'round_1',
+        current_question_id: null,
+        current_turn_team_id: null,
+        pending_question_id: null,
+        pending_selection_team_id: null,
+        pending_selection_session_id: null,
+        pending_selection_claimed_at: null,
+        pending_selection_wager: null,
+      }).eq('id', room.id)
     if (!err) {
       lobbyBroadcastRef.current?.publish('game_state_change', { status: 'round_1' })
-      setRoom(prev => prev ? { ...prev, status: 'round_1' } : prev)
+      setRoom(prev => prev ? {
+        ...prev,
+        status: 'round_1',
+        current_question_id: null,
+        current_turn_team_id: null,
+        pending_question_id: null,
+        pending_selection_team_id: null,
+        pending_selection_session_id: null,
+        pending_selection_claimed_at: null,
+        pending_selection_wager: null,
+      } : prev)
       setPhase('game')
     }
   }

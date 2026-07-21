@@ -8,6 +8,12 @@
 | host_id | uuid | Host session reference |
 | status | enum | `lobby`, `round_1`, `round_2`, `final_jeopardy`, `finished` |
 | current_question_id | uuid, nullable | Set when a question is active |
+| current_turn_team_id | uuid, nullable | Team currently allowed to select a clue |
+| pending_question_id | uuid, nullable | Atomic first-tap-wins clue claim during preview |
+| pending_selection_team_id | uuid, nullable | Team that owns the pending clue claim |
+| pending_selection_session_id | text, nullable | Player device that won the claim (used for Double Tap wagering) |
+| pending_selection_claimed_at | timestamptz, nullable | Server time of the accepted claim |
+| pending_selection_wager | integer, nullable | Double Tap wager after the winning device confirms it |
 | created_at | timestamp | Used to identify today's room |
 
 **One active room at a time.** When the host creates a new room, all other rooms are immediately set to `finished`. Players and projector auto-resolve to the most recent non-finished room created today.

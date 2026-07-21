@@ -37,7 +37,8 @@ Additional scoped channels:
 | Event | Sender | Payload | Effect |
 |---|---|---|---|
 | `question_preview` | Player (turn) | `{ questionId, categoryName, pointValue, startTs }` | 10s countdown shown on all screens |
-| `question_activated` | Player (turn) | `{ question_id }` | Buzz button goes live; `rooms.current_question_id` set |
+| `question_selection_cleared` | Host | `{}` | Clears a pending preview after host undo or turn reassignment |
+| `question_activated` | Host | `{ question_id }` | Buzz button goes live; `rooms.current_question_id` set |
 | `question_deactivated` | Host | `{}` | Clears active question on all clients |
 | `timer_start` | Host | `{ start_timestamp, duration_seconds, team_id, buzz_id, team_name }` | Synced countdown on all screens |
 | `score_update` | Host | `{ teams: [{id, score}], current_question_id?, answered_question_id? }` | Updates scores everywhere; greys out answered board cell |

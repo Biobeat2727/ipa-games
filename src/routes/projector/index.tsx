@@ -82,6 +82,7 @@ export default function ProjectorView() {
   const roomRef            = useRef<Room | null>(null)
   const teamsRef           = useRef<Team[]>([])
   const feedbackTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const doubleTapPreviewTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   useEffect(() => { roomRef.current = room },   [room])
   useEffect(() => { teamsRef.current = teams }, [teams])
@@ -224,7 +225,8 @@ export default function ProjectorView() {
       if (p.doubleTapWager !== undefined) {
         // Real DT preview (post-wager) — splash may already be showing; keep it 2s then show preview
         setDoubleTapSplash(true)
-        setTimeout(() => {
+        if (doubleTapPreviewTimerRef.current) clearTimeout(doubleTapPreviewTimerRef.current)
+        doubleTapPreviewTimerRef.current = setTimeout(() => {
           setDoubleTapSplash(false)
           setPreviewInfo(p)
         }, 2000)
@@ -234,13 +236,23 @@ export default function ProjectorView() {
     })
     ch.subscribe('question_activated', ({ data }) => {
       const { question_id } = data as { question_id: string }
+      if (doubleTapPreviewTimerRef.current) clearTimeout(doubleTapPreviewTimerRef.current)
       setPreviewInfo(null)
+      setDoubleTapSplash(false)
       setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
       setTimerPayload(null)
     })
     ch.subscribe('question_deactivated', () => {
+      if (doubleTapPreviewTimerRef.current) clearTimeout(doubleTapPreviewTimerRef.current)
+      setPreviewInfo(null)
+      setDoubleTapSplash(false)
       setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
       setTimerPayload(null)
+    })
+    ch.subscribe('question_selection_cleared', () => {
+      if (doubleTapPreviewTimerRef.current) clearTimeout(doubleTapPreviewTimerRef.current)
+      setPreviewInfo(null)
+      setDoubleTapSplash(false)
     })
     ch.subscribe('timer_start', ({ data }) => {
       setTimerPayload(data as TimerPayload)
@@ -424,6 +436,7 @@ export default function ProjectorView() {
 
   useEffect(() => () => {
     if (feedbackTimeoutRef.current) clearTimeout(feedbackTimeoutRef.current)
+    if (doubleTapPreviewTimerRef.current) clearTimeout(doubleTapPreviewTimerRef.current)
   }, [])
 
   // ── Derived ───────────────────────────────────────────────

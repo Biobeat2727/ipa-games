@@ -37,7 +37,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   const [judgingBuzzId, setJudgingBuzzId]     = useState<string | null>(null)
   const [judgeStartTime, setJudgeStartTime]   = useState<number | null>(null)
   const [timerSeconds, setTimerSeconds]       = useState(RESPONSE_SECONDS)
-  const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
+  const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(initialRoom.current_turn_team_id ?? null)
   const [previewInfo, setPreviewInfo] = useState<{
     questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number
   } | null>(null)
@@ -123,8 +123,20 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   useEffect(() => {
     let autoAssigned = false
     const ch = ablyClient.channels.get(`room:${initialRoom.id}`)
-    ch.subscribe('question_preview', ({ data }) => {
+    ch.subscribe('question_preview', async ({ data }) => {
       const p = data as { questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number; doubleTapPending?: boolean; selectorTeamId?: string }
+      // Only display a preview that won the atomic database claim. This also
+      // rejects a stale Double Tap wager sent after the host undid the pick.
+      const { data: selectionRoom } = await supabase
+        .from('rooms')
+        .select('pending_question_id, pending_selection_team_id, pending_selection_wager')
+        .eq('id', roomId)
+        .single()
+      if (
+        selectionRoom?.pending_question_id !== p.questionId
+        || (p.selectorTeamId && selectionRoom.pending_selection_team_id !== p.selectorTeamId)
+        || (p.doubleTapWager !== undefined && selectionRoom.pending_selection_wager !== p.doubleTapWager)
+      ) return
       if (p.doubleTapPending) {
         if (p.selectorTeamId) setDtPendingTeamId(p.selectorTeamId)
         return // wait for real preview after wager
@@ -146,17 +158,37 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     ch.subscribe('buzz_debug_report', ({ data }) => {
       setDebugReports(prev => [...prev, data as typeof prev[number]])
     })
-    // Auto-assign first turn when the channel connects
-    ch.on('attached', () => {
+    // Auto-assign first turn. The lobby already uses this same channel, so it
+    // may be attached before Game mounts and never emit another attached event.
+    const ensureInitialTurn = () => {
       if (!autoAssigned && teams.length > 0) {
         autoAssigned = true
-        const firstTeamId = teams[0].id
+        const persistedTeamId = initialRoom.current_turn_team_id
+        const firstTeamId = persistedTeamId && teams.some(t => t.id === persistedTeamId)
+          ? persistedTeamId
+          : teams[0].id
         setCurrentTurnTeamId(firstTeamId)
         ch.publish('turn_change', { team_id: firstTeamId })
+        if (!persistedTeamId) {
+          supabase.from('rooms').update({
+            current_turn_team_id: firstTeamId,
+            pending_question_id: null,
+            pending_selection_team_id: null,
+            pending_selection_session_id: null,
+            pending_selection_claimed_at: null,
+            pending_selection_wager: null,
+          }).eq('id', roomId).then(() => {})
+        }
       }
-    })
+    }
+    ch.on('attached', ensureInitialTurn)
     broadcastRef.current = ch
-    return () => { ch.unsubscribe(); broadcastRef.current = null }
+    if (ch.state === 'attached') ensureInitialTurn()
+    return () => {
+      ch.off('attached', ensureInitialTurn)
+      ch.unsubscribe()
+      broadcastRef.current = null
+    }
   }, [initialRoom.code]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Subscribe to room + team score changes
@@ -164,7 +196,13 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     const ch = supabase.channel(`host-game-${roomId}`)
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
-        payload => setRoom(payload.new as Room))
+        payload => {
+          const nextRoom = payload.new as Room
+          setRoom(nextRoom)
+          if (nextRoom.current_turn_team_id !== undefined) {
+            setCurrentTurnTeamId(nextRoom.current_turn_team_id ?? null)
+          }
+        })
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'teams', filter: `room_id=eq.${roomId}` },
         payload => {
@@ -179,6 +217,43 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
       })
     return () => { supabase.removeChannel(ch) }
   }, [roomId])
+
+  // Restore an accepted preview from the database after a host refresh or a
+  // missed broadcast. Double Tap waits here until its winning device saves a wager.
+  useEffect(() => {
+    const questionId = room.pending_question_id
+    if (!questionId || room.current_question_id || previewInfo) return
+    const category = categories.find(c => c.questions.some(q => q.id === questionId))
+    const question = category?.questions.find(q => q.id === questionId)
+    if (!category || !question) return
+
+    if (question.is_double_tap && room.pending_selection_wager == null) {
+      setDtPendingTeamId(room.pending_selection_team_id ?? null)
+      return
+    }
+
+    setDtPendingTeamId(null)
+    setPreviewInfo({
+      questionId,
+      categoryName: category.name,
+      pointValue: question.point_value,
+      startTs: room.pending_selection_claimed_at
+        ? new Date(room.pending_selection_claimed_at).getTime()
+        : Date.now(),
+      ...(room.pending_selection_wager != null
+        ? { doubleTapWager: room.pending_selection_wager }
+        : {}),
+    })
+    setDoubleTapWager(room.pending_selection_wager ?? null)
+  }, [
+    room.pending_question_id,
+    room.pending_selection_team_id,
+    room.pending_selection_claimed_at,
+    room.pending_selection_wager,
+    room.current_question_id,
+    categories,
+    previewInfo,
+  ])
 
   // Subscribe to question updates filtered to this room's categories only
   useEffect(() => {
@@ -406,9 +481,24 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   async function activateQuestion(questionId: string) {
     const { error } = await supabase
-      .from('rooms').update({ current_question_id: questionId }).eq('id', roomId)
+      .from('rooms').update({
+        current_question_id: questionId,
+        pending_question_id: null,
+        pending_selection_team_id: null,
+        pending_selection_session_id: null,
+        pending_selection_claimed_at: null,
+        pending_selection_wager: null,
+      }).eq('id', roomId)
     if (!error) {
-      setRoom(prev => ({ ...prev, current_question_id: questionId }))
+      setRoom(prev => ({
+        ...prev,
+        current_question_id: questionId,
+        pending_question_id: null,
+        pending_selection_team_id: null,
+        pending_selection_session_id: null,
+        pending_selection_claimed_at: null,
+        pending_selection_wager: null,
+      }))
       setPreviewInfo(null)
       setDebugReports([]) // fresh table per question
 
@@ -467,11 +557,26 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   async function deactivateQuestion() {
     const { error } = await supabase
-      .from('rooms').update({ current_question_id: null }).eq('id', roomId)
+      .from('rooms').update({
+        current_question_id: null,
+        pending_question_id: null,
+        pending_selection_team_id: null,
+        pending_selection_session_id: null,
+        pending_selection_claimed_at: null,
+        pending_selection_wager: null,
+      }).eq('id', roomId)
     if (!error) {
       activationStartTsRef.current = null
       setBuzzOpenedAt(null)
-      setRoom(prev => ({ ...prev, current_question_id: null }))
+      setRoom(prev => ({
+        ...prev,
+        current_question_id: null,
+        pending_question_id: null,
+        pending_selection_team_id: null,
+        pending_selection_session_id: null,
+        pending_selection_claimed_at: null,
+        pending_selection_wager: null,
+      }))
       setDoubleTapWager(null)
       setPendingDeactivation(false)
       broadcastRef.current?.publish('question_deactivated', {})
@@ -509,16 +614,44 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     setBuzzes([])
   }
 
-  function abortPreview() {
+  async function abortPreview() {
+    await supabase.from('rooms').update({
+      pending_question_id: null,
+      pending_selection_team_id: null,
+      pending_selection_session_id: null,
+      pending_selection_claimed_at: null,
+      pending_selection_wager: null,
+    }).eq('id', roomId)
     setPreviewInfo(null)
-    broadcastRef.current?.publish('question_deactivated', {})
+    setDtPendingTeamId(null)
+    setDoubleTapWager(null)
+    setRoom(prev => ({
+      ...prev,
+      pending_question_id: null,
+      pending_selection_team_id: null,
+      pending_selection_session_id: null,
+      pending_selection_claimed_at: null,
+      pending_selection_wager: null,
+    }))
+    broadcastRef.current?.publish('question_selection_cleared', {})
   }
 
   function assignTurn(teamId: string | null) {
     setCurrentTurnTeamId(teamId)
+    setPreviewInfo(null)
+    setDtPendingTeamId(null)
+    setDoubleTapWager(null)
     broadcastRef.current?.publish('turn_change', { team_id: teamId })
+    broadcastRef.current?.publish('question_selection_cleared', {})
     // Persist turn to DB so page refreshes restore it
-    supabase.from('rooms').update({ current_turn_team_id: teamId }).eq('id', roomId).then(() => {})
+    supabase.from('rooms').update({
+      current_turn_team_id: teamId,
+      pending_question_id: null,
+      pending_selection_team_id: null,
+      pending_selection_session_id: null,
+      pending_selection_claimed_at: null,
+      pending_selection_wager: null,
+    }).eq('id', roomId).then(() => {})
   }
 
   async function handleCorrect(buzz: Buzz) {
@@ -636,7 +769,15 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
         supabase.from('teams').update({ is_active: false }).eq('id', t.id)
       ))
     }
-    await supabase.from('rooms').update({ status: 'final_jeopardy' }).eq('id', roomId)
+    await supabase.from('rooms').update({
+      status: 'final_jeopardy',
+      current_turn_team_id: null,
+      pending_question_id: null,
+      pending_selection_team_id: null,
+      pending_selection_session_id: null,
+      pending_selection_claimed_at: null,
+      pending_selection_wager: null,
+    }).eq('id', roomId)
 
     setRoom(prev => ({ ...prev, status: 'final_jeopardy' }))
     setFjActiveTeamIds(top3ids)
@@ -727,7 +868,16 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   }
 
   async function finishGame(finalScores: Map<string, number>) {
-    await supabase.from('rooms').update({ status: 'finished', current_question_id: null }).eq('id', roomId)
+    await supabase.from('rooms').update({
+      status: 'finished',
+      current_question_id: null,
+      current_turn_team_id: null,
+      pending_question_id: null,
+      pending_selection_team_id: null,
+      pending_selection_session_id: null,
+      pending_selection_claimed_at: null,
+      pending_selection_wager: null,
+    }).eq('id', roomId)
     setRoom(prev => ({ ...prev, status: 'finished', current_question_id: null }))
     setFjPhase('done')
     broadcastRef.current?.publish('game_over', { scores: teams.map(t => ({ id: t.id, name: t.name, score: finalScores.get(t.id) ?? t.score })) })
@@ -839,6 +989,12 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
         <div className="fixed top-4 left-1/2 -translate-x-1/2 z-50 bg-amber-500 text-gray-950 px-6 py-3 rounded-2xl font-black text-lg shadow-2xl animate-pulse flex items-center gap-3">
           <span>🍺</span>
           <span>DOUBLE TAP! — {teams.find(t => t.id === dtPendingTeamId)?.name ?? 'A team'} is wagering</span>
+          <button
+            onClick={abortPreview}
+            className="ml-2 rounded-lg bg-gray-950/15 px-3 py-1 text-sm hover:bg-gray-950/25"
+          >
+            Undo Pick
+          </button>
         </div>
       )}
 
@@ -1240,7 +1396,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 {sortedTeams.map(team => (
                   <button
                     key={team.id}
-                    onClick={() => setCurrentTurnTeamId(
+                    onClick={() => assignTurn(
                       team.id === currentTurnTeamId ? null : team.id
                     )}
                     className={`w-full px-4 py-2 rounded-xl text-sm font-bold transition-colors flex items-center justify-between ${
@@ -1306,7 +1462,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                   onClick={abortPreview}
                   className="px-4 py-3 rounded-xl text-sm font-semibold text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-colors"
                 >
-                  Abort
+                  Undo Pick
                 </button>
               </div>
             </div>
@@ -1359,7 +1515,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 {sortedTeams.map(team => (
                   <button
                     key={team.id}
-                    onClick={() => setCurrentTurnTeamId(
+                    onClick={() => assignTurn(
                       team.id === currentTurnTeamId ? null : team.id
                     )}
                     className={`w-full px-4 py-3 rounded-xl text-sm font-bold transition-colors flex items-center justify-between ${

@@ -97,6 +97,8 @@ export default function PlayView() {
   const [flippingId, setFlippingId]   = useState<string | null>(null)
   const [tileRect, setTileRect]         = useState<DOMRect | null>(null)
   const [overlayExpanding, setOverlayExpanding] = useState(false)
+  const [selectionClaiming, setSelectionClaiming] = useState(false)
+  const [selectionNotice, setSelectionNotice] = useState<string | null>(null)
 
   // Game state
   const [activeQuestion, setActiveQuestion]   = useState<QuestionPublic | null>(null)
@@ -140,7 +142,7 @@ export default function PlayView() {
   // Double Tap state
   const [doubleTapStep, setDoubleTapStep]       = useState<'reveal' | 'wager' | null>(null)
   const [doubleTapPendingQ, setDoubleTapPendingQ] = useState<{
-    questionId: string; rect: DOMRect
+    questionId: string; rect: DOMRect | null
   } | null>(null)
   const [doubleTapWagerInput, setDoubleTapWagerInput] = useState('')
 
@@ -183,6 +185,8 @@ export default function PlayView() {
   const timerBuzzIdRef         = useRef<string | null>(null) // buzz_id from timerPayload for teammate matching
   const revealClaimRef         = useRef<string | null>(null) // question id whose reveal is owned by the Ably broadcast path
   const revealTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null) // pending scheduled reveal
+  const selectionClaimingRef   = useRef(false)
+  const selectionNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Beta-test timing tool (host-toggled, see docs): remembers the last-seen debugTiming
   // flag so even a device that fell to the FALLBACK-DB path (missed the broadcast
   // entirely) still knows to self-report via buzz_debug_report.
@@ -196,6 +200,10 @@ export default function PlayView() {
   useEffect(() => { roomRef.current = room }, [room])
   useEffect(() => { currentTurnTeamIdRef.current = currentTurnTeamId }, [currentTurnTeamId])
   useEffect(() => { phaseRef.current = phase }, [phase])
+
+  useEffect(() => () => {
+    if (selectionNoticeTimerRef.current) clearTimeout(selectionNoticeTimerRef.current)
+  }, [])
 
   // Whether this phone won the team's current buzz claim is per-question state.
   useEffect(() => { setBuzzWasMine(false) }, [activeQuestion?.id])
@@ -356,6 +364,67 @@ export default function PlayView() {
     }
   }, [room?.current_turn_team_id, phase])
 
+  // Database fallback for an accepted pick whose broadcast was missed or for a
+  // device that reconnected during the preview.
+  useEffect(() => {
+    const questionId = room?.pending_question_id
+    if (phase !== 'game' || !questionId || room.current_question_id || activeQuestion || previewInfo) return
+    const category = boardCategories.find(c => c.questions.some(q => q.id === questionId))
+    const question = category?.questions.find(q => q.id === questionId)
+    if (!category || !question) return
+
+    if (question.is_double_tap) {
+      const selectingTeamId = room.pending_selection_team_id ?? null
+      setDoubleTapTeamId(selectingTeamId)
+      if (room.pending_selection_wager !== null && room.pending_selection_wager !== undefined) {
+        setDtRevealForObserver(false)
+        setDtTeammateWaiting(false)
+        setPreviewInfo({
+          questionId,
+          categoryName: category.name,
+          pointValue: question.point_value,
+          startTs: room.pending_selection_claimed_at
+            ? new Date(room.pending_selection_claimed_at).getTime()
+            : Date.now(),
+          doubleTapWager: room.pending_selection_wager,
+          answer: question.answer,
+        })
+        return
+      }
+      if (room.pending_selection_session_id === getSessionId()) {
+        setDoubleTapPendingQ({ questionId, rect: null })
+        setDoubleTapStep(prev => prev ?? 'wager')
+      } else if (selectingTeamId === myTeam?.id) {
+        setDtTeammateWaiting(true)
+      } else {
+        setDtRevealForObserver(true)
+      }
+      return
+    }
+
+    setPreviewInfo({
+      questionId,
+      categoryName: category.name,
+      pointValue: question.point_value,
+      startTs: room.pending_selection_claimed_at
+        ? new Date(room.pending_selection_claimed_at).getTime()
+        : Date.now(),
+      answer: question.answer,
+    })
+  }, [
+    phase,
+    room?.pending_question_id,
+    room?.pending_selection_team_id,
+    room?.pending_selection_session_id,
+    room?.pending_selection_claimed_at,
+    room?.pending_selection_wager,
+    room?.current_question_id,
+    activeQuestion,
+    previewInfo,
+    boardCategories,
+    myTeam?.id,
+  ])
+
   // Kick: if room becomes 'finished' while player is in a pre-game phase, send them back
   useEffect(() => {
     if (room?.status !== 'finished') return
@@ -512,7 +581,15 @@ export default function PlayView() {
         if (buzz_opened_at) {
           sessionStorage.setItem('buzzWindow', JSON.stringify({ questionId: question_id, ts: buzz_opened_at }))
         }
-        setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
+        setRoom(prev => prev ? {
+          ...prev,
+          current_question_id: question_id,
+          pending_question_id: null,
+          pending_selection_team_id: null,
+          pending_selection_session_id: null,
+          pending_selection_claimed_at: null,
+          pending_selection_wager: null,
+        } : prev)
         return
       }
 
@@ -548,7 +625,15 @@ export default function PlayView() {
         if (buzz_opened_at) {
           sessionStorage.setItem('buzzWindow', JSON.stringify({ questionId: question_id, ts: buzz_opened_at }))
         }
-        setRoom(prev => prev ? { ...prev, current_question_id: question_id } : prev)
+        setRoom(prev => prev ? {
+          ...prev,
+          current_question_id: question_id,
+          pending_question_id: null,
+          pending_selection_team_id: null,
+          pending_selection_session_id: null,
+          pending_selection_claimed_at: null,
+          pending_selection_wager: null,
+        } : prev)
         // Reveal straight from the broadcast payload — no DB fetch in the critical path.
         if (question) setActiveQuestion(question)
         if (debugTimingRef.current) {
@@ -578,7 +663,15 @@ export default function PlayView() {
       setPreBuzzTaps(0)
       setBuzzLockedOut(false)
       setBuzzFailed(false)
-      setRoom(prev => prev ? { ...prev, current_question_id: null } : prev)
+      setRoom(prev => prev ? {
+        ...prev,
+        current_question_id: null,
+        pending_question_id: null,
+        pending_selection_team_id: null,
+        pending_selection_session_id: null,
+        pending_selection_claimed_at: null,
+        pending_selection_wager: null,
+      } : prev)
       setActiveQuestion(null)
       setHasBuzzed(false)
       setMyBuzzId(null)
@@ -591,6 +684,25 @@ export default function PlayView() {
       // Reload board so answered questions are greyed out immediately
       const r = roomRef.current
       if (r) loadBoard(r.id, r.status === 'round_2' ? 2 : 1)
+    })
+    ch.subscribe('question_selection_cleared', () => {
+      if (selectionNoticeTimerRef.current) clearTimeout(selectionNoticeTimerRef.current)
+      sessionStorage.removeItem('dtWager')
+      setPreviewInfo(null)
+      setDoubleTapTeamId(null)
+      setDoubleTapStep(null)
+      setDoubleTapPendingQ(null)
+      setDtRevealForObserver(false)
+      setDtTeammateWaiting(false)
+      setSelectionNotice(null)
+      setRoom(prev => prev ? {
+        ...prev,
+        pending_question_id: null,
+        pending_selection_team_id: null,
+        pending_selection_session_id: null,
+        pending_selection_claimed_at: null,
+        pending_selection_wager: null,
+      } : prev)
     })
     ch.subscribe('timer_start', ({ data }) => {
       const p = data as TimerPayload
@@ -1182,10 +1294,66 @@ export default function PlayView() {
     })
   }
 
-  function handleSelectQuestion(questionId: string, el: HTMLElement) {
-    if (!room || (currentTurnTeamId !== null && myTeam?.id !== currentTurnTeamId)) return
+  function showSelectionNotice(message: string) {
+    if (selectionNoticeTimerRef.current) clearTimeout(selectionNoticeTimerRef.current)
+    setSelectionNotice(message)
+    selectionNoticeTimerRef.current = setTimeout(() => setSelectionNotice(null), 3500)
+  }
+
+  function questionSelectionLabel(questionId: string | null) {
+    if (!questionId) return 'another clue'
+    const category = boardCategories.find(c => c.questions.some(q => q.id === questionId))
+    const question = category?.questions.find(q => q.id === questionId)
+    const points = question?.point_value != null ? ` for ${question.point_value}` : ''
+    return category ? `${category.name}${points}` : 'another clue'
+  }
+
+  async function claimQuestionSelection(questionId: string) {
+    if (!room || !myTeam || selectionClaimingRef.current) return null
+    selectionClaimingRef.current = true
+    setSelectionClaiming(true)
+    const { data, error } = await supabase.rpc('claim_question_selection', {
+      p_room_id: room.id,
+      p_team_id: myTeam.id,
+      p_question_id: questionId,
+      p_session_id: getSessionId(),
+    })
+    selectionClaimingRef.current = false
+    setSelectionClaiming(false)
+
+    const result = data?.[0]
+    if (error || !result) {
+      showSelectionNotice('That pick did not go through — try again.')
+      return null
+    }
+    if (!result.accepted) {
+      showSelectionNotice(
+        result.question_id
+          ? `Your teammate already picked ${questionSelectionLabel(result.question_id)}.`
+          : 'That clue is no longer available.',
+      )
+      return null
+    }
+
+    setRoom(prev => prev ? {
+      ...prev,
+      pending_question_id: result.question_id,
+      pending_selection_team_id: result.selecting_team_id,
+      pending_selection_session_id: result.selector_session_id,
+      pending_selection_claimed_at: result.claimed_at,
+      pending_selection_wager: null,
+    } : prev)
+    return result
+  }
+
+  async function handleSelectQuestion(questionId: string, el: HTMLElement) {
+    if (!room || !myTeam || currentTurnTeamId !== myTeam.id || selectionClaimingRef.current) return
     const cat = boardCategories.find(c => c.questions.some(q => q.id === questionId))
     const q   = cat?.questions.find(q => q.id === questionId)
+    if (!q) return
+    const rect = el.getBoundingClientRect()
+    const claim = await claimQuestionSelection(questionId)
+    if (!claim) return
 
     if (q?.is_double_tap) {
       // Fire question_preview immediately so all observers see the DT reveal at tile-tap time.
@@ -1200,10 +1368,10 @@ export default function PlayView() {
           pointValue: q.point_value ?? null,
           startTs: Date.now(),
           selectorTeamId: team.id,
+          selectorSessionId: getSessionId(),
           doubleTapPending: true,
         })
       }
-      const rect = el.getBoundingClientRect()
       setDoubleTapPendingQ({ questionId, rect })
       setDoubleTapWagerInput('')
       setDoubleTapStep('reveal')
@@ -1213,10 +1381,10 @@ export default function PlayView() {
       return
     }
 
-    _fireQuestionSelect(questionId, el, null)
+    _fireQuestionSelect(questionId, rect, null)
   }
 
-  function _fireQuestionSelect(questionId: string, elOrRect: HTMLElement | DOMRect, wager: number | null) {
+  function _fireQuestionSelect(questionId: string, elOrRect: HTMLElement | DOMRect | null, wager: number | null) {
     const cat = boardCategories.find(c => c.questions.some(q => q.id === questionId))
     const q   = cat?.questions.find(q => q.id === questionId)
     const preview: PreviewInfo = {
@@ -1231,20 +1399,34 @@ export default function PlayView() {
     setTileRect(rect)
     broadcastRef.current?.publish('question_preview', {
       ...preview,
-      ...(wager !== null && myTeam ? { selectorTeamId: myTeam.id } : {}),
+      ...(myTeam ? { selectorTeamId: myTeam.id, selectorSessionId: getSessionId() } : {}),
     })
     setFlippingId(questionId)
     setTimeout(() => setPreviewInfo(preview), 600)
     setTimeout(() => setFlippingId(null), 650)
   }
 
-  function handleConfirmDoubleTapWager() {
-    if (!doubleTapPendingQ) return
+  async function handleConfirmDoubleTapWager() {
+    if (!doubleTapPendingQ || !room || !myTeam) return
     const roundFloor = room?.status === 'round_2' ? 2000 : 500
     const max    = Math.max(myScore, roundFloor)
     const parsed = parseInt(doubleTapWagerInput)
     const wager  = Math.max(5, Math.min(max, isNaN(parsed) ? 5 : parsed))
     const { questionId, rect } = doubleTapPendingQ
+    const { data: confirmed } = await supabase.rpc('confirm_question_selection', {
+      p_room_id: room.id,
+      p_team_id: myTeam.id,
+      p_question_id: questionId,
+      p_session_id: getSessionId(),
+      p_wager: wager,
+    })
+    if (!confirmed) {
+      setDoubleTapStep(null)
+      setDoubleTapPendingQ(null)
+      showSelectionNotice('That pick was undone by the host.')
+      return
+    }
+    setRoom(prev => prev ? { ...prev, pending_selection_wager: wager } : prev)
     setDoubleTapStep(null)
     setDoubleTapPendingQ(null)
     // Brief board flash, then overlay opens
@@ -1895,6 +2077,13 @@ export default function PlayView() {
         {scoreOverlayEl}
         {scoreChip}
 
+        {selectionNotice && (
+          <div className="fixed top-3 left-3 right-3 z-[110] rounded-xl border border-amber-400/50 bg-amber-950 px-4 py-3 text-center text-sm font-bold text-amber-200 shadow-xl"
+            style={{ animation: 'banner-drop 0.25s ease-out both' }}>
+            {selectionNotice}
+          </div>
+        )}
+
         {/* Round 2 opener splash — fires in sync with the projector */}
         {playerRoundSplash && (
           <div className="fixed inset-0 z-[90] bg-gray-950/95 flex flex-col items-center justify-center pointer-events-none text-center p-6">
@@ -1911,7 +2100,9 @@ export default function PlayView() {
 
         <div className="pt-16 pb-3 px-4 text-center shrink-0">
           {isMyTurnNow ? (
-            <p className="text-yellow-400 font-black text-xl animate-pulse">Your pick!</p>
+            <p className="text-yellow-400 font-black text-xl animate-pulse">
+              {selectionClaiming ? 'Locking your pick…' : room?.pending_question_id ? 'Pick locked!' : 'Your pick!'}
+            </p>
           ) : turnTeamName ? (
             <p className="text-gray-400 text-sm">
               <span className="text-white font-semibold">{turnTeamName}</span> is choosing…
@@ -1975,9 +2166,9 @@ export default function PlayView() {
                       <BeerGlass
                         pointValue={pv}
                         state={answered ? 'empty' : 'full'}
-                        disabled={!isMyTurnNow}
-                        dimmed={!answered && !isMyTurnNow}
-                        onClick={(e) => isMyTurnNow && !answered && handleSelectQuestion(q.id, e.currentTarget)}
+                        disabled={!isMyTurnNow || selectionClaiming || !!room?.pending_question_id}
+                        dimmed={!answered && (!isMyTurnNow || selectionClaiming || !!room?.pending_question_id)}
+                        onClick={(e) => isMyTurnNow && !answered && !selectionClaiming && !room?.pending_question_id && handleSelectQuestion(q.id, e.currentTarget)}
                       />
                     </div>
                   )

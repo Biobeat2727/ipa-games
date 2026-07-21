@@ -51,7 +51,9 @@ checking → no_lobby → join_lobby → select_team → lobby → game
 ## Round Phase (Rounds 1 & 2)
 - Category grid visible on projector + all player screens
 - One team has the "pick" — selects a category + point value
-- Selection triggers `question_preview` broadcast (10s countdown)
+- The first valid teammate tap atomically claims `rooms.pending_question_id`; later taps adopt that clue
+- The accepted selection triggers `question_preview` broadcast (10s countdown)
+- The host can undo the pending pick before opening the buzzer
 - After 10s: question is activated (`rooms.current_question_id` updated + `question_activated` broadcast)
 - Buzz button goes live on all player screens simultaneously
 - Buzzes stored with server timestamp → host sees chronological queue

@@ -22,6 +22,11 @@ export type Room = {
   status: RoomStatus
   current_question_id: string | null
   current_turn_team_id?: string | null
+  pending_question_id?: string | null
+  pending_selection_team_id?: string | null
+  pending_selection_session_id?: string | null
+  pending_selection_claimed_at?: string | null
+  pending_selection_wager?: number | null
   score_snapshots?: ScoreSnapshot[]
   created_at: string
 }
@@ -166,7 +171,33 @@ export type Database = {
         Relationships: []
       }
     }
-    Functions: Record<never, never>
+    Functions: {
+      claim_question_selection: {
+        Args: {
+          p_room_id: string
+          p_team_id: string
+          p_question_id: string
+          p_session_id: string
+        }
+        Returns: Array<{
+          accepted: boolean
+          question_id: string | null
+          selecting_team_id: string | null
+          selector_session_id: string | null
+          claimed_at: string | null
+        }>
+      }
+      confirm_question_selection: {
+        Args: {
+          p_room_id: string
+          p_team_id: string
+          p_question_id: string
+          p_session_id: string
+          p_wager: number
+        }
+        Returns: boolean
+      }
+    }
     Enums: {
       room_status: RoomStatus
       buzz_status: BuzzStatus
