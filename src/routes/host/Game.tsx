@@ -2,7 +2,7 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
 import { ablyClient, serverNow } from '../../lib/ably'
 import { clearHostSession } from '../../lib/session'
-import type { Buzz, Question, Room, ScoreSnapshot, Team, Wager } from '../../lib/types'
+import type { Buzz, FinalPhase, Question, Room, ScoreSnapshot, Team, Wager } from '../../lib/types'
 import ScoreHistoryChart from '../../components/ScoreHistoryChart'
 
 const RESPONSE_SECONDS = 40
@@ -64,7 +64,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   const judgmentInFlightRef = useRef(false)
 
   // ── Final Jeopardy state ──────────────────────────────────
-  const [fjPhase, setFjPhase]               = useState<'starting' | 'wager' | 'question' | 'review' | 'done' | null>(null)
+  const [fjPhase, setFjPhase]               = useState<FinalPhase | null>(null)
   const [fjCategoryName, setFjCategoryName] = useState('')
   const [fjQuestion, setFjQuestion]         = useState<Question | null>(null)
   const [fjActiveTeamIds, setFjActiveTeamIds] = useState<Set<string>>(new Set())
@@ -77,9 +77,11 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   const [fjJudgmentRetry, setFjJudgmentRetry] = useState<'correct' | 'wrong' | null>(null)
   const [gameFinishSaving, setGameFinishSaving] = useState(false)
   const [gameFinishError, setGameFinishError] = useState('')
-  const [fjTimerStart, setFjTimerStart]     = useState<number | null>(null)
+  const [fjResponseDeadline, setFjResponseDeadline] = useState<number | null>(null)
   const [fjTimerSeconds, setFjTimerSeconds] = useState(90)
   const [fjTimerExpired, setFjTimerExpired] = useState(false)
+  const [fjTransitionSaving, setFjTransitionSaving] = useState(false)
+  const [fjTransitionError, setFjTransitionError] = useState('')
   const fjActiveTeamIdsRef   = useRef<Set<string>>(new Set())
   const fjExpiryInProgress   = useRef(false)
   const fjJudgmentInFlightRef = useRef(false)
@@ -329,17 +331,16 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   // FJ 90-second answer timer
   useEffect(() => {
-    if (fjPhase !== 'question' || fjTimerStart === null) return
+    if (fjPhase !== 'question' || fjResponseDeadline === null) return
     const tick = () => {
-      const elapsed = Math.floor((Date.now() - fjTimerStart) / 1000)
-      const remaining = Math.max(0, 90 - elapsed)
+      const remaining = Math.max(0, Math.floor((fjResponseDeadline - serverNow()) / 1000))
       setFjTimerSeconds(remaining)
       if (remaining === 0) setFjTimerExpired(true)
     }
     tick()
     const id = setInterval(tick, 500)
     return () => clearInterval(id)
-  }, [fjPhase, fjTimerStart])
+  }, [fjPhase, fjResponseDeadline])
 
   // FJ timer expiry → broadcast, wait for player auto-submits, fresh fetch, build reveal order
   useEffect(() => {
@@ -372,6 +373,22 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
         .filter(t => activeIds.has(t.id))
         .sort((a, b) => (currentScores.get(a.id) ?? 0) - (currentScores.get(b.id) ?? 0))
         .map(t => t.id)
+      const firstReviewTeamId = order[0] ?? null
+      const { error: phaseError } = await supabase
+        .from('rooms')
+        .update({ final_phase: 'review', final_review_team_id: firstReviewTeamId })
+        .eq('id', roomId)
+      if (phaseError) {
+        fjExpiryInProgress.current = false
+        setFjTransitionError("Couldn't save the review phase. Retrying is safe.")
+        return
+      }
+
+      setRoom(prev => ({
+        ...prev,
+        final_phase: 'review',
+        final_review_team_id: firstReviewTeamId,
+      }))
       setFjRevealOrder(order)
       setFjReviewIdx(0)
       setFjPhase('review')
@@ -403,12 +420,29 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
       const { data: wagerData } = await supabase.from('wagers').select().eq('room_id', roomId)
       const wagers = wagerData ?? []
       setFjWagers(wagers)
+      setFjWagerStatus(new Map(wagers.map(w => [w.team_id, true])))
 
-      if (wagers.length === 0) {
+      const persistedPhase = room.final_phase
+      if (persistedPhase === 'starting') {
         setFjPhase('starting')
         return
       }
-      if (!wagers.some(w => w.response !== null)) {
+      if (persistedPhase === 'wager') {
+        setFjPhase('wager')
+        return
+      }
+      if (persistedPhase === 'question' && room.final_question_id && room.final_response_deadline_at) {
+        const deadline = new Date(room.final_response_deadline_at).getTime()
+        setFjResponseDeadline(deadline)
+        setFjPhase('question')
+        if (deadline <= serverNow()) setFjTimerExpired(true)
+        return
+      }
+      if (!persistedPhase && wagers.length === 0) {
+        setFjPhase('starting')
+        return
+      }
+      if (!persistedPhase && !wagers.some(w => w.response !== null)) {
         setFjPhase('wager')
         return
       }
@@ -422,8 +456,23 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
         const w = wagers.find(w => w.team_id === tid)
         return !w || w.status === 'pending'
       })
-      setFjReviewIdx(firstPending >= 0 ? firstPending : Math.max(order.length - 1, 0))
+      const persistedReviewIdx = room.final_review_team_id
+        ? order.indexOf(room.final_review_team_id)
+        : -1
+      const persistedReviewWager = room.final_review_team_id
+        ? wagers.find(w => w.team_id === room.final_review_team_id)
+        : null
+      const reviewIdx = persistedReviewIdx >= 0
+        && (!persistedReviewWager || persistedReviewWager.status === 'pending')
+        ? persistedReviewIdx
+        : firstPending
+      const recoveredReviewIdx = reviewIdx >= 0 ? reviewIdx : Math.max(order.length - 1, 0)
+      setFjReviewIdx(recoveredReviewIdx)
       setFjPhase('review')
+      const recoveredReviewTeamId = order[recoveredReviewIdx] ?? null
+      if (firstPending >= 0 && recoveredReviewTeamId !== room.final_review_team_id) {
+        await persistFinalReviewTeam(recoveredReviewTeamId)
+      }
       if (firstPending < 0) await finishGame()
     })()
   }, [room.status]) // eslint-disable-line react-hooks/exhaustive-deps
@@ -774,6 +823,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   // ── Final Jeopardy actions ────────────────────────────────
 
   async function startFinalJeopardy() {
+    setFjTransitionError('')
     // Clear any wagers from a previous FJ round
     await supabase.from('wagers').delete().eq('room_id', roomId)
 
@@ -797,7 +847,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
         supabase.from('teams').update({ is_active: false }).eq('id', t.id)
       ))
     }
-    await supabase.from('rooms').update({
+    const { error: roomError } = await supabase.from('rooms').update({
       status: 'final_jeopardy',
       current_question_id: null,
       buzz_opened_at: null,
@@ -807,9 +857,27 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
       pending_selection_session_id: null,
       pending_selection_claimed_at: null,
       pending_selection_wager: null,
+      final_phase: 'starting',
+      final_question_id: null,
+      final_response_deadline_at: null,
+      final_review_team_id: null,
     }).eq('id', roomId)
 
-    setRoom(prev => ({ ...prev, status: 'final_jeopardy', current_question_id: null, buzz_opened_at: null }))
+    if (roomError) {
+      setFjTransitionError("Couldn't start Final Tap. Check your connection and try again.")
+      return
+    }
+
+    setRoom(prev => ({
+      ...prev,
+      status: 'final_jeopardy',
+      current_question_id: null,
+      buzz_opened_at: null,
+      final_phase: 'starting',
+      final_question_id: null,
+      final_response_deadline_at: null,
+      final_review_team_id: null,
+    }))
     setFjActiveTeamIds(top3ids)
     setFjCategoryName(catName)
     setFjQuestion(loadedQuestion)
@@ -817,17 +885,68 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     broadcastRef.current?.publish('game_state_change', { status: 'final_jeopardy', fj_category: catName, active_team_ids: [...top3ids] })
   }
 
-  function openFJWagering() {
+  async function openFJWagering() {
+    setFjTransitionSaving(true)
+    setFjTransitionError('')
+    const { error } = await supabase
+      .from('rooms')
+      .update({ final_phase: 'wager' })
+      .eq('id', roomId)
+    setFjTransitionSaving(false)
+    if (error) {
+      setFjTransitionError("Couldn't open wagering. Check your connection and try again.")
+      return
+    }
+    setRoom(prev => ({ ...prev, final_phase: 'wager' }))
     setFjPhase('wager')
     broadcastRef.current?.publish('fj_wager_open', { active_team_ids: [...fjActiveTeamIds] })
   }
 
   async function revealFJQuestion() {
     if (!fjQuestion) return
-    const startTs = Date.now()
+    setFjTransitionSaving(true)
+    setFjTransitionError('')
+    const { data, error } = await supabase.rpc('reveal_final_question', {
+      p_room_id: roomId,
+      p_question_id: fjQuestion.id,
+    })
+    setFjTransitionSaving(false)
+    const revealed = data?.[0]
+    if (error || !revealed) {
+      setFjTransitionError("Couldn't reveal the Final question. Retrying will not restart the timer.")
+      return
+    }
+    const deadline = new Date(revealed.response_deadline_at).getTime()
+    const startTs = deadline - 90_000
     setFjPhase('question')
-    setFjTimerStart(startTs)
-    broadcastRef.current?.publish('fj_question_revealed', { question_id: fjQuestion.id, start_ts: startTs, duration: 90 })
+    setFjResponseDeadline(deadline)
+    setRoom(prev => ({
+      ...prev,
+      final_phase: 'question',
+      final_question_id: revealed.question_id,
+      final_response_deadline_at: revealed.response_deadline_at,
+      final_review_team_id: null,
+    }))
+    broadcastRef.current?.publish('fj_question_revealed', {
+      question_id: revealed.question_id,
+      start_ts: startTs,
+      response_deadline_at: deadline,
+      duration: 90,
+    })
+  }
+
+  async function persistFinalReviewTeam(teamId: string | null) {
+    const { error } = await supabase
+      .from('rooms')
+      .update({ final_phase: 'review', final_review_team_id: teamId })
+      .eq('id', roomId)
+    if (error) {
+      setFjTransitionError("Couldn't save the next review team. Refreshing the host will recover the first unjudged team.")
+      return false
+    }
+    setRoom(prev => ({ ...prev, final_phase: 'review', final_review_team_id: teamId }))
+    setFjTransitionError('')
+    return true
   }
 
   async function submitFJJudgment(wager: Wager, outcome: 'correct' | 'wrong') {
@@ -881,8 +1000,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     if (nextIdx >= revealOrder.length) {
       await finishGame()
     } else {
-      setFjReviewIdx(nextIdx)
       const nextId = revealOrder[nextIdx]
+      await persistFinalReviewTeam(nextId)
+      setFjReviewIdx(nextIdx)
       const nextWager = wagerList.find(w => w.team_id === nextId)
       broadcastRef.current?.publish('fj_answer_reveal', { team_id: nextId, team_name: teamName(nextId), response: nextWager?.response ?? null })
     }
@@ -904,8 +1024,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     if (nextIdx >= fjRevealOrder.length) {
       await finishGame()
     } else {
-      setFjReviewIdx(nextIdx)
       const nextId = fjRevealOrder[nextIdx]
+      await persistFinalReviewTeam(nextId)
+      setFjReviewIdx(nextIdx)
       const nextWager = fjWagers.find(w => w.team_id === nextId)
       broadcastRef.current?.publish('fj_answer_reveal', { team_id: nextId, team_name: teamName(nextId), response: nextWager?.response ?? null })
     }
@@ -931,7 +1052,14 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
     const finalScores = new Map(data.map(row => [row.team_id, row.final_score]))
     setScores(finalScores)
-    setRoom(prev => ({ ...prev, status: 'finished', current_question_id: null, buzz_opened_at: null }))
+    setRoom(prev => ({
+      ...prev,
+      status: 'finished',
+      current_question_id: null,
+      buzz_opened_at: null,
+      final_phase: 'done',
+      final_review_team_id: null,
+    }))
     setFjPhase('done')
     broadcastRef.current?.publish('game_over', {
       scores: data.map(row => ({ id: row.team_id, name: row.team_name, score: row.final_score })),
@@ -1237,10 +1365,12 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
               </div>
               <button
                 onClick={openFJWagering}
-                className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+                disabled={fjTransitionSaving}
+                className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 disabled:opacity-50 transition-colors"
               >
-                Open Wagering →
+                {fjTransitionSaving ? 'Opening…' : 'Open Wagering →'}
               </button>
+              {fjTransitionError && <p className="text-red-400 text-sm">{fjTransitionError}</p>}
             </div>
           ) : fjPhase === 'wager' ? (
             <div className="flex-1 flex flex-col gap-4">
@@ -1269,12 +1399,15 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
               </div>
               <button
                 onClick={revealFJQuestion}
-                disabled={!fjQuestion}
+                disabled={!fjQuestion || fjTransitionSaving}
                 className="py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 disabled:opacity-30 transition-colors"
               >
-                {fjWagerStatus.size >= fjActiveTeamIds.size && fjActiveTeamIds.size > 0
-                  ? 'Reveal Question →' : 'Reveal Anyway →'}
+                {fjTransitionSaving
+                  ? 'Revealing…'
+                  : fjWagerStatus.size >= fjActiveTeamIds.size && fjActiveTeamIds.size > 0
+                    ? 'Reveal Question →' : 'Reveal Anyway →'}
               </button>
+              {fjTransitionError && <p className="text-red-400 text-sm text-center">{fjTransitionError}</p>}
             </div>
 
           ) : fjPhase === 'question' ? (
@@ -1324,6 +1457,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
               >
                 End Timer Early
               </button>
+              {fjTransitionError && <p className="text-red-400 text-sm text-center">{fjTransitionError}</p>}
             </div>
 
           ) : fjPhase === 'review' ? (() => {

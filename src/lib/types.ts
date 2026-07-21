@@ -3,6 +3,7 @@
 // ============================================================
 
 export type RoomStatus = 'lobby' | 'round_1' | 'round_2' | 'final_jeopardy' | 'finished'
+export type FinalPhase = 'starting' | 'wager' | 'question' | 'review' | 'done'
 export type BuzzStatus = 'pending' | 'correct' | 'wrong' | 'expired' | 'skipped'
 export type WagerStatus = 'pending' | 'correct' | 'wrong'
 
@@ -28,6 +29,10 @@ export type Room = {
   pending_selection_session_id?: string | null
   pending_selection_claimed_at?: string | null
   pending_selection_wager?: number | null
+  final_phase?: FinalPhase | null
+  final_question_id?: string | null
+  final_response_deadline_at?: string | null
+  final_review_team_id?: string | null
   score_snapshots?: ScoreSnapshot[]
   created_at: string
 }
@@ -239,6 +244,16 @@ export type Database = {
           team_id: string
           team_name: string
           final_score: number
+        }>
+      }
+      reveal_final_question: {
+        Args: {
+          p_room_id: string
+          p_question_id: string
+        }
+        Returns: Array<{
+          question_id: string
+          response_deadline_at: string
         }>
       }
     }

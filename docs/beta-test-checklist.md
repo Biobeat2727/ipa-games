@@ -290,11 +290,12 @@ Prepare at least four teams so elimination behavior can be tested.
   the winner and complete ranking. Confetti/animations do not hide the scores.
 - [ ] **FNL-18 — Eliminated player game over:** A non-top-three phone receives the final result
   without being incorrectly returned to wagering.
-- [ ] **FNL-19 — Refresh during Final Tap:** Refresh phones during incoming, wager-locked,
-  question, reviewing, and game-over states. Each should recover the current state.
+- [ ] **FNL-19 — Player refresh during Final Tap:** Refresh active and eliminated phones during
+  incoming, wager, wager-locked, question, reviewing, and game-over states. Each returns to the
+  same state without exposing the clue early or reopening a locked input.
 - [ ] **FNL-20 — Host refresh during question:** Refresh the host during the 90-second clue.
-  Record whether the timer/state resumes or requires Reveal Anyway; confirm no scores or
-  responses are lost.
+  The same clue and original remaining time return automatically—Reveal Anyway is not offered,
+  and the timer never restarts at 90.
 - [ ] **FNL-21 — Prevent double Final judgment:** Rapidly double-click Correct or Wrong. The
   wager changes the score exactly once and review advances only one team.
 - [ ] **FNL-22 — Failed Final save and safe retry:** Interrupt the host's connection while
@@ -308,6 +309,12 @@ Prepare at least four teams so elimination behavior can be tested.
 - [ ] **FNL-25 — Missed game-over broadcast:** Disconnect one player as the host finishes, then
   reconnect without replaying the broadcast. The phone uses the finished room state to recover
   the final scores and winner screen.
+- [ ] **FNL-26 — Projector refresh during question:** Refresh the projector midway through the
+  90-second clue. It restores the same clue and is within roughly one second of the host timer.
+- [ ] **FNL-27 — Host refresh during review:** Refresh while a team's response is awaiting
+  judgment. The host restores that team (or the first still-unjudged team) without scoring twice.
+- [ ] **FNL-28 — Projector refresh during review:** Refresh while a response card is displayed.
+  The projector restores the same team and response without briefly revealing the Final clue.
 
 ---
 

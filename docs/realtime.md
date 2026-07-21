@@ -51,7 +51,7 @@ Additional scoped channels:
 |---|---|---|---|
 | `fj_wager_open` | Host | `{ active_team_ids: string[] }` | Active players enter wager phase; eliminated players enter done |
 | `fj_wager_locked` | Player | `{ team_id }` | Projector + host update wager status display |
-| `fj_question_revealed` | Host | `{ question_id, start_ts, duration }` | Question shown + 90s timer starts on all screens |
+| `fj_question_revealed` | Host | `{ question_id, start_ts, response_deadline_at, duration }` | Question shown; all screens count down to the persisted database deadline |
 | `fj_timer_expired` | Host | `{}` | Players auto-submit current response via `wagers` update |
 | `fj_answer_reveal` | Host | `{ team_id, team_name, response }` | Projector shows team's response during review |
 | `fj_answer_judged` | Host | `{ team_id, status, wager, new_score }` | Projector shows result + score change |
@@ -68,9 +68,9 @@ against Ably server time:
 remaining = Math.max(0, start_timestamp + duration_ms - serverNow())
 ```
 
-Regular and Double Tap answer windows additionally persist `buzzes.response_deadline_at` in
-Postgres. Reconnecting phones derive the display timer from that immutable deadline, while a
-database trigger enforces the deadline using database time even if a phone clock or UI is stale.
+Regular and Double Tap answer windows persist `buzzes.response_deadline_at`; Final Tap persists
+`rooms.final_response_deadline_at`. Reconnecting screens derive their display timers from those
+immutable deadlines. Regular/Double Tap deadlines are additionally enforced by a database trigger.
 
 ---
 

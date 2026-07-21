@@ -54,7 +54,11 @@ Legend: 🔴 fix before charging money · 🟠 fix during beta · 🟡 polish ·
   connected; on reconnect, re-run the existing resync so the player catches up. This is the
   single biggest reliability win for real venue conditions. ~1–2 hrs.
 
-### 4. One team can appear twice in the buzz queue [VERIFY]
+### 4. One team can appear twice in the buzz queue [RESOLVED]
+
+**Resolved:** `buzzes_one_per_team_question` enforces one row per team/question, and the player
+adopts the existing team buzz when simultaneous teammate inserts race.
+
 - **Symptom:** two teammates tapping the buzzer at nearly the same instant can both
   register a buzz, so the team shows up **twice** in the host's queue.
 - **Cause:** the "already buzzed" guard (`hasBuzzed`) is per-phone, so two phones on the
@@ -65,7 +69,12 @@ Legend: 🔴 fix before charging money · 🟠 fix during beta · 🟡 polish ·
   insert is rejected cleanly, and treat that rejection as "already buzzed" on the client.
   Small migration + a few lines. **[VERIFY]** the constraint isn't already there.
 
-### 5. Answers may be readable by players — cheating vector [VERIFY]
+### 5. Answers may be readable by players — cheating vector [RESOLVED]
+
+**Resolved:** anonymous access to the private `questions` table is revoked. Player and projector
+queries use `questions_public`, which excludes `correct_question`; authenticated hosts retain the
+private answer access required to run the game.
+
 - **Symptom:** a technically-savvy player could read **every correct answer** before the
   game, from their own phone.
 - **Cause:** players are meant to use the `questions_public` view (which hides
@@ -102,10 +111,9 @@ retries are safe, conflicting re-judgments are rejected, and host controls lock 
 ## 🟡 Polish / professional feel
 
 ### 7. Host refresh mid-game loses the "current turn" highlight
-- Already tracked in `docs/TODO.md`. Turn is now persisted to `rooms.current_turn_team_id`
-  (`Game.tsx` `assignTurn`) and players hydrate it, but the **host** view doesn't restore
-  it on refresh. Minor, but looks unpolished if the host reloads. Hydrate
-  `currentTurnTeamId` from the room row in the host's init.
+
+**Resolved:** turn ownership is persisted in `rooms.current_turn_team_id` and restored by host,
+player, and projector screens.
 
 ### 8. Refresh mid-question can restore a stale answer box
 

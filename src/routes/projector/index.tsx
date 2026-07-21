@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { supabase } from '../../lib/supabase'
-import { ablyClient } from '../../lib/ably'
+import { ablyClient, serverNow } from '../../lib/ably'
 import type { Buzz, QuestionPublic, Room, ScoreSnapshot, Team } from '../../lib/types'
 import AnimatedScore from '../../components/AnimatedScore'
 import Confetti from '../../components/Confetti'
@@ -72,7 +72,7 @@ export default function ProjectorView() {
   const [fjCategoryName, setFjCategoryName]   = useState('')
   const [fjQuestion, setFjQuestion]           = useState<{ answer: string } | null>(null)
   const [fjWagerStatus, setFjWagerStatus]     = useState<Set<string>>(new Set())
-  const [fjTimerStart, setFjTimerStart]       = useState<number | null>(null)
+  const [fjResponseDeadline, setFjResponseDeadline] = useState<number | null>(null)
   const [fjTimeRemaining, setFjTimeRemaining] = useState<number | null>(null)
   const [fjReveal, setFjReveal]               = useState<{
     teamName: string; response: string | null; result?: 'correct' | 'wrong'; wager?: number; newScore?: number
@@ -134,6 +134,50 @@ export default function ProjectorView() {
     setScores(new Map(list.map(t => [t.id, t.score])))
     if (['round_1', 'round_2'].includes(freshRoom.status)) {
       await loadCategories(roomId, freshRoom.status)
+    } else if (freshRoom.status === 'final_jeopardy') {
+      const [{ data: category }, { data: wagers }] = await Promise.all([
+        supabase.from('categories').select('name').eq('room_id', roomId).eq('round', 3).single(),
+        supabase.from('wagers').select().eq('room_id', roomId),
+      ])
+      setFjCategoryName(category?.name ?? 'Final Jeopardy')
+      setFjWagerStatus(new Set((wagers ?? []).map(w => w.team_id)))
+
+      if (freshRoom.final_phase === 'question'
+        && freshRoom.final_question_id
+        && freshRoom.final_response_deadline_at) {
+        const { data: question } = await supabase
+          .from('questions_public')
+          .select('answer')
+          .eq('id', freshRoom.final_question_id)
+          .single()
+        const deadline = new Date(freshRoom.final_response_deadline_at).getTime()
+        setFjReveal(null)
+        setFjQuestion(question ?? null)
+        setFjResponseDeadline(deadline)
+        setFjTimeRemaining(Math.max(0, Math.floor((deadline - serverNow()) / 1000)))
+      } else if (freshRoom.final_phase === 'review' && freshRoom.final_review_team_id) {
+        const reviewTeam = list.find(t => t.id === freshRoom.final_review_team_id)
+        const reviewWager = (wagers ?? []).find(w => w.team_id === freshRoom.final_review_team_id)
+        setFjQuestion(null)
+        setFjResponseDeadline(null)
+        setFjTimeRemaining(0)
+        setFjReveal(reviewTeam ? {
+          teamName: reviewTeam.name,
+          response: reviewWager?.response ?? null,
+          ...(reviewWager?.status === 'correct' || reviewWager?.status === 'wrong'
+            ? {
+                result: reviewWager.status,
+                wager: reviewWager.amount,
+                newScore: reviewTeam.score,
+              }
+            : {}),
+        } : null)
+      } else {
+        setFjQuestion(null)
+        setFjReveal(null)
+        setFjResponseDeadline(null)
+        setFjTimeRemaining(null)
+      }
     }
   }, [loadCategories])
 
@@ -194,9 +238,12 @@ export default function ProjectorView() {
         { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
         async payload => {
           const updated = payload.new as Room
+          roomRef.current = updated
           setRoom(updated)
           if (['round_1', 'round_2'].includes(updated.status)) {
             await loadCategories(roomId, updated.status)
+          } else if (updated.status === 'final_jeopardy') {
+            await resyncAll()
           }
         })
       .on('postgres_changes',
@@ -336,10 +383,14 @@ export default function ProjectorView() {
       setFjWagerStatus(prev => new Set([...prev, team_id]))
     })
     ch.subscribe('fj_question_revealed', async ({ data }) => {
-      const { question_id, start_ts } = data as { question_id: string; start_ts: number }
+      const { question_id, start_ts, response_deadline_at } = data as {
+        question_id: string
+        start_ts: number
+        response_deadline_at?: number
+      }
       const { data: q } = await supabase.from('questions_public').select().eq('id', question_id).single()
       if (q) setFjQuestion({ answer: q.answer })
-      setFjTimerStart(start_ts)
+      setFjResponseDeadline(response_deadline_at ?? start_ts + 90_000)
       setFjTimeRemaining(90)
     })
     ch.subscribe('fj_timer_expired', () => {
@@ -412,16 +463,16 @@ export default function ProjectorView() {
   // ── FJ countdown ──────────────────────────────────────────
 
   useEffect(() => {
-    if (fjTimerStart === null) return
+    if (fjResponseDeadline === null) return
     const tick = () => {
-      const remaining = Math.max(0, Math.floor((fjTimerStart + 90_000 - Date.now()) / 1000))
+      const remaining = Math.max(0, Math.floor((fjResponseDeadline - serverNow()) / 1000))
       setFjTimeRemaining(remaining)
       if (remaining === 0) clearInterval(id)
     }
     tick()
     const id = setInterval(tick, 500)
     return () => clearInterval(id)
-  }, [fjTimerStart])
+  }, [fjResponseDeadline])
 
 
   // ── Winner confetti ───────────────────────────────────────

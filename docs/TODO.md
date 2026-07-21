@@ -6,6 +6,9 @@
 - **Reliable lobby player counts**: host counts now refresh on every player database change,
   join/leave broadcasts, and a recovery poll; stale overlapping refreshes are ignored. A failed
   Leave Team request keeps the player in place with a retry message instead of desynchronizing.
+- **Refresh-safe Final Tap**: phase, revealed question, database-owned response deadline, and
+  current review team are persisted on the room. Host, player, and projector refreshes recover
+  the same state without restarting the 90-second timer or exposing the clue early.
 - **Error boundary**: `src/components/ErrorBoundary.tsx` wraps /play, /host, /projector — render crashes show a friendly reload screen instead of a white screen (session survives reload).
 - **Silent buzz failure**: failed buzz insert now shows "Buzz didn't go through — tap again!" + vibration instead of silently dropping the player.
 - **Connection-drop banner**: `src/components/ConnectionBanner.tsx` — amber "Reconnecting…" strip when Ably drops, green "Back online" flash on recovery.
@@ -84,11 +87,9 @@ Original design sketch kept below for reference:
 
 ---
 
-## Final Tap — Known Edge Cases (documented, not actionable)
+## Final Tap — Known Behavior
 
-- `currentTurnTeamId` is ephemeral (broadcast only). Host page refresh resets it — host must use "give" button to reassign.
-- If host refreshes during `question` phase of FJ, state restores to `wager` phase (can't recover timer start timestamp from DB). Host must click "Reveal Anyway" to restart the question.
-- Eliminated players (non-top-3) land in `fjSubPhase = 'done'` immediately on `fj_wager_open`.
+- Eliminated players (non-top-3) land in `fjSubPhase = 'done'` when wagering opens.
 
 ---
 

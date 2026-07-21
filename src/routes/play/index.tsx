@@ -156,7 +156,7 @@ export default function PlayView() {
   const [fjQuestion, setFjQuestion]           = useState<QuestionPublic | null>(null)
   const [fjResponse, setFjResponse]           = useState('')
   const [fjResponseSubmitted, setFjResponseSubmitted] = useState(false)
-  const [fjTimerStart, setFjTimerStart]       = useState<number | null>(null)
+  const [fjResponseDeadline, setFjResponseDeadline] = useState<number | null>(null)
   const [fjTimeRemaining, setFjTimeRemaining] = useState<number | null>(null)
   const [fjFinalScores, setFjFinalScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
 
@@ -824,15 +824,20 @@ export default function PlayView() {
         setFjCategoryName(fj_category ?? 'Final Jeopardy')
         setFjWagerInput(''); setFjWagerId(null); setFjLockedWagerAmount(null); setFjQuestion(null)
         setFjResponse(''); setFjResponseSubmitted(false)
-        setFjTimerStart(null); setFjTimeRemaining(null); setFjFinalScores([])
+        setFjResponseDeadline(null); setFjTimeRemaining(null); setFjFinalScores([])
         setFjSubPhase('incoming')
       }
     })
     ch.subscribe('fj_question_revealed', async ({ data }) => {
-      const { question_id, start_ts, duration } = data as { question_id: string; start_ts: number; duration: number }
+      const { question_id, start_ts, response_deadline_at, duration } = data as {
+        question_id: string
+        start_ts: number
+        response_deadline_at?: number
+        duration: number
+      }
       const { data: q } = await supabase.from('questions_public').select().eq('id', question_id).single()
       setFjQuestion(q ?? null)
-      setFjTimerStart(start_ts)
+      setFjResponseDeadline(response_deadline_at ?? start_ts + duration * 1000)
       setFjTimeRemaining(duration)
       setFjSubPhase('question')
     })
@@ -934,17 +939,72 @@ export default function PlayView() {
     })
   }, [phase, room?.id, room?.status, loadBoard])
 
-  // Fallback: if room transitions to final_jeopardy via postgres_changes and fjSubPhase not yet set
+  // Persisted Final Tap recovery. Broadcasts move live clients immediately; these room fields
+  // put refreshed or reconnected phones back into the same phase and original deadline.
   useEffect(() => {
-    if (room?.status !== 'final_jeopardy' || fjSubPhase !== null) return
+    if (room?.status !== 'final_jeopardy') return
     const myId = myTeam?.id
     if (!myId) return
-    supabase.from('teams').select().eq('id', myId).single().then(({ data: t }) => {
-      if (!t) return
-      setMyTeam(t)
-      setFjSubPhase(prev => prev ?? 'incoming')
-    })
-  }, [room?.status, fjSubPhase, myTeam?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+    let cancelled = false
+
+    ;(async () => {
+      const [{ data: team }, { data: category }, { data: wager }] = await Promise.all([
+        supabase.from('teams').select().eq('id', myId).single(),
+        supabase.from('categories').select('id, name').eq('room_id', room.id).eq('round', 3).single(),
+        supabase.from('wagers').select().eq('room_id', room.id).eq('team_id', myId).maybeSingle(),
+      ])
+      if (cancelled || !team) return
+
+      setMyTeam(team)
+      setMyScore(team.score)
+      setFjCategoryName(category?.name ?? 'Final Jeopardy')
+      if (wager) {
+        setFjWagerId(wager.id)
+        setFjLockedWagerAmount(wager.amount)
+        if (wager.response) setFjResponse(wager.response)
+        setFjResponseSubmitted(wager.submitted_at !== null)
+      }
+
+      const persistedPhase = room.final_phase ?? 'starting'
+      if (!team.is_active) {
+        setFjSubPhase('done')
+        return
+      }
+      if (persistedPhase === 'starting') {
+        setFjSubPhase('incoming')
+        return
+      }
+      if (persistedPhase === 'wager') {
+        setFjSubPhase(wager ? 'wager_locked' : 'wager')
+        return
+      }
+      if (persistedPhase === 'question' && room.final_question_id && room.final_response_deadline_at) {
+        const { data: question } = await supabase
+          .from('questions_public')
+          .select()
+          .eq('id', room.final_question_id)
+          .single()
+        if (cancelled) return
+        const deadline = new Date(room.final_response_deadline_at).getTime()
+        setFjQuestion(question ?? null)
+        setFjResponseDeadline(deadline)
+        setFjTimeRemaining(Math.max(0, Math.floor((deadline - serverNow()) / 1000)))
+        setFjSubPhase(deadline > serverNow() ? 'question' : 'reviewing')
+        return
+      }
+      if (persistedPhase === 'review') {
+        setFjSubPhase('reviewing')
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [
+    room?.status,
+    room?.final_phase,
+    room?.final_question_id,
+    room?.final_response_deadline_at,
+    myTeam?.id,
+  ]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Auto-clear correct/wrong feedback after 2.5 s
   useEffect(() => {
@@ -1066,10 +1126,10 @@ export default function PlayView() {
 
   // FJ 90-second countdown
   useEffect(() => {
-    if (fjSubPhase !== 'question' || fjTimerStart === null) return
+    if (fjSubPhase !== 'question' || fjResponseDeadline === null) return
     const tick = () => {
       const remaining = Math.max(0, Math.floor(
-        (fjTimerStart + 90_000 - Date.now()) / 1000
+        (fjResponseDeadline - serverNow()) / 1000
       ))
       setFjTimeRemaining(remaining)
       if (remaining === 0) clearInterval(id)
@@ -1077,7 +1137,7 @@ export default function PlayView() {
     tick()
     const id = setInterval(tick, 500)
     return () => clearInterval(id)
-  }, [fjSubPhase, fjTimerStart])
+  }, [fjSubPhase, fjResponseDeadline])
 
   // Subscribe to my buzz status changes (for correct/wrong feedback)
   useEffect(() => {

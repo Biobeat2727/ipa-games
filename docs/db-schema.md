@@ -15,6 +15,10 @@
 | pending_selection_session_id | text, nullable | Player device that won the claim (used for Double Tap wagering) |
 | pending_selection_claimed_at | timestamptz, nullable | Server time of the accepted claim |
 | pending_selection_wager | integer, nullable | Double Tap wager after the winning device confirms it |
+| final_phase | text, nullable | Persisted Final Tap state: `starting`, `wager`, `question`, `review`, or `done` |
+| final_question_id | uuid, nullable | Final clue exposed only when the host reveals it |
+| final_response_deadline_at | timestamptz, nullable | Database-generated end of the shared 90s Final response window |
+| final_review_team_id | uuid, nullable | Team whose response is currently on the host/projector review screen |
 | created_at | timestamp | Used to identify today's room |
 
 **One active room at a time.** When the host creates a new room, all other rooms are immediately set to `finished`. Players and projector auto-resolve to the most recent non-finished room created today.

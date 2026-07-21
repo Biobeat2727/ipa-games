@@ -108,16 +108,20 @@ checking → no_lobby → join_lobby → select_team → lobby → game
    - Broadcasts `game_state_change { status: 'final_jeopardy', fj_category, active_team_ids }`
    - Host enters `starting` phase
 2. Players receive broadcast → reset all FJ local state → enter `incoming` phase (shows category)
-3. Host clicks "Open Wagering" → broadcasts `fj_wager_open { active_team_ids }`
+3. Host clicks "Open Wagering" → persists `rooms.final_phase = 'wager'`, then broadcasts
+   `fj_wager_open { active_team_ids }`
 4. Active players enter `wager` phase; eliminated players enter `done`
 5. Players submit wager → wager row created in DB → player enters `wager_locked`
-6. Host clicks "Reveal Question" → broadcasts `fj_question_revealed { question_id, start_ts, duration: 90 }`
+6. Host clicks "Reveal Question" → `reveal_final_question` atomically persists the question
+   and a database-generated 90-second deadline, then the host broadcasts
+   `fj_question_revealed { question_id, response_deadline_at, duration: 90 }`
 7. Players see question + 90s response timer
 8. Players submit response → `wagers.response` updated in DB
 9. Timer ends (or auto-ends when all teams have responses) → host broadcasts `fj_timer_expired`
    - If all responses already in DB, skip the 1500ms wait
    - Players auto-submit remaining responses on `fj_timer_expired`
-   - Host builds reveal order (ascending by score) → enters `review` phase
+   - Host builds reveal order (ascending by score), persists `final_phase = 'review'` and
+     `final_review_team_id`, then enters `review`
 10. Host reviews each response, clicks Correct/Wrong → `judge_final_wager` commits wager
     status and score atomically → `fj_answer_judged` broadcast
     - Controls lock while saving; same-result retries are safe and cannot score twice
@@ -126,6 +130,13 @@ checking → no_lobby → join_lobby → select_team → lobby → game
     - A failed completion stays on review with **Retry Finish**; retries are idempotent
     - Host refresh after the last judgment detects that no wagers remain and completes safely
     - Players that miss `game_over` recover the final scores from the persisted `finished` room
+
+### Refresh recovery
+- Host, player, and projector rebuild Final Tap from the four persisted room fields.
+- The question is never queried by public clients before `final_phase = 'question'`.
+- Every timer compares the immutable database deadline with `serverNow()`; refreshes cannot
+  restart or extend the response window.
+- During review, `final_review_team_id` lets a refreshed projector restore the exact answer card.
 
 ### Auto-end behavior
 - Host watches `fjWagers` (via postgres_changes on `wagers` table)
