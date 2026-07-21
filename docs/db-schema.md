@@ -69,6 +69,10 @@
 | response_submitted_at | timestamp, nullable | |
 | status | enum | `pending`, `correct`, `wrong`, `expired`, `skipped` |
 
+`buzzes_one_per_team_question` allows only one buzz per team/question. Host Correct/Wrong
+judgments use the authenticated `judge_buzz` database function so buzz status, score, and
+question completion commit together and duplicate host taps cannot score twice.
+
 ## `wagers` (Final Jeopardy only)
 | Column | Type | Notes |
 |---|---|---|

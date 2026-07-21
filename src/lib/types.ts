@@ -197,6 +197,23 @@ export type Database = {
         }
         Returns: boolean
       }
+      judge_buzz: {
+        Args: {
+          p_room_id: string
+          p_buzz_id: string
+          p_outcome: 'correct' | 'wrong'
+          p_points: number
+        }
+        Returns: Array<{
+          applied: boolean
+          buzz_id: string
+          team_id: string
+          question_id: string
+          outcome: 'correct' | 'wrong'
+          new_score: number
+          question_done: boolean
+        }>
+      }
     }
     Enums: {
       room_status: RoomStatus

@@ -82,6 +82,10 @@ Legend: 🔴 fix before charging money · 🟠 fix during beta · 🟡 polish ·
   For a paid event with prizes, close it. ~30 min once RLS is confirmed.
 
 ### 6. Judge writes aren't checked — scores and board can silently diverge
+
+**Resolved for regular and Double Tap clues:** Correct/Wrong now uses the authenticated `judge_buzz` database transaction.
+Buzz status, score, and question completion succeed or fail together; same-result retries are
+safe, conflicting re-judgments are rejected, and host controls lock while the save is in flight.
 - **Symptom:** rare, but a team's score could update while the question fails to mark as
   answered (or vice-versa), leaving the board and scores inconsistent for the rest of the
   game.
@@ -153,5 +157,5 @@ So the audit reads as balanced, not alarmist — these areas held up:
 1. **#1 error boundary** and **#2 silent buzz** — small, high-impact, do first.
 2. **#3 connection banner** — the biggest real-venue reliability gain.
 3. **#4 / #5 [VERIFY]** — quick dashboard checks; fix if confirmed.
-4. **#6 judge-write checks**, then polish (#7, #8).
+4. **#6 judge-write checks are complete**; proceed to polish (#7, #8).
 5. Write the **run-of-show checklist** (#11) before the first paid night.

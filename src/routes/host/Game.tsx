@@ -35,6 +35,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     new Map(teams.map(t => [t.id, t.score]))
   )
   const [judgingBuzzId, setJudgingBuzzId]     = useState<string | null>(null)
+  const [judgmentSaving, setJudgmentSaving]   = useState(false)
+  const [judgmentError, setJudgmentError]     = useState('')
+  const [judgmentRetry, setJudgmentRetry]     = useState<'correct' | 'wrong' | null>(null)
   const [judgeStartTime, setJudgeStartTime]   = useState<number | null>(null)
   const [timerSeconds, setTimerSeconds]       = useState(RESPONSE_SECONDS)
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(initialRoom.current_turn_team_id ?? null)
@@ -58,6 +61,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   const broadcastRef        = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
   const activationStartTsRef = useRef<number | null>(null)
+  const judgmentInFlightRef = useRef(false)
 
   // ── Final Jeopardy state ──────────────────────────────────
   const [fjPhase, setFjPhase]               = useState<'starting' | 'wager' | 'question' | 'review' | 'done' | null>(null)
@@ -550,6 +554,8 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   }
 
   function handleJudge(buzz: Buzz) {
+    setJudgmentError('')
+    setJudgmentRetry(null)
     setJudgingBuzzId(buzz.id)
     // judgeStartTime already set at activation; no need to fire timer_start since
     // players already have their answer boxes open from the shared buzz window countdown.
@@ -584,6 +590,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   }
 
   function clearJudging() {
+    if (judgmentInFlightRef.current) return
+    setJudgmentError('')
+    setJudgmentRetry(null)
     setJudgingBuzzId(null)
     setJudgeStartTime(null)
   }
@@ -654,93 +663,92 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     }).eq('id', roomId).then(() => {})
   }
 
-  async function handleCorrect(buzz: Buzz) {
-    if (!activeQuestion) return
-    const pointValue   = doubleTapWager ?? (activeQuestion.point_value ?? 0)
-    const currentScore = scores.get(buzz.team_id) ?? 0
-    const newScore     = currentScore + pointValue
+  async function submitJudgment(buzz: Buzz, outcome: 'correct' | 'wrong') {
+    if (!activeQuestion || judgmentInFlightRef.current) return
+    judgmentInFlightRef.current = true
+    setJudgmentSaving(true)
+    setJudgmentError('')
+    setJudgmentRetry(outcome)
 
-    await Promise.all([
-      supabase.from('buzzes').update({ status: 'correct' }).eq('id', buzz.id),
-      supabase.from('teams').update({ score: newScore }).eq('id', buzz.team_id),
-      supabase.from('questions')
-        .update({ is_answered: true, answered_by_team_id: buzz.team_id })
-        .eq('id', activeQuestion.id),
-    ])
-
-    const updatedScores = new Map([...scores, [buzz.team_id, newScore]])
-    setScores(updatedScores)
-    recordScoreSnapshot(updatedScores)
-
-    // Compute updated categories inline so we can check round completion immediately
-    const nextCategories = categories.map(cat => ({
-      ...cat,
-      questions: cat.questions.map(q =>
-        q.id === activeQuestion.id ? { ...q, is_answered: true } : q
-      ),
-    }))
-    setCategories(nextCategories)
-
-    broadcastRef.current?.publish('score_update', {
-      teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
-      current_question_id: null,
-      answered_question_id: activeQuestion.id,
-      winning_team_id: buzz.team_id,
+    const pointValue = doubleTapWager ?? (activeQuestion.point_value ?? 0)
+    const { data, error } = await supabase.rpc('judge_buzz', {
+      p_room_id: roomId,
+      p_buzz_id: buzz.id,
+      p_outcome: outcome,
+      p_points: pointValue,
     })
+    const result = data?.[0]
 
-    clearJudging()
-    assignTurn(buzz.team_id)
-    deactivateQuestion()
-  }
-
-  async function handleWrong(buzz: Buzz) {
-    if (!activeQuestion) return
-    const pointValue   = doubleTapWager ?? (activeQuestion.point_value ?? 0)
-    const currentScore = scores.get(buzz.team_id) ?? 0
-    const newScore     = currentScore - pointValue
-
-    // Compute using local state before the DB writes — local buzz state is current
-    const remainingPending = buzzes.filter(b => b.status === 'pending' && b.id !== buzz.id)
-    const questionDone     = remainingPending.length === 0
-
-    await Promise.all([
-      supabase.from('buzzes').update({ status: 'wrong' }).eq('id', buzz.id),
-      supabase.from('teams').update({ score: newScore }).eq('id', buzz.team_id),
-    ])
-    // When all buzzes are exhausted mark the question answered so every board greys it out
-    if (questionDone) {
-      await supabase.from('questions').update({ is_answered: true }).eq('id', activeQuestion.id)
+    if (error || !result) {
+      judgmentInFlightRef.current = false
+      setJudgmentSaving(false)
+      setJudgmentError(
+        error?.message?.includes('already judged')
+          ? error.message
+          : "Couldn't confirm that judgment. Retrying is safe and cannot score the buzz twice."
+      )
+      return
     }
 
-    const updatedScores = new Map([...scores, [buzz.team_id, newScore]])
+    const updatedScores = new Map([...scores, [buzz.team_id, result.new_score]])
     setScores(updatedScores)
     recordScoreSnapshot(updatedScores)
-    setBuzzes(prev => prev.map(b => b.id === buzz.id ? { ...b, status: 'wrong' } : b))
+    setBuzzes(prev => prev.map(b =>
+      b.id === buzz.id ? { ...b, status: outcome } : b
+    ))
 
-    // Compute updated categories inline so we can check round completion when questionDone
-    let nextCategories = categories
-    if (questionDone) {
-      nextCategories = categories.map(cat => ({
+    if (result.question_done) {
+      setCategories(prev => prev.map(cat => ({
         ...cat,
         questions: cat.questions.map(q =>
-          q.id === activeQuestion.id ? { ...q, is_answered: true } : q
+          q.id === activeQuestion.id
+            ? {
+                ...q,
+                is_answered: true,
+                answered_by_team_id: outcome === 'correct' ? buzz.team_id : null,
+              }
+            : q
         ),
-      }))
-      setCategories(nextCategories)
+      })))
     }
 
     broadcastRef.current?.publish('score_update', {
       teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })),
-      wrong_buzz_id: buzz.id,
-      ...(questionDone ? { current_question_id: null, answered_question_id: activeQuestion.id } : {}),
+      ...(outcome === 'correct'
+        ? {
+            current_question_id: null,
+            answered_question_id: activeQuestion.id,
+            winning_team_id: buzz.team_id,
+          }
+        : {
+            wrong_buzz_id: buzz.id,
+            ...(result.question_done
+              ? { current_question_id: null, answered_question_id: activeQuestion.id }
+              : {}),
+          }),
     })
 
+    judgmentInFlightRef.current = false
+    setJudgmentSaving(false)
+    setJudgmentError('')
+    setJudgmentRetry(null)
     clearJudging()
 
-    if (questionDone) {
+    if (outcome === 'correct') {
+      assignTurn(buzz.team_id)
+      deactivateQuestion()
+    } else if (result.question_done) {
       assignTurn(null)
       setPendingDeactivation(true)
     }
+  }
+
+  async function handleCorrect(buzz: Buzz) {
+    await submitJudgment(buzz, 'correct')
+  }
+
+  async function handleWrong(buzz: Buzz) {
+    await submitJudgment(buzz, 'wrong')
   }
 
   // ── Final Jeopardy actions ────────────────────────────────
@@ -1674,24 +1682,46 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                   )}
                 </div>
 
+                {judgmentError && (
+                  <div role="alert" className="mb-4 rounded-xl border border-red-500/50 bg-red-950/60 p-3">
+                    <p className="text-sm font-semibold text-red-200">{judgmentError}</p>
+                    {judgmentRetry && (
+                      <button
+                        onClick={() => submitJudgment(judgingBuzz, judgmentRetry)}
+                        disabled={judgmentSaving}
+                        className="mt-2 rounded-lg bg-red-200 px-3 py-1.5 text-sm font-black text-red-950 hover:bg-white disabled:opacity-50"
+                      >
+                        Try Again
+                      </button>
+                    )}
+                  </div>
+                )}
+
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => handleWrong(judgingBuzz)}
-                    className="py-5 rounded-2xl font-black text-xl bg-red-700 hover:bg-red-600 active:bg-red-800 transition-colors"
+                    disabled={judgmentSaving}
+                    className="py-5 rounded-2xl font-black text-xl bg-red-700 hover:bg-red-600 active:bg-red-800 disabled:cursor-wait disabled:opacity-50 transition-colors"
                   >
-                    ✗ Wrong −{doubleTapWager ?? activeQuestion?.point_value ?? 0}
+                    {judgmentSaving && judgmentRetry === 'wrong'
+                      ? 'Saving…'
+                      : `✗ Wrong −${doubleTapWager ?? activeQuestion?.point_value ?? 0}`}
                   </button>
                   <button
                     onClick={() => handleCorrect(judgingBuzz)}
-                    className="py-5 rounded-2xl font-black text-xl bg-green-600 hover:bg-green-500 active:bg-green-700 transition-colors"
+                    disabled={judgmentSaving}
+                    className="py-5 rounded-2xl font-black text-xl bg-green-600 hover:bg-green-500 active:bg-green-700 disabled:cursor-wait disabled:opacity-50 transition-colors"
                   >
-                    ✓ Correct +{doubleTapWager ?? activeQuestion?.point_value ?? 0}
+                    {judgmentSaving && judgmentRetry === 'correct'
+                      ? 'Saving…'
+                      : `✓ Correct +${doubleTapWager ?? activeQuestion?.point_value ?? 0}`}
                   </button>
                 </div>
 
                 <button
                   onClick={clearJudging}
-                  className="mt-3 text-xs text-gray-700 hover:text-gray-500 transition-colors"
+                  disabled={judgmentSaving}
+                  className="mt-3 text-xs text-gray-700 hover:text-gray-500 disabled:cursor-wait disabled:opacity-40 transition-colors"
                 >
                   Cancel judging
                 </button>
