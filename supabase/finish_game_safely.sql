@@ -65,6 +65,7 @@ begin
   update public.rooms
   set status = 'finished',
       current_question_id = null,
+      buzz_opened_at = null,
       current_turn_team_id = null,
       pending_question_id = null,
       pending_selection_team_id = null,

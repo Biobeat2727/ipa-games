@@ -336,6 +336,12 @@ Run these with trusted testers so a deliberate disconnect does not affect regula
   previously used phone. It should load the new version without a 404 or manual cache clear.
 - [ ] **NET-14 — Mixed browsers:** Test at least one recent iPhone/Safari and one Android/Chrome
   device. Core joining, selection, buzzing, answer, and reconnect flows work on both.
+- [ ] **NET-15 — Double Tap answer refresh:** Refresh a selecting team's phone during its
+  40-second response window. It restores the remaining time from the original deadline rather
+  than changing to 15 seconds or restarting at 40.
+- [ ] **NET-16 — Late response rejected:** Keep a response typed as the timer reaches zero and
+  attempt to submit it. The database rejects it, the phone stays closed, and the host does not
+  receive a late answer.
 
 ---
 

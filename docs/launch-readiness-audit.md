@@ -108,8 +108,10 @@ retries are safe, conflicting re-judgments are rejected, and host controls lock 
   `currentTurnTeamId` from the room row in the host's init.
 
 ### 8. Refresh mid-question can restore a stale answer box
-- Already in `docs/TODO.md`: a player reconnecting mid-question can get a fresh answer box
-  even if the buzz window already closed. Worth validating buzz-window expiry on restore.
+
+**Resolved:** each buzz has an immutable database-generated response deadline. Player refreshes
+restore that exact 15-second or 40-second window against the shared server clock, and a database
+trigger rejects late, blank, or second submissions regardless of what the phone displays.
 
 ---
 

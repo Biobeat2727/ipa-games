@@ -495,6 +495,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     const { error } = await supabase
       .from('rooms').update({
         current_question_id: questionId,
+        buzz_opened_at: null,
         pending_question_id: null,
         pending_selection_team_id: null,
         pending_selection_session_id: null,
@@ -505,6 +506,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
       setRoom(prev => ({
         ...prev,
         current_question_id: questionId,
+        buzz_opened_at: null,
         pending_question_id: null,
         pending_selection_team_id: null,
         pending_selection_session_id: null,
@@ -538,6 +540,12 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
         // serverNow() (Ably server clock) — NOT Date.now() — so devices with skewed OS
         // clocks still reveal together; each player also computes its delay via serverNow().
         const revealAt = serverNow() + REVEAL_BUFFER_MS
+        const revealAtIso = new Date(revealAt).toISOString()
+        // Persist for reconnect recovery without delaying the timing-critical broadcast.
+        // If this write fails, reconnects fail closed instead of reopening the buzzer.
+        supabase.from('rooms').update({ buzz_opened_at: revealAtIso })
+          .eq('id', roomId).eq('current_question_id', questionId).then(() => {})
+        setRoom(prev => ({ ...prev, buzz_opened_at: revealAtIso }))
         activationStartTsRef.current = revealAt
         setBuzzOpenedAt(revealAt)
         // Timer is now player-side (10s from buzz) — no host judgeStartTime for regular questions
@@ -573,6 +581,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     const { error } = await supabase
       .from('rooms').update({
         current_question_id: null,
+        buzz_opened_at: null,
         pending_question_id: null,
         pending_selection_team_id: null,
         pending_selection_session_id: null,
@@ -585,6 +594,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
       setRoom(prev => ({
         ...prev,
         current_question_id: null,
+        buzz_opened_at: null,
         pending_question_id: null,
         pending_selection_team_id: null,
         pending_selection_session_id: null,
@@ -789,6 +799,8 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     }
     await supabase.from('rooms').update({
       status: 'final_jeopardy',
+      current_question_id: null,
+      buzz_opened_at: null,
       current_turn_team_id: null,
       pending_question_id: null,
       pending_selection_team_id: null,
@@ -797,7 +809,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
       pending_selection_wager: null,
     }).eq('id', roomId)
 
-    setRoom(prev => ({ ...prev, status: 'final_jeopardy' }))
+    setRoom(prev => ({ ...prev, status: 'final_jeopardy', current_question_id: null, buzz_opened_at: null }))
     setFjActiveTeamIds(top3ids)
     setFjCategoryName(catName)
     setFjQuestion(loadedQuestion)
@@ -919,7 +931,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
     const finalScores = new Map(data.map(row => [row.team_id, row.final_score]))
     setScores(finalScores)
-    setRoom(prev => ({ ...prev, status: 'finished', current_question_id: null }))
+    setRoom(prev => ({ ...prev, status: 'finished', current_question_id: null, buzz_opened_at: null }))
     setFjPhase('done')
     broadcastRef.current?.publish('game_over', {
       scores: data.map(row => ({ id: row.team_id, name: row.team_name, score: row.final_score })),

@@ -12,6 +12,7 @@
 - **Atomic regular/Double Tap judgment**: Correct/Wrong now saves buzz status, team score, and question completion in one authorized transaction. Buttons lock while saving, retries are safe, and conflicting duplicate judgments are rejected.
 - **Atomic Final Tap judgment**: Final Correct/Wrong now saves wager status and team score together using the locked database wager. Rapid taps cannot score twice, controls lock while saving, and connection-loss retries are safe.
 - **Reliable game-over transition**: the room only enters the winner screen after the authorized `finish_game` transaction confirms every submitted Final wager is judged. It returns authoritative scores, supports safe retries, and recovers after a host refresh between the last judgment and game over.
+- **Reconnect-safe response deadlines**: every buzz now receives an immutable database deadline (15s regular, 40s Double Tap). Reconnecting devices restore that exact deadline using the shared server clock, and the database rejects late, blank, or second submissions.
 
 ### PWA Stale Cache — 404 on Real Devices
 - `vercel.json` added: SPA rewrite + `no-store` on `sw.js`/`registerSW.js`/`index.html`
@@ -22,7 +23,6 @@
 
 ## 🟡 Bugs
 
-- **Refresh mid-question** — player reconnecting mid-question gets a fresh timer and answer box even if the buzz window has already closed. `loadQuestion` needs to validate buzz window expiry against the server before restoring answer UI.
 - **Player count on host lobby** — doesn't update in realtime when players leave teams. Needs testing to confirm current state. (Low priority)
 
 ---

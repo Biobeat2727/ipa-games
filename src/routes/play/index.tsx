@@ -508,18 +508,24 @@ export default function PlayView() {
         if (existingBuzz) {
           setHasBuzzed(true)
           setMyBuzzId(existingBuzz.id)
-          // Reconstruct timerPayload from server buzz time so answer/waiting screens render after refresh
+          // Restore the exact server-owned deadline. This preserves Double Tap's
+          // 40-second window and never grants fresh time after a reconnect.
           const team = myTeamRef.current
-          if (team) {
+          const duration = question?.is_double_tap ? 40 : 15
+          const deadline = new Date(existingBuzz.response_deadline_at).getTime()
+          if (team && existingBuzz.status === 'pending') {
             setTimerPayload({
-              start_timestamp: new Date(existingBuzz.buzzed_at).getTime(),
-              duration_seconds: 15,
+              start_timestamp: deadline - duration * 1000,
+              duration_seconds: duration,
               team_id: team.id,
               buzz_id: existingBuzz.id,
               team_name: team.name,
             })
           }
-          if (existingBuzz.response) { setResponseText(existingBuzz.response); setResponseSubmitted(true) }
+          if (existingBuzz.response) setResponseText(existingBuzz.response)
+          if (existingBuzz.response_submitted_at || existingBuzz.status !== 'pending') {
+            setResponseSubmitted(true)
+          }
         }
       }
       // Give the broadcast a moment to win the race before falling back to a DB fetch.
@@ -601,6 +607,7 @@ export default function PlayView() {
         setRoom(prev => prev ? {
           ...prev,
           current_question_id: question_id,
+          buzz_opened_at: buzz_opened_at ? new Date(buzz_opened_at).toISOString() : null,
           pending_question_id: null,
           pending_selection_team_id: null,
           pending_selection_session_id: null,
@@ -645,6 +652,7 @@ export default function PlayView() {
         setRoom(prev => prev ? {
           ...prev,
           current_question_id: question_id,
+          buzz_opened_at: buzz_opened_at ? new Date(buzz_opened_at).toISOString() : null,
           pending_question_id: null,
           pending_selection_team_id: null,
           pending_selection_session_id: null,
@@ -683,6 +691,7 @@ export default function PlayView() {
       setRoom(prev => prev ? {
         ...prev,
         current_question_id: null,
+        buzz_opened_at: null,
         pending_question_id: null,
         pending_selection_team_id: null,
         pending_selection_session_id: null,
@@ -954,10 +963,14 @@ export default function PlayView() {
     }
   }, [fjSubPhase, fjFinalScores])
 
-  // Fallback: if question loads but buzz_opened_at broadcast was missed (e.g. refresh or DB poll),
-  // restore from sessionStorage if it matches, otherwise start from now.
+  // Fallback: restore the persisted buzzer-open time. If an old room lacks one,
+  // fail closed instead of granting a fresh 25-second window after refresh.
   useEffect(() => {
     if (!activeQuestion || doubleTapTeamId || buzzWindowTs) return
+    if (room?.buzz_opened_at) {
+      setBuzzWindowTs(new Date(room.buzz_opened_at).getTime())
+      return
+    }
     try {
       const saved = sessionStorage.getItem('buzzWindow')
       if (saved) {
@@ -965,8 +978,8 @@ export default function PlayView() {
         if (questionId === activeQuestion.id) { setBuzzWindowTs(ts); return }
       }
     } catch {}
-    setBuzzWindowTs(serverNow()) // buzzWindowTs is server-clock time
-  }, [activeQuestion, doubleTapTeamId, buzzWindowTs])
+    setBuzzWindowTs(serverNow() - 25_000)
+  }, [activeQuestion, doubleTapTeamId, buzzWindowTs, room?.buzz_opened_at])
 
   // Fallback: if page was refreshed during DT wager phase, restore the appropriate screen from sessionStorage.
   useEffect(() => {
@@ -1011,7 +1024,7 @@ export default function PlayView() {
 
     const tick = () => {
       const remaining = Math.max(0, Math.floor(
-        (timerPayload.start_timestamp + timerPayload.duration_seconds * 1000 - Date.now()) / 1000
+        (timerPayload.start_timestamp + timerPayload.duration_seconds * 1000 - serverNow()) / 1000
       ))
       setTimeRemaining(remaining)
 
@@ -1042,7 +1055,7 @@ export default function PlayView() {
       setBuzzWasMine(created)
       // Set timer locally so the answer box appears immediately without waiting for host broadcast
       setTimerPayload({
-        start_timestamp: new Date(buzz.buzzed_at).getTime(),
+        start_timestamp: new Date(buzz.response_deadline_at).getTime() - 40_000,
         duration_seconds: 40,
         team_id: team.id,
         buzz_id: buzz.id,
@@ -1236,7 +1249,7 @@ export default function PlayView() {
 
     if (!created) {
       setTimerPayload({
-        start_timestamp: new Date(buzz.buzzed_at).getTime(),
+        start_timestamp: new Date(buzz.response_deadline_at).getTime() - 15_000,
         duration_seconds: 15,
         team_id: myTeam.id,
         buzz_id: buzz.id,
@@ -1244,8 +1257,8 @@ export default function PlayView() {
       })
       return
     }
-    // Start 10s answer timer locally and broadcast for projector
-    const startTs = Date.now()
+    // Start the server-deadline answer timer locally and broadcast for teammates/projector
+    const startTs = new Date(buzz.response_deadline_at).getTime() - 15_000
     const payload: TimerPayload = {
       start_timestamp: startTs,
       duration_seconds: 15,
@@ -1291,6 +1304,9 @@ export default function PlayView() {
 
     if (submitError) {
       responseSubmittedRef.current = false
+      if (submitError.message.includes('Response window has closed')) {
+        setTimeRemaining(0)
+      }
       return
     }
 

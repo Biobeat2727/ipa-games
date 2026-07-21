@@ -21,6 +21,7 @@ export type Room = {
   host_id: string
   status: RoomStatus
   current_question_id: string | null
+  buzz_opened_at?: string | null
   current_turn_team_id?: string | null
   pending_question_id?: string | null
   pending_selection_team_id?: string | null
@@ -83,6 +84,7 @@ export type Buzz = {
   buzzed_at: string // server-generated — never use client time for ordering
   response: string | null
   response_submitted_at: string | null
+  response_deadline_at: string
   status: BuzzStatus
 }
 
@@ -154,7 +156,7 @@ export type Database = {
       }
       buzzes: {
         Row: Buzz
-        Insert: Omit<Buzz, 'id' | 'buzzed_at' | 'response' | 'response_submitted_at'> & { id?: string; buzzed_at?: string; response?: string | null; response_submitted_at?: string | null }
+        Insert: Omit<Buzz, 'id' | 'buzzed_at' | 'response' | 'response_submitted_at' | 'response_deadline_at'> & { id?: string; buzzed_at?: string; response?: string | null; response_submitted_at?: string | null }
         Update: Partial<Omit<Buzz, 'id'>>
         Relationships: []
       }

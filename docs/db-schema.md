@@ -8,6 +8,7 @@
 | host_id | uuid | Host session reference |
 | status | enum | `lobby`, `round_1`, `round_2`, `final_jeopardy`, `finished` |
 | current_question_id | uuid, nullable | Set when a question is active |
+| buzz_opened_at | timestamptz, nullable | Shared server-clock start of the active 25s buzzer window |
 | current_turn_team_id | uuid, nullable | Team currently allowed to select a clue |
 | pending_question_id | uuid, nullable | Atomic first-tap-wins clue claim during preview |
 | pending_selection_team_id | uuid, nullable | Team that owns the pending clue claim |
@@ -67,11 +68,14 @@
 | buzzed_at | timestamptz | Server-generated; used for queue ordering |
 | response | text, nullable | Typed answer from responding team |
 | response_submitted_at | timestamp, nullable | |
+| response_deadline_at | timestamptz | Immutable server deadline: buzz time + 15s, or +40s for Double Tap |
 | status | enum | `pending`, `correct`, `wrong`, `expired`, `skipped` |
 
 `buzzes_one_per_team_question` allows only one buzz per team/question. Host Correct/Wrong
 judgments use the authenticated `judge_buzz` database function so buzz status, score, and
 question completion commit together and duplicate host taps cannot score twice.
+The `buzz_response_deadline_guard` trigger creates the response deadline, replaces phone-supplied
+submission timestamps with database time, and rejects blank, duplicate, or late responses.
 
 ## `wagers` (Final Jeopardy only)
 | Column | Type | Notes |

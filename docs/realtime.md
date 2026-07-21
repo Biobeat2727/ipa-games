@@ -60,13 +60,16 @@ Additional scoped channels:
 
 ## Timer Logic
 
-Timers use sender's `Date.now()` as `start_timestamp`. All clients compute remaining time as:
+Display timers carry a shared timestamp and compare it with `serverNow()`, which is corrected
+against Ably server time:
 
 ```
-remaining = Math.max(0, start_timestamp + duration_ms - Date.now())
+remaining = Math.max(0, start_timestamp + duration_ms - serverNow())
 ```
 
-This stays in sync regardless of when a client joined. The 10s question preview uses `startTs + 10_000`. The 30s buzz timer uses `start_timestamp + duration_seconds * 1000`.
+Regular and Double Tap answer windows additionally persist `buzzes.response_deadline_at` in
+Postgres. Reconnecting phones derive the display timer from that immutable deadline, while a
+database trigger enforces the deadline using database time even if a phone clock or UI is stale.
 
 ---
 

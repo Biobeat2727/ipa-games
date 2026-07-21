@@ -57,7 +57,9 @@ checking → no_lobby → join_lobby → select_team → lobby → game
 - After 10s: question is activated (`rooms.current_question_id` updated + `question_activated` broadcast)
 - Buzz button goes live on all player screens simultaneously
 - Buzzes stored with server timestamp → host sees chronological queue
-- First team in queue: text input + `timer_start` broadcast (15s countdown); ALL teammates on that team see the answer box simultaneously
+- First team in queue: the buzz row receives an immutable server deadline (15s regular,
+  40s Double Tap); `timer_start` displays that shared window on every teammate's phone
+- Reconnects restore the same database deadline and late/duplicate submissions are rejected
 - Host judges: **Correct** or **Wrong**
   - The judgment is one authenticated database transaction; a retry is idempotent and
     conflicting/double judgments are rejected
