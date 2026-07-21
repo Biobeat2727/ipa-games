@@ -11,6 +11,7 @@
 - **Atomic clue selection**: the first valid teammate tap owns the pending clue; simultaneous picks converge on one clue, Double Tap wagering stays with the winning device, and the host can Undo Pick.
 - **Atomic regular/Double Tap judgment**: Correct/Wrong now saves buzz status, team score, and question completion in one authorized transaction. Buttons lock while saving, retries are safe, and conflicting duplicate judgments are rejected.
 - **Atomic Final Tap judgment**: Final Correct/Wrong now saves wager status and team score together using the locked database wager. Rapid taps cannot score twice, controls lock while saving, and connection-loss retries are safe.
+- **Reliable game-over transition**: the room only enters the winner screen after the authorized `finish_game` transaction confirms every submitted Final wager is judged. It returns authoritative scores, supports safe retries, and recovers after a host refresh between the last judgment and game over.
 
 ### PWA Stale Cache — 404 on Real Devices
 - `vercel.json` added: SPA rewrite + `no-store` on `sw.js`/`registerSW.js`/`index.html`

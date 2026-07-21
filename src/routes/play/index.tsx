@@ -425,14 +425,31 @@ export default function PlayView() {
     myTeam?.id,
   ])
 
-  // Kick: if room becomes 'finished' while player is in a pre-game phase, send them back
+  // A persisted finished room is the fallback when the game_over broadcast is missed.
+  // Pre-game visitors leave the old room; active players recover the final scoreboard.
   useEffect(() => {
     if (room?.status !== 'finished') return
     if (['join_lobby', 'select_team', 'lobby'].includes(phase)) {
       clearPlayerSession()
       setRoom(null); setMyTeam(null); setTeams([])
       setPhase('no_lobby')
+      return
     }
+
+    if (phase !== 'game') return
+    let cancelled = false
+    ;(async () => {
+      const { data } = await supabase
+        .from('teams')
+        .select('id, name, score')
+        .eq('room_id', room.id)
+      if (cancelled || !data) return
+      setFjFinalScores(data)
+      const mine = data.find(t => t.id === myTeamRef.current?.id)
+      if (mine) setMyScore(mine.score)
+      setFjSubPhase('done')
+    })()
+    return () => { cancelled = true }
   }, [room?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Kick via broadcast: host sends lobby_closed on the room channel

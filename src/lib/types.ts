@@ -229,6 +229,16 @@ export type Database = {
           new_score: number
         }>
       }
+      finish_game: {
+        Args: {
+          p_room_id: string
+        }
+        Returns: Array<{
+          team_id: string
+          team_name: string
+          final_score: number
+        }>
+      }
     }
     Enums: {
       room_status: RoomStatus

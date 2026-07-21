@@ -119,7 +119,11 @@ checking → no_lobby → join_lobby → select_team → lobby → game
 10. Host reviews each response, clicks Correct/Wrong → `judge_final_wager` commits wager
     status and score atomically → `fj_answer_judged` broadcast
     - Controls lock while saving; same-result retries are safe and cannot score twice
-11. After last team reviewed → `finishGame()` → `game_over` broadcast with final scores
+11. After the last team is reviewed, `finish_game` atomically marks the room finished and
+    returns authoritative scores → host enters `done` → `game_over` broadcast
+    - A failed completion stays on review with **Retry Finish**; retries are idempotent
+    - Host refresh after the last judgment detects that no wagers remain and completes safely
+    - Players that miss `game_over` recover the final scores from the persisted `finished` room
 
 ### Auto-end behavior
 - Host watches `fjWagers` (via postgres_changes on `wagers` table)

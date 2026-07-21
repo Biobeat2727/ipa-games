@@ -75,12 +75,15 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   const [fjJudgmentSaving, setFjJudgmentSaving] = useState(false)
   const [fjJudgmentError, setFjJudgmentError] = useState('')
   const [fjJudgmentRetry, setFjJudgmentRetry] = useState<'correct' | 'wrong' | null>(null)
+  const [gameFinishSaving, setGameFinishSaving] = useState(false)
+  const [gameFinishError, setGameFinishError] = useState('')
   const [fjTimerStart, setFjTimerStart]     = useState<number | null>(null)
   const [fjTimerSeconds, setFjTimerSeconds] = useState(90)
   const [fjTimerExpired, setFjTimerExpired] = useState(false)
   const fjActiveTeamIdsRef   = useRef<Set<string>>(new Set())
   const fjExpiryInProgress   = useRef(false)
   const fjJudgmentInFlightRef = useRef(false)
+  const gameFinishInFlightRef = useRef(false)
 
   // Score adjustment
   const [editingScoreTeamId, setEditingScoreTeamId] = useState<string | null>(null)
@@ -419,8 +422,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
         const w = wagers.find(w => w.team_id === tid)
         return !w || w.status === 'pending'
       })
-      setFjReviewIdx(firstPending >= 0 ? firstPending : order.length - 1)
+      setFjReviewIdx(firstPending >= 0 ? firstPending : Math.max(order.length - 1, 0))
       setFjPhase('review')
+      if (firstPending < 0) await finishGame()
     })()
   }, [room.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -863,7 +867,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
     const nextIdx = reviewIdx + 1
     if (nextIdx >= revealOrder.length) {
-      finishGame(updatedScores)
+      await finishGame()
     } else {
       setFjReviewIdx(nextIdx)
       const nextId = revealOrder[nextIdx]
@@ -883,10 +887,10 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   // A team in the reveal order with NO wager row (players never locked one in —
   // dead phone, wifi drop, walked out) would otherwise strand the review on
   // "Loading review…" with no way forward. Skip them: no score change, move on.
-  function skipFJTeam() {
+  async function skipFJTeam() {
     const nextIdx = fjReviewIdx + 1
     if (nextIdx >= fjRevealOrder.length) {
-      finishGame(new Map(scores))
+      await finishGame()
     } else {
       setFjReviewIdx(nextIdx)
       const nextId = fjRevealOrder[nextIdx]
@@ -895,20 +899,35 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     }
   }
 
-  async function finishGame(finalScores: Map<string, number>) {
-    await supabase.from('rooms').update({
-      status: 'finished',
-      current_question_id: null,
-      current_turn_team_id: null,
-      pending_question_id: null,
-      pending_selection_team_id: null,
-      pending_selection_session_id: null,
-      pending_selection_claimed_at: null,
-      pending_selection_wager: null,
-    }).eq('id', roomId)
+  async function finishGame() {
+    if (gameFinishInFlightRef.current) return
+    gameFinishInFlightRef.current = true
+    setGameFinishSaving(true)
+    setGameFinishError('')
+
+    const { data, error } = await supabase.rpc('finish_game', { p_room_id: roomId })
+    if (error || !data) {
+      gameFinishInFlightRef.current = false
+      setGameFinishSaving(false)
+      setGameFinishError(
+        error?.message === 'A Final wager still needs judgment'
+          ? error.message
+          : "Couldn't confirm game over. Retrying is safe and will not change any scores."
+      )
+      return
+    }
+
+    const finalScores = new Map(data.map(row => [row.team_id, row.final_score]))
+    setScores(finalScores)
     setRoom(prev => ({ ...prev, status: 'finished', current_question_id: null }))
     setFjPhase('done')
-    broadcastRef.current?.publish('game_over', { scores: teams.map(t => ({ id: t.id, name: t.name, score: finalScores.get(t.id) ?? t.score })) })
+    broadcastRef.current?.publish('game_over', {
+      scores: data.map(row => ({ id: row.team_id, name: row.team_name, score: row.final_score })),
+    })
+
+    gameFinishInFlightRef.current = false
+    setGameFinishSaving(false)
+    setGameFinishError('')
   }
 
   async function commitScoreEdit(teamId: string) {
@@ -1316,11 +1335,33 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                     Never locked in a wager — nothing to judge. Their score stays as-is.
                   </p>
                 </div>
+                {(gameFinishSaving || gameFinishError) && (
+                  <div
+                    role={gameFinishError ? 'alert' : 'status'}
+                    className={`rounded-xl border p-3 ${gameFinishError
+                      ? 'border-red-500/50 bg-red-950/60'
+                      : 'border-yellow-500/40 bg-yellow-950/40'}`}
+                  >
+                    <p className={`text-sm font-semibold ${gameFinishError ? 'text-red-200' : 'text-yellow-200'}`}>
+                      {gameFinishError || 'Confirming final scores and finishing the game…'}
+                    </p>
+                    {gameFinishError && (
+                      <button
+                        onClick={finishGame}
+                        disabled={gameFinishSaving}
+                        className="mt-2 rounded-lg bg-red-200 px-3 py-1.5 text-sm font-black text-red-950 hover:bg-white disabled:opacity-50"
+                      >
+                        Retry Finish
+                      </button>
+                    )}
+                  </div>
+                )}
                 <button
                   onClick={skipFJTeam}
-                  className="py-5 rounded-2xl font-black text-xl bg-gray-800 hover:bg-gray-700 active:bg-gray-900 transition-colors"
+                  disabled={gameFinishSaving || !!gameFinishError}
+                  className="py-5 rounded-2xl font-black text-xl bg-gray-800 hover:bg-gray-700 active:bg-gray-900 disabled:cursor-wait disabled:opacity-50 transition-colors"
                 >
-                  Skip Team →
+                  {gameFinishSaving ? 'Finishing Game…' : 'Skip Team →'}
                 </button>
               </div>
             )
@@ -1361,10 +1402,31 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                     )}
                   </div>
                 )}
+                {(gameFinishSaving || gameFinishError) && (
+                  <div
+                    role={gameFinishError ? 'alert' : 'status'}
+                    className={`rounded-xl border p-3 ${gameFinishError
+                      ? 'border-red-500/50 bg-red-950/60'
+                      : 'border-yellow-500/40 bg-yellow-950/40'}`}
+                  >
+                    <p className={`text-sm font-semibold ${gameFinishError ? 'text-red-200' : 'text-yellow-200'}`}>
+                      {gameFinishError || 'Confirming final scores and finishing the game…'}
+                    </p>
+                    {gameFinishError && (
+                      <button
+                        onClick={finishGame}
+                        disabled={gameFinishSaving}
+                        className="mt-2 rounded-lg bg-red-200 px-3 py-1.5 text-sm font-black text-red-950 hover:bg-white disabled:opacity-50"
+                      >
+                        Retry Finish
+                      </button>
+                    )}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => handleFJWrong(reviewWager)}
-                    disabled={fjJudgmentSaving}
+                    disabled={fjJudgmentSaving || gameFinishSaving || !!gameFinishError}
                     className="py-5 rounded-2xl font-black text-xl bg-red-700 hover:bg-red-600 active:bg-red-800 disabled:cursor-wait disabled:opacity-50 transition-colors"
                   >
                     {fjJudgmentSaving && fjJudgmentRetry === 'wrong'
@@ -1373,7 +1435,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                   </button>
                   <button
                     onClick={() => handleFJCorrect(reviewWager)}
-                    disabled={fjJudgmentSaving}
+                    disabled={fjJudgmentSaving || gameFinishSaving || !!gameFinishError}
                     className="py-5 rounded-2xl font-black text-xl bg-green-600 hover:bg-green-500 active:bg-green-700 disabled:cursor-wait disabled:opacity-50 transition-colors"
                   >
                     {fjJudgmentSaving && fjJudgmentRetry === 'correct'

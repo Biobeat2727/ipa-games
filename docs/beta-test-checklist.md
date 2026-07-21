@@ -291,6 +291,15 @@ Prepare at least four teams so elimination behavior can be tested.
   wager changes the score exactly once and review advances only one team.
 - [ ] **FNL-22 — Failed Final save and safe retry:** Interrupt the host's connection while
   judging, restore it, and use Try Again. The wager applies exactly once, then review advances.
+- [ ] **FNL-23 — Failed game-over save:** Interrupt the host connection as the final team is
+  judged. The host must not show a false winner screen; after reconnecting, Retry Finish uses
+  the saved scores and all screens reach game over.
+- [ ] **FNL-24 — Refresh between judgment and game over:** Refresh the host immediately after
+  the last score saves. The host detects that review is complete and restores the winner screen
+  without applying any wager again.
+- [ ] **FNL-25 — Missed game-over broadcast:** Disconnect one player as the host finishes, then
+  reconnect without replaying the broadcast. The phone uses the finished room state to recover
+  the final scores and winner screen.
 
 ---
 

@@ -87,3 +87,7 @@ question completion commit together and duplicate host taps cannot score twice.
 Final judgments use the authenticated `judge_final_wager` database function. It reads the
 locked wager amount from the database and commits wager status and score together. Repeating
 the same judgment is a safe no-op; a conflicting judgment is rejected.
+
+The authenticated `finish_game` function rejects completion while an active team's submitted
+wager is still pending, clears transient room fields, and returns authoritative final scores.
+Calling it again after a lost response is safe.
