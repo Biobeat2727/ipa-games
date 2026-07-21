@@ -156,6 +156,8 @@ export default function PlayView() {
   const [fjQuestion, setFjQuestion]           = useState<QuestionPublic | null>(null)
   const [fjResponse, setFjResponse]           = useState('')
   const [fjResponseSubmitted, setFjResponseSubmitted] = useState(false)
+  const [fjResponseSubmitting, setFjResponseSubmitting] = useState(false)
+  const [fjResponseError, setFjResponseError] = useState('')
   const [fjResponseDeadline, setFjResponseDeadline] = useState<number | null>(null)
   const [fjTimeRemaining, setFjTimeRemaining] = useState<number | null>(null)
   const [fjFinalScores, setFjFinalScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
@@ -165,6 +167,8 @@ export default function PlayView() {
 
   const fjResponseRef = useRef('')
   const fjWagerIdRef  = useRef<string | null>(null)
+  const fjResponseSubmitInFlightRef = useRef(false)
+  const fjAutoSubmitStartedRef = useRef(false)
   useEffect(() => { fjResponseRef.current = fjResponse }, [fjResponse])
   useEffect(() => { fjWagerIdRef.current = fjWagerId }, [fjWagerId])
 
@@ -200,6 +204,49 @@ export default function PlayView() {
   useEffect(() => { roomRef.current = room }, [room])
   useEffect(() => { currentTurnTeamIdRef.current = currentTurnTeamId }, [currentTurnTeamId])
   useEffect(() => { phaseRef.current = phase }, [phase])
+
+  const submitFinalResponse = useCallback(async (response: string) => {
+    const team = myTeamRef.current
+    const currentRoom = roomRef.current
+    if (!team || !currentRoom || fjResponseSubmitInFlightRef.current) return false
+
+    fjResponseSubmitInFlightRef.current = true
+    setFjResponseSubmitting(true)
+    setFjResponseError('')
+
+    try {
+      const { data, error } = await supabase.rpc('submit_final_response', {
+        p_room_id: currentRoom.id,
+        p_team_id: team.id,
+        p_session_id: getSessionId(),
+        p_response: response.trim(),
+      })
+
+      if (error) {
+        const timedOut = error.message.includes('window has closed')
+          || error.message.includes('window is not open')
+        setFjResponseError(timedOut
+          ? 'Time expired before your response reached the server.'
+          : "Couldn't lock your response. Check your connection and try again.")
+        if (timedOut) setFjTimeRemaining(0)
+        return false
+      }
+
+      const saved = data?.[0]
+      if (!saved) {
+        setFjResponseError("Couldn't confirm your response. Please try again.")
+        return false
+      }
+
+      setFjWagerId(saved.wager_id)
+      setFjResponse(saved.saved_response ?? '')
+      setFjResponseSubmitted(true)
+      return true
+    } finally {
+      fjResponseSubmitInFlightRef.current = false
+      setFjResponseSubmitting(false)
+    }
+  }, [])
 
   useEffect(() => () => {
     if (selectionNoticeTimerRef.current) clearTimeout(selectionNoticeTimerRef.current)
@@ -823,8 +870,10 @@ export default function PlayView() {
       if (status === 'final_jeopardy') {
         setFjCategoryName(fj_category ?? 'Final Jeopardy')
         setFjWagerInput(''); setFjWagerId(null); setFjLockedWagerAmount(null); setFjQuestion(null)
-        setFjResponse(''); setFjResponseSubmitted(false)
+        setFjResponse(''); setFjResponseSubmitted(false); setFjResponseSubmitting(false); setFjResponseError('')
         setFjResponseDeadline(null); setFjTimeRemaining(null); setFjFinalScores([])
+        fjResponseSubmitInFlightRef.current = false
+        fjAutoSubmitStartedRef.current = false
         setFjSubPhase('incoming')
       }
     })
@@ -837,6 +886,8 @@ export default function PlayView() {
       }
       const { data: q } = await supabase.from('questions_public').select().eq('id', question_id).single()
       setFjQuestion(q ?? null)
+      setFjResponseError('')
+      fjAutoSubmitStartedRef.current = false
       setFjResponseDeadline(response_deadline_at ?? start_ts + duration * 1000)
       setFjTimeRemaining(duration)
       setFjSubPhase('question')
@@ -875,15 +926,7 @@ export default function PlayView() {
     })
     ch.subscribe('fj_timer_expired', () => {
       // Auto-submit whatever the player has typed
-      const wagerId = fjWagerIdRef.current
-      const resp    = fjResponseRef.current.trim()
-      if (wagerId) {
-        supabase.from('wagers').update({
-          response: resp || null,
-          submitted_at: new Date().toISOString(),
-        }).eq('id', wagerId).is('submitted_at', null).then(() => {})
-      }
-      setFjResponseSubmitted(true)
+      void submitFinalResponse(fjResponseRef.current)
       setFjSubPhase('reviewing')
     })
     ch.subscribe('game_over', ({ data }) => {
@@ -987,8 +1030,10 @@ export default function PlayView() {
         if (cancelled) return
         const deadline = new Date(room.final_response_deadline_at).getTime()
         setFjQuestion(question ?? null)
+        setFjResponseError('')
+        fjAutoSubmitStartedRef.current = false
         setFjResponseDeadline(deadline)
-        setFjTimeRemaining(Math.max(0, Math.floor((deadline - serverNow()) / 1000)))
+        setFjTimeRemaining(Math.max(0, Math.ceil((deadline - serverNow()) / 1000)))
         setFjSubPhase(deadline > serverNow() ? 'question' : 'reviewing')
         return
       }
@@ -1124,20 +1169,37 @@ export default function PlayView() {
     })()
   }, [activeQuestion, doubleTapTeamId, myTeam?.id]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // FJ 90-second countdown
+  // FJ 90-second countdown. Lock the current text just before the database deadline so
+  // the request can arrive on time; Supabase still decides whether it was accepted.
   useEffect(() => {
     if (fjSubPhase !== 'question' || fjResponseDeadline === null) return
     const tick = () => {
-      const remaining = Math.max(0, Math.floor(
-        (fjResponseDeadline - serverNow()) / 1000
-      ))
+      const millisecondsRemaining = fjResponseDeadline - serverNow()
+      const remaining = Math.max(0, Math.ceil(millisecondsRemaining / 1000))
       setFjTimeRemaining(remaining)
-      if (remaining === 0) clearInterval(id)
+      if (
+        millisecondsRemaining > 0
+        && millisecondsRemaining <= 750
+        && !fjResponseSubmitted
+        && !fjAutoSubmitStartedRef.current
+      ) {
+        fjAutoSubmitStartedRef.current = true
+        void submitFinalResponse(fjResponseRef.current).then(saved => {
+          if (!saved && fjResponseDeadline > serverNow()) {
+            fjAutoSubmitStartedRef.current = false
+          }
+        })
+      }
+      if (millisecondsRemaining <= 0) {
+        setFjSubPhase('reviewing')
+        return true
+      }
+      return false
     }
-    tick()
-    const id = setInterval(tick, 500)
-    return () => clearInterval(id)
-  }, [fjSubPhase, fjResponseDeadline])
+    let id: ReturnType<typeof setInterval> | null = null
+    if (!tick()) id = setInterval(tick, 250)
+    return () => { if (id) clearInterval(id) }
+  }, [fjSubPhase, fjResponseDeadline, fjResponseSubmitted, submitFinalResponse])
 
   // Subscribe to my buzz status changes (for correct/wrong feedback)
   useEffect(() => {
@@ -1577,24 +1639,8 @@ export default function PlayView() {
   }
 
   async function handleSubmitFJResponse() {
-    if (!fjResponse.trim() || !myTeam || !room) return
-    let wagerId = fjWagerId
-    if (!wagerId) {
-      // Teammate who didn't submit the wager — fetch it from DB
-      const { data: w } = await supabase.from('wagers').select('id').eq('team_id', myTeam.id).eq('room_id', room.id).maybeSingle()
-      if (!w) return
-      wagerId = w.id
-      setFjWagerId(w.id)
-    }
-    const { data: submitted } = await supabase.from('wagers').update({
-      response: fjResponse.trim(),
-      submitted_at: new Date().toISOString(),
-    }).eq('id', wagerId).is('submitted_at', null).select().maybeSingle()
-    if (!submitted) {
-      const { data: existing } = await supabase.from('wagers').select('response').eq('id', wagerId).single()
-      if (existing?.response) setFjResponse(existing.response)
-    }
-    setFjResponseSubmitted(true)
+    if (!fjResponse.trim()) return
+    await submitFinalResponse(fjResponse)
   }
 
   // ── Derived ───────────────────────────────────────────────
@@ -1887,15 +1933,20 @@ export default function PlayView() {
                 placeholder="Type your response…"
                 value={fjResponse}
                 onChange={e => setFjResponse(e.target.value)}
+                disabled={fjResponseSubmitting}
+                maxLength={500}
                 rows={3}
                 className="w-full bg-gray-800 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-yellow-400 resize-none text-lg mb-4"
               />
+              {fjResponseError && (
+                <p role="alert" className="text-red-400 text-sm text-center mb-3">{fjResponseError}</p>
+              )}
               <button
                 onClick={handleSubmitFJResponse}
-                disabled={!fjResponse.trim()}
+                disabled={!fjResponse.trim() || fjResponseSubmitting}
                 className="w-full py-4 rounded-2xl font-black text-lg bg-yellow-400 text-gray-950 disabled:opacity-30"
               >
-                Submit Response
+                {fjResponseSubmitting ? 'Locking…' : 'Submit Response'}
               </button>
             </>
           )}

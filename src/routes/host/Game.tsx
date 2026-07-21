@@ -333,9 +333,10 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   useEffect(() => {
     if (fjPhase !== 'question' || fjResponseDeadline === null) return
     const tick = () => {
-      const remaining = Math.max(0, Math.floor((fjResponseDeadline - serverNow()) / 1000))
+      const millisecondsRemaining = fjResponseDeadline - serverNow()
+      const remaining = Math.max(0, Math.ceil(millisecondsRemaining / 1000))
       setFjTimerSeconds(remaining)
-      if (remaining === 0) setFjTimerExpired(true)
+      if (millisecondsRemaining <= 0) setFjTimerExpired(true)
     }
     tick()
     const id = setInterval(tick, 500)

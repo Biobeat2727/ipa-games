@@ -88,13 +88,18 @@ submission timestamps with database time, and rejects blank, duplicate, or late 
 | team_id | uuid → teams | |
 | room_id | uuid → rooms | |
 | amount | integer | Validated to be 0–current score |
-| response | text, nullable | FJ written response |
+| response | text, nullable | FJ written response, maximum 500 characters |
 | status | enum | `pending`, `correct`, `wrong` |
-| submitted_at | timestamp, nullable | Set on lock-in or timer expiry |
+| submitted_at | timestamp, nullable | Set by the database when the first team response is accepted |
 
-Final judgments use the authenticated `judge_final_wager` database function. It reads the
-locked wager amount from the database and commits wager status and score together. Repeating
-the same judgment is a safe no-op; a conflicting judgment is rejected.
+Player responses use `submit_final_response`. The function verifies the phone's player session,
+active team, room phase, and immutable Final deadline before locking the first response with a
+database timestamp. Duplicate teammate submissions return the already-saved response without
+overwriting it, and anonymous clients cannot update wager rows directly.
+
+Final judgments use the authenticated `judge_final_wager` database function. It reads the locked
+wager amount from the database and commits wager status and score together. Repeating the same
+judgment is a safe no-op; a conflicting judgment is rejected.
 
 The authenticated `finish_game` function rejects completion while an active team's submitted
 wager is still pending, clears transient room fields, and returns authoritative final scores.

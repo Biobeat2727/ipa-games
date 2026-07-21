@@ -116,10 +116,12 @@ checking → no_lobby → join_lobby → select_team → lobby → game
    and a database-generated 90-second deadline, then the host broadcasts
    `fj_question_revealed { question_id, response_deadline_at, duration: 90 }`
 7. Players see question + 90s response timer
-8. Players submit response → `wagers.response` updated in DB
+8. Players submit response → `submit_final_response` verifies the player session, active team,
+   Final phase, and database deadline, then locks the team's first response
 9. Timer ends (or auto-ends when all teams have responses) → host broadcasts `fj_timer_expired`
    - If all responses already in DB, skip the 1500ms wait
-   - Players auto-submit remaining responses on `fj_timer_expired`
+   - Phones attempt to lock their current text just before the deadline; the expiry broadcast is
+     an idempotent fallback and cannot create a late response
    - Host builds reveal order (ascending by score), persists `final_phase = 'review'` and
      `final_review_team_id`, then enters `review`
 10. Host reviews each response, clicks Correct/Wrong → `judge_final_wager` commits wager
@@ -136,6 +138,8 @@ checking → no_lobby → join_lobby → select_team → lobby → game
 - The question is never queried by public clients before `final_phase = 'question'`.
 - Every timer compares the immutable database deadline with `serverNow()`; refreshes cannot
   restart or extend the response window.
+- `submit_final_response` compares arrival time with the database deadline, so a slow or altered
+  phone clock cannot extend the response window.
 - During review, `final_review_team_id` lets a refreshed projector restore the exact answer card.
 
 ### Auto-end behavior

@@ -19,6 +19,10 @@
 - **Atomic Final Tap judgment**: Final Correct/Wrong now saves wager status and team score together using the locked database wager. Rapid taps cannot score twice, controls lock while saving, and connection-loss retries are safe.
 - **Reliable game-over transition**: the room only enters the winner screen after the authorized `finish_game` transaction confirms every submitted Final wager is judged. It returns authoritative scores, supports safe retries, and recovers after a host refresh between the last judgment and game over.
 - **Reconnect-safe response deadlines**: every buzz now receives an immutable database deadline (15s regular, 40s Double Tap). Reconnecting devices restore that exact deadline using the shared server clock, and the database rejects late, blank, or second submissions.
+- **Server-authoritative Final Tap responses**: phones submit through a session-validated database
+  function that enforces the persisted Final deadline and locks the first teammate response. Direct
+  anonymous wager updates are removed, retries are idempotent, and countdown rounding no longer
+  closes Final Tap early.
 
 ### PWA Stale Cache — 404 on Real Devices
 - `vercel.json` added: SPA rewrite + `no-store` on `sw.js`/`registerSW.js`/`index.html`

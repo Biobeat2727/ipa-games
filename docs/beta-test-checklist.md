@@ -315,6 +315,15 @@ Prepare at least four teams so elimination behavior can be tested.
   judgment. The host restores that team (or the first still-unjudged team) without scoring twice.
 - [ ] **FNL-28 — Projector refresh during review:** Refresh while a response card is displayed.
   The projector restores the same team and response without briefly revealing the Final clue.
+- [ ] **FNL-29 — Late Final response rejected:** Disconnect a phone with a response typed until
+  after the timer reaches zero, reconnect, and attempt submission. The phone cannot change the
+  team's saved response and the host never receives a late answer.
+- [ ] **FNL-30 — Simultaneous teammate responses:** Have two teammates enter different Final
+  responses and submit at nearly the same moment. Both phones settle on the same first
+  server-accepted response, and neither can overwrite it.
+- [ ] **FNL-31 — Final response connection retry:** Interrupt a phone's connection during a
+  manual Final submission while time remains. It shows a retry message instead of a false lock;
+  after reconnecting, one retry locks exactly one response.
 
 ---
 

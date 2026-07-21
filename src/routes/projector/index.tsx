@@ -464,14 +464,18 @@ export default function ProjectorView() {
 
   useEffect(() => {
     if (fjResponseDeadline === null) return
+    let id: ReturnType<typeof setInterval> | null = null
     const tick = () => {
-      const remaining = Math.max(0, Math.floor((fjResponseDeadline - serverNow()) / 1000))
+      const remaining = Math.max(0, Math.ceil((fjResponseDeadline - serverNow()) / 1000))
       setFjTimeRemaining(remaining)
-      if (remaining === 0) clearInterval(id)
+      if (remaining === 0 && id) {
+        clearInterval(id)
+        id = null
+      }
+      return remaining
     }
-    tick()
-    const id = setInterval(tick, 500)
-    return () => clearInterval(id)
+    if (tick() > 0) id = setInterval(tick, 500)
+    return () => { if (id) clearInterval(id) }
   }, [fjResponseDeadline])
 
 

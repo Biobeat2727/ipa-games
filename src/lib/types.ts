@@ -256,6 +256,20 @@ export type Database = {
           response_deadline_at: string
         }>
       }
+      submit_final_response: {
+        Args: {
+          p_room_id: string
+          p_team_id: string
+          p_session_id: string
+          p_response: string
+        }
+        Returns: Array<{
+          accepted: boolean
+          wager_id: string
+          saved_response: string | null
+          response_submitted_at: string
+        }>
+      }
     }
     Enums: {
       room_status: RoomStatus
