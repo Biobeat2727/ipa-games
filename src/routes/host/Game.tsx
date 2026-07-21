@@ -72,11 +72,15 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   const [fjWagers, setFjWagers]             = useState<Wager[]>([])
   const [fjRevealOrder, setFjRevealOrder]   = useState<string[]>([])
   const [fjReviewIdx, setFjReviewIdx]       = useState(0)
+  const [fjJudgmentSaving, setFjJudgmentSaving] = useState(false)
+  const [fjJudgmentError, setFjJudgmentError] = useState('')
+  const [fjJudgmentRetry, setFjJudgmentRetry] = useState<'correct' | 'wrong' | null>(null)
   const [fjTimerStart, setFjTimerStart]     = useState<number | null>(null)
   const [fjTimerSeconds, setFjTimerSeconds] = useState(90)
   const [fjTimerExpired, setFjTimerExpired] = useState(false)
   const fjActiveTeamIdsRef   = useRef<Set<string>>(new Set())
   const fjExpiryInProgress   = useRef(false)
+  const fjJudgmentInFlightRef = useRef(false)
 
   // Score adjustment
   const [editingScoreTeamId, setEditingScoreTeamId] = useState<string | null>(null)
@@ -680,11 +684,13 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     const result = data?.[0]
 
     if (error || !result) {
+      const conflict = error?.message?.includes('already judged') ?? false
       judgmentInFlightRef.current = false
       setJudgmentSaving(false)
+      setJudgmentRetry(conflict ? null : outcome)
       setJudgmentError(
-        error?.message?.includes('already judged')
-          ? error.message
+        conflict
+          ? `${error?.message}. Reload the host screen to use the saved result.`
           : "Couldn't confirm that judgment. Retrying is safe and cannot score the buzz twice."
       )
       return
@@ -808,20 +814,52 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     broadcastRef.current?.publish('fj_question_revealed', { question_id: fjQuestion.id, start_ts: startTs, duration: 90 })
   }
 
-  async function handleFJCorrect(wager: Wager) {
+  async function submitFJJudgment(wager: Wager, outcome: 'correct' | 'wrong') {
+    if (fjJudgmentInFlightRef.current) return
+    fjJudgmentInFlightRef.current = true
+    setFjJudgmentSaving(true)
+    setFjJudgmentError('')
+    setFjJudgmentRetry(outcome)
+
     const revealOrder  = fjRevealOrder
     const wagerList    = fjWagers
     const reviewIdx    = fjReviewIdx
-    const currentScore = scores.get(wager.team_id) ?? 0
-    const newScore     = currentScore + wager.amount
+    const { data, error } = await supabase.rpc('judge_final_wager', {
+      p_room_id: roomId,
+      p_wager_id: wager.id,
+      p_outcome: outcome,
+    })
+    const result = data?.[0]
 
-    await Promise.all([
-      supabase.from('wagers').update({ status: 'correct' }).eq('id', wager.id),
-      supabase.from('teams').update({ score: newScore }).eq('id', wager.team_id),
-    ])
-    const updatedScores = new Map([...scores, [wager.team_id, newScore]])
+    if (error || !result) {
+      const conflict = error?.message?.includes('already judged') ?? false
+      fjJudgmentInFlightRef.current = false
+      setFjJudgmentSaving(false)
+      setFjJudgmentRetry(conflict ? null : outcome)
+      setFjJudgmentError(
+        conflict
+          ? `${error?.message}. Reload the host screen to use the saved result.`
+          : "Couldn't confirm that judgment. Retrying is safe and cannot score the wager twice."
+      )
+      return
+    }
+
+    const updatedScores = new Map([...scores, [wager.team_id, result.new_score]])
     setScores(updatedScores)
-    broadcastRef.current?.publish('fj_answer_judged', { team_id: wager.team_id, status: 'correct', wager: wager.amount, new_score: newScore })
+    setFjWagers(prev => prev.map(w =>
+      w.id === wager.id ? { ...w, status: outcome } : w
+    ))
+    broadcastRef.current?.publish('fj_answer_judged', {
+      team_id: wager.team_id,
+      status: outcome,
+      wager: result.wager_amount,
+      new_score: result.new_score,
+    })
+
+    fjJudgmentInFlightRef.current = false
+    setFjJudgmentSaving(false)
+    setFjJudgmentError('')
+    setFjJudgmentRetry(null)
 
     const nextIdx = reviewIdx + 1
     if (nextIdx >= revealOrder.length) {
@@ -834,30 +872,12 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     }
   }
 
+  async function handleFJCorrect(wager: Wager) {
+    await submitFJJudgment(wager, 'correct')
+  }
+
   async function handleFJWrong(wager: Wager) {
-    const revealOrder  = fjRevealOrder
-    const wagerList    = fjWagers
-    const reviewIdx    = fjReviewIdx
-    const currentScore = scores.get(wager.team_id) ?? 0
-    const newScore     = currentScore - wager.amount
-
-    await Promise.all([
-      supabase.from('wagers').update({ status: 'wrong' }).eq('id', wager.id),
-      supabase.from('teams').update({ score: newScore }).eq('id', wager.team_id),
-    ])
-    const updatedScores = new Map([...scores, [wager.team_id, newScore]])
-    setScores(updatedScores)
-    broadcastRef.current?.publish('fj_answer_judged', { team_id: wager.team_id, status: 'wrong', wager: wager.amount, new_score: newScore })
-
-    const nextIdx = reviewIdx + 1
-    if (nextIdx >= revealOrder.length) {
-      finishGame(updatedScores)
-    } else {
-      setFjReviewIdx(nextIdx)
-      const nextId = revealOrder[nextIdx]
-      const nextWager = wagerList.find(w => w.team_id === nextId)
-      broadcastRef.current?.publish('fj_answer_reveal', { team_id: nextId, team_name: teamName(nextId), response: nextWager?.response ?? null })
-    }
+    await submitFJJudgment(wager, 'wrong')
   }
 
   // A team in the reveal order with NO wager row (players never locked one in —
@@ -1327,18 +1347,38 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                     <p className="text-green-400 text-sm font-semibold">{fjQuestion.correct_question}</p>
                   </div>
                 )}
+                {fjJudgmentError && (
+                  <div role="alert" className="rounded-xl border border-red-500/50 bg-red-950/60 p-3">
+                    <p className="text-sm font-semibold text-red-200">{fjJudgmentError}</p>
+                    {fjJudgmentRetry && (
+                      <button
+                        onClick={() => submitFJJudgment(reviewWager, fjJudgmentRetry)}
+                        disabled={fjJudgmentSaving}
+                        className="mt-2 rounded-lg bg-red-200 px-3 py-1.5 text-sm font-black text-red-950 hover:bg-white disabled:opacity-50"
+                      >
+                        Try Again
+                      </button>
+                    )}
+                  </div>
+                )}
                 <div className="grid grid-cols-2 gap-3">
                   <button
                     onClick={() => handleFJWrong(reviewWager)}
-                    className="py-5 rounded-2xl font-black text-xl bg-red-700 hover:bg-red-600 active:bg-red-800 transition-colors"
+                    disabled={fjJudgmentSaving}
+                    className="py-5 rounded-2xl font-black text-xl bg-red-700 hover:bg-red-600 active:bg-red-800 disabled:cursor-wait disabled:opacity-50 transition-colors"
                   >
-                    ✗ Wrong −{reviewWager.amount}
+                    {fjJudgmentSaving && fjJudgmentRetry === 'wrong'
+                      ? 'Saving…'
+                      : `✗ Wrong −${reviewWager.amount}`}
                   </button>
                   <button
                     onClick={() => handleFJCorrect(reviewWager)}
-                    className="py-5 rounded-2xl font-black text-xl bg-green-600 hover:bg-green-500 active:bg-green-700 transition-colors"
+                    disabled={fjJudgmentSaving}
+                    className="py-5 rounded-2xl font-black text-xl bg-green-600 hover:bg-green-500 active:bg-green-700 disabled:cursor-wait disabled:opacity-50 transition-colors"
                   >
-                    ✓ Correct +{reviewWager.amount}
+                    {fjJudgmentSaving && fjJudgmentRetry === 'correct'
+                      ? 'Saving…'
+                      : `✓ Correct +${reviewWager.amount}`}
                   </button>
                 </div>
               </div>

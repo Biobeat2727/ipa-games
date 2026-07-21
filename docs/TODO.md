@@ -10,6 +10,7 @@
 - **Player-experience pass**: halftime intermission redesign (personal rank hero + medal standings + staggered reveals, player & projector), champion game-over screens (confetti on winning phones, final-rank hero for the rest, projector confetti bursts), Round 2 splash on phones, buzzer glow, pop-in/shake result animations, low-timer pulses, `prefers-reduced-motion` support.
 - **Atomic clue selection**: the first valid teammate tap owns the pending clue; simultaneous picks converge on one clue, Double Tap wagering stays with the winning device, and the host can Undo Pick.
 - **Atomic regular/Double Tap judgment**: Correct/Wrong now saves buzz status, team score, and question completion in one authorized transaction. Buttons lock while saving, retries are safe, and conflicting duplicate judgments are rejected.
+- **Atomic Final Tap judgment**: Final Correct/Wrong now saves wager status and team score together using the locked database wager. Rapid taps cannot score twice, controls lock while saving, and connection-loss retries are safe.
 
 ### PWA Stale Cache — 404 on Real Devices
 - `vercel.json` added: SPA rewrite + `no-store` on `sw.js`/`registerSW.js`/`index.html`

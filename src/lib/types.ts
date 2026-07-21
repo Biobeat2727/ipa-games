@@ -214,6 +214,21 @@ export type Database = {
           question_done: boolean
         }>
       }
+      judge_final_wager: {
+        Args: {
+          p_room_id: string
+          p_wager_id: string
+          p_outcome: 'correct' | 'wrong'
+        }
+        Returns: Array<{
+          applied: boolean
+          wager_id: string
+          team_id: string
+          outcome: 'correct' | 'wrong'
+          wager_amount: number
+          new_score: number
+        }>
+      }
     }
     Enums: {
       room_status: RoomStatus

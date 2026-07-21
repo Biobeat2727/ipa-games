@@ -116,7 +116,9 @@ checking → no_lobby → join_lobby → select_team → lobby → game
    - If all responses already in DB, skip the 1500ms wait
    - Players auto-submit remaining responses on `fj_timer_expired`
    - Host builds reveal order (ascending by score) → enters `review` phase
-10. Host reviews each response, clicks Correct/Wrong → `fj_answer_judged` broadcast
+10. Host reviews each response, clicks Correct/Wrong → `judge_final_wager` commits wager
+    status and score atomically → `fj_answer_judged` broadcast
+    - Controls lock while saving; same-result retries are safe and cannot score twice
 11. After last team reviewed → `finishGame()` → `game_over` broadcast with final scores
 
 ### Auto-end behavior

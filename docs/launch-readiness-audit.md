@@ -83,9 +83,9 @@ Legend: 🔴 fix before charging money · 🟠 fix during beta · 🟡 polish ·
 
 ### 6. Judge writes aren't checked — scores and board can silently diverge
 
-**Resolved for regular and Double Tap clues:** Correct/Wrong now uses the authenticated `judge_buzz` database transaction.
-Buzz status, score, and question completion succeed or fail together; same-result retries are
-safe, conflicting re-judgments are rejected, and host controls lock while the save is in flight.
+**Resolved:** Regular and Double Tap judging uses `judge_buzz`; Final Tap judging uses
+`judge_final_wager`. The related status and score writes succeed or fail together, same-result
+retries are safe, conflicting re-judgments are rejected, and host controls lock while saving.
 - **Symptom:** rare, but a team's score could update while the question fails to mark as
   answered (or vice-versa), leaving the board and scores inconsistent for the rest of the
   game.

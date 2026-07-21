@@ -287,6 +287,10 @@ Prepare at least four teams so elimination behavior can be tested.
 - [ ] **FNL-20 — Host refresh during question:** Refresh the host during the 90-second clue.
   Record whether the timer/state resumes or requires Reveal Anyway; confirm no scores or
   responses are lost.
+- [ ] **FNL-21 — Prevent double Final judgment:** Rapidly double-click Correct or Wrong. The
+  wager changes the score exactly once and review advances only one team.
+- [ ] **FNL-22 — Failed Final save and safe retry:** Interrupt the host's connection while
+  judging, restore it, and use Try Again. The wager applies exactly once, then review advances.
 
 ---
 

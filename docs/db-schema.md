@@ -83,3 +83,7 @@ question completion commit together and duplicate host taps cannot score twice.
 | response | text, nullable | FJ written response |
 | status | enum | `pending`, `correct`, `wrong` |
 | submitted_at | timestamp, nullable | Set on lock-in or timer expiry |
+
+Final judgments use the authenticated `judge_final_wager` database function. It reads the
+locked wager amount from the database and commits wager status and score together. Repeating
+the same judgment is a safe no-op; a conflicting judgment is rejected.
