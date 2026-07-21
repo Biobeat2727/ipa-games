@@ -23,6 +23,10 @@
   function that enforces the persisted Final deadline and locks the first teammate response. Direct
   anonymous wager updates are removed, retries are idempotent, and countdown rounding no longer
   closes Final Tap early.
+- **Consistent room and player-session recovery**: host, player, and projector now share the same
+  current-day active-room discovery rule. A player phone only restores its saved team after its
+  browser session membership is confirmed, so abandoned prior-day rooms and copied team IDs cannot
+  reopen stale games.
 
 ### PWA Stale Cache — 404 on Real Devices
 - `vercel.json` added: SPA rewrite + `no-store` on `sw.js`/`registerSW.js`/`index.html`

@@ -14,6 +14,7 @@ import ScoreOverlay from '../../components/ScoreOverlay'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
 import { QUIPS } from '../../lib/quips'
+import { findCurrentActiveRoom, getLocalDayStartIso } from '../../lib/roomDiscovery'
 import {
   playBuzz,
   playCorrect,
@@ -329,23 +330,33 @@ export default function PlayView() {
     const savedTeamId = getTeamId()
 
     async function autoResolve() {
-      const { data } = await supabase
-        .from('rooms')
-        .select()
-        .neq('status', 'finished')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (!data) { setPhase('no_lobby'); return }
-      setRoom(data)
-      setPhase('join_lobby')
+      try {
+        const activeRoom = await findCurrentActiveRoom()
+        if (!activeRoom) { setPhase('no_lobby'); return }
+        setRoom(activeRoom)
+        setPhase('join_lobby')
+      } catch {
+        setPhase('no_lobby')
+      }
     }
 
     async function resume(teamId: string) {
-      const { data: teamData } = await supabase.from('teams').select().eq('id', teamId).single()
-      if (!teamData) { clearPlayerSession(); return autoResolve() }
+      const [{ data: teamData }, { data: playerMembership }] = await Promise.all([
+        supabase.from('teams').select().eq('id', teamId).maybeSingle(),
+        supabase.from('players')
+          .select('id')
+          .eq('team_id', teamId)
+          .eq('session_id', getSessionId())
+          .maybeSingle(),
+      ])
+      if (!teamData || !playerMembership) { clearPlayerSession(); return autoResolve() }
       const { data: roomData } = await supabase
-        .from('rooms').select().eq('id', teamData.room_id).neq('status', 'finished').single()
+        .from('rooms')
+        .select()
+        .eq('id', teamData.room_id)
+        .neq('status', 'finished')
+        .gte('created_at', getLocalDayStartIso())
+        .maybeSingle()
       if (!roomData) { clearPlayerSession(); return autoResolve() }
       setRoom(roomData)
       setMyTeam(teamData)
@@ -367,17 +378,12 @@ export default function PlayView() {
   useEffect(() => {
     if (phase !== 'no_lobby') return
     const id = setInterval(async () => {
-      const { data } = await supabase
-        .from('rooms')
-        .select()
-        .neq('status', 'finished')
-        .order('created_at', { ascending: false })
-        .limit(1)
-        .maybeSingle()
-      if (data) {
-        setRoom(data)
+      try {
+        const activeRoom = await findCurrentActiveRoom()
+        if (!activeRoom) return
+        setRoom(activeRoom)
         setPhase('join_lobby')
-      }
+      } catch { /* keep polling through transient connection errors */ }
     }, 3000)
     return () => clearInterval(id)
   }, [phase])

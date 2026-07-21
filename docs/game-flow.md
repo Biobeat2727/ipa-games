@@ -33,7 +33,10 @@ checking → no_lobby → join_lobby → select_team → lobby → game
 | `lobby` | Joined a team; waiting for host to start |
 | `game` | All in-game screens |
 
-**Session resume:** If `teamId` is stored in localStorage, app skips to `lobby` or `game` directly. If the saved room is now `finished`, session is cleared and player starts from `checking`.
+**Session resume:** If `teamId` is stored in localStorage, the app first verifies that this
+browser's player session still belongs to that team and that the team's room is an unfinished room
+from today. Valid sessions resume directly into `lobby` or `game`; stale sessions are cleared before
+the app discovers today's current lobby.
 
 **Kick:** When host broadcasts `lobby_closed` or room status changes to `finished`, players in `join_lobby`, `select_team`, or `lobby` phases are cleared and sent to `no_lobby`. Game-phase players receive the broadcast too and are sent to `no_lobby`.
 

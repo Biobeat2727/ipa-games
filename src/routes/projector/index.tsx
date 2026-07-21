@@ -7,6 +7,7 @@ import Confetti from '../../components/Confetti'
 import { playRoundTransition } from '../../lib/sounds'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
+import { findCurrentActiveRoom } from '../../lib/roomDiscovery'
 
 interface TimerPayload {
   start_timestamp: number
@@ -20,23 +21,6 @@ type CategoryRow = {
   id: string
   name: string
   questions: QuestionPublic[]
-}
-
-// Find the most recent active room created today (local midnight cutoff)
-async function findActiveRoom(): Promise<Room | null> {
-  const todayMidnight = new Date()
-  todayMidnight.setHours(0, 0, 0, 0)
-
-  const { data } = await supabase
-    .from('rooms')
-    .select()
-    .neq('status', 'finished')
-    .gte('created_at', todayMidnight.toISOString())
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  return data ?? null
 }
 
 type Phase = 'checking' | 'waiting' | 'connected'
@@ -185,20 +169,24 @@ export default function ProjectorView() {
 
   useEffect(() => {
     async function init() {
-      const found = await findActiveRoom()
-      if (found) {
-        roomRef.current = found
-        setRoom(found)
-        const { data } = await supabase
-          .from('teams').select().eq('room_id', found.id).order('score', { ascending: false })
-        const list = data ?? []
-        setTeams(list)
-        setScores(new Map(list.map(t => [t.id, t.score])))
-        if (['round_1', 'round_2'].includes(found.status)) {
-          await loadCategories(found.id, found.status)
+      try {
+        const found = await findCurrentActiveRoom()
+        if (found) {
+          roomRef.current = found
+          setRoom(found)
+          const { data } = await supabase
+            .from('teams').select().eq('room_id', found.id).order('score', { ascending: false })
+          const list = data ?? []
+          setTeams(list)
+          setScores(new Map(list.map(t => [t.id, t.score])))
+          if (['round_1', 'round_2'].includes(found.status)) {
+            await loadCategories(found.id, found.status)
+          }
+          setPhase('connected')
+        } else {
+          setPhase('waiting')
         }
-        setPhase('connected')
-      } else {
+      } catch {
         setPhase('waiting')
       }
     }
@@ -209,20 +197,22 @@ export default function ProjectorView() {
   useEffect(() => {
     if (phase !== 'waiting') return
     const id = setInterval(async () => {
-      const found = await findActiveRoom()
-      if (found) {
-        roomRef.current = found
-        setRoom(found)
-        const { data } = await supabase
-          .from('teams').select().eq('room_id', found.id).order('score', { ascending: false })
-        const list = data ?? []
-        setTeams(list)
-        setScores(new Map(list.map(t => [t.id, t.score])))
-        if (['round_1', 'round_2'].includes(found.status)) {
-          await loadCategories(found.id, found.status)
+      try {
+        const found = await findCurrentActiveRoom()
+        if (found) {
+          roomRef.current = found
+          setRoom(found)
+          const { data } = await supabase
+            .from('teams').select().eq('room_id', found.id).order('score', { ascending: false })
+          const list = data ?? []
+          setTeams(list)
+          setScores(new Map(list.map(t => [t.id, t.score])))
+          if (['round_1', 'round_2'].includes(found.status)) {
+            await loadCategories(found.id, found.status)
+          }
+          setPhase('connected')
         }
-        setPhase('connected')
-      }
+      } catch { /* keep polling through transient connection errors */ }
     }, 3000)
     return () => clearInterval(id)
   }, [phase, loadCategories])

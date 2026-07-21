@@ -22,10 +22,12 @@ There are no room codes shown to users. Players and projector auto-resolve to th
 
 ## Session Persistence
 Players store their `team_id` in `localStorage`. On return visit:
-- Look up team → look up room → if room is still active, resume directly into lobby/game
-- If team or room is gone/finished → clear session, start fresh from lobby discovery
+- Confirm this browser's `session_id` still has a player row on the saved team
+- Look up team → look up room → if the room is active and was created today, resume into lobby/game
+- If membership, team, or current room is missing → clear the stale session and discover today's lobby
 
-Hosts have no session persistence. On page load the host always queries for today's active room. If one exists, resume it. If not, show "Create Lobby".
+Host, player, and projector room discovery all use the same current-day query. The authenticated
+host additionally filters by room ownership.
 
 ## URLs
 | Route | Description |

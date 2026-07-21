@@ -100,6 +100,12 @@ These are the minimum checks required before letting players join.
 - [ ] **LOB-17 — Leave while offline:** Disconnect a joined phone, press Leave Team, and
   confirm it stays on the team with a retry message. Reconnect, retry, and confirm the host
   count then drops without requiring a host refresh.
+- [ ] **LOB-18 — Prior-day unfinished room ignored:** Leave a disposable old room unfinished
+  in the database, then open host, player, and projector for today's event. None restores the old
+  room; all three agree on today's lobby or the no-lobby state.
+- [ ] **LOB-19 — Invalid saved membership cleared:** Remove a test phone's player row while
+  leaving its team and local browser storage intact, then refresh `/play`. The phone does not
+  rejoin that team silently and instead discovers today's lobby normally.
 
 ---
 

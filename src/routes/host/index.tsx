@@ -3,31 +3,13 @@ import type { FormEvent } from 'react'
 import { supabase } from '../../lib/supabase'
 import { ablyClient } from '../../lib/ably'
 import { generateRoomCode } from '../../lib/roomCode'
+import { findCurrentActiveRoom } from '../../lib/roomDiscovery'
 import { getContentSummary, importContent } from '../../lib/content'
 import type { ContentJSON, ContentSummary } from '../../lib/content'
 import type { Room, Team } from '../../lib/types'
 import Game from './Game'
 
 type Phase = 'checking' | 'sign_in' | 'access_denied' | 'no_room' | 'creating' | 'lobby' | 'game' | 'error'
-
-// Find the most recent active room created today (local midnight cutoff)
-async function findActiveRoom(hostId: string): Promise<Room | null> {
-  const todayMidnight = new Date()
-  todayMidnight.setHours(0, 0, 0, 0)
-
-  const { data, error } = await supabase
-    .from('rooms')
-    .select()
-    .eq('host_id', hostId)
-    .neq('status', 'finished')
-    .gte('created_at', todayMidnight.toISOString())
-    .order('created_at', { ascending: false })
-    .limit(1)
-    .maybeSingle()
-
-  if (error) throw error
-  return data ?? null
-}
 
 export default function HostView() {
   const [phase, setPhase]        = useState<Phase>('checking')
@@ -95,7 +77,7 @@ export default function HostView() {
     }
 
     setHostUserId(userId)
-    const existing = await findActiveRoom(userId)
+    const existing = await findCurrentActiveRoom(userId)
     if (existing) {
       setRoom(existing)
       await Promise.all([fetchTeams(existing.id), fetchSummary(existing.id)])
