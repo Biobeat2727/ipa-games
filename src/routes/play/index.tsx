@@ -13,6 +13,7 @@ import Confetti from '../../components/Confetti'
 import ScoreOverlay from '../../components/ScoreOverlay'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
+import { Bubbles, PintHero } from '../../components/Barware'
 import { QUIPS } from '../../lib/quips'
 import { findCurrentActiveRoom, getLocalDayStartIso } from '../../lib/roomDiscovery'
 import {
@@ -74,7 +75,7 @@ function QuipCycler() {
 
   return (
     <p
-      className="text-gray-600 text-xs mt-6 max-w-xs text-center px-4 leading-relaxed"
+      className="text-amber-100/40 text-xs mt-6 max-w-xs text-center px-4 leading-relaxed"
       style={{ opacity: visible ? 1 : 0, transition: 'opacity 0.4s ease' }}
     >
       {QUIPS[idx]}
@@ -1659,7 +1660,7 @@ export default function PlayView() {
   const scoreChip = (
     <button
       onClick={() => setShowScoreOverlay(true)}
-      className={`absolute top-4 right-4 bg-gray-900 border border-gray-800 rounded-2xl px-3 py-2 text-right z-10 ${scoreChipPulse ? 'score-chip-pulse' : ''}`}
+      className={`absolute top-4 right-4 bg-[#17120b]/90 border border-amber-500/20 shadow-lg shadow-black/40 backdrop-blur-sm rounded-2xl px-3 py-2 text-right z-10 ${scoreChipPulse ? 'score-chip-pulse' : ''}`}
     >
       {myTeam && (
         <p className="text-gray-500 text-xs leading-tight truncate max-w-[6rem]">{myTeam.name}</p>
@@ -1675,19 +1676,24 @@ export default function PlayView() {
 
   if (phase === 'checking') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-        <p className="text-gray-400 text-lg animate-pulse">Finding game…</p>
+      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6">
+        <PintHero className="w-16 h-24 mb-6 opacity-90" />
+        <p className="text-amber-200/70 text-lg animate-pulse">Finding game…</p>
       </div>
     )
   }
 
   if (phase === 'no_lobby') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
-        <h1 className="text-5xl font-black mb-4 text-yellow-400 tracking-tight">Tapped In!</h1>
-        <p className="text-gray-400 animate-pulse">Waiting for host to open a lobby…</p>
-        <p className="text-gray-600 text-sm mt-2">This page will update automatically.</p>
-        <QuipCycler />
+      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
+        <Bubbles />
+        <div className="relative z-10 flex flex-col items-center">
+          <PintHero className="w-20 h-32 mb-5" />
+          <h1 className="neon-title text-5xl font-black mb-4 tracking-tight">Tapped In!</h1>
+          <p className="text-amber-100/70 animate-pulse">Waiting for host to open a lobby…</p>
+          <p className="text-gray-600 text-sm mt-2">This page will update automatically.</p>
+          <QuipCycler />
+        </div>
       </div>
     )
   }
@@ -1695,42 +1701,48 @@ export default function PlayView() {
   if (phase === 'join_lobby' && room) {
     const openedAt = new Date(room.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
-        <h1 className="text-5xl font-black mb-10 text-yellow-400 tracking-tight">Tapped In!</h1>
-        <div className="bg-gray-900 border border-gray-800 rounded-2xl p-8 w-full max-w-sm mb-6">
-          <p className="text-gray-500 text-xs uppercase tracking-wider mb-3">Game Lobby</p>
-          <p className="text-white font-black text-2xl mb-1">Tonight's Game</p>
-          <p className="text-gray-500 text-sm">Opened at {openedAt}</p>
+      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
+        <Bubbles />
+        <div className="relative z-10 w-full flex flex-col items-center">
+          <PintHero className="w-16 h-24 mb-4" />
+          <h1 className="neon-title text-5xl font-black mb-8 tracking-tight">Tapped In!</h1>
+          <div className="glass-card rounded-2xl p-6 w-full max-w-sm mb-6"
+            style={{ animation: 'slide-up-in 0.4s ease-out both' }}>
+            <p className="text-amber-400/80 text-xs uppercase tracking-[0.2em] mb-2">Now pouring</p>
+            <p className="text-white font-black text-2xl mb-1">Tonight's Game</p>
+            <p className="text-gray-500 text-sm">Doors opened at {openedAt}</p>
+          </div>
+          <input
+            type="text"
+            placeholder="Your nickname"
+            value={nickname}
+            onChange={e => setNickname(e.target.value)}
+            onKeyDown={e => e.key === 'Enter' && nickname.trim() && handleJoinLobby()}
+            className="w-full max-w-sm bg-white/5 border border-white/10 text-white rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent text-center text-lg placeholder:text-gray-600"
+            autoFocus
+          />
+          <button
+            onClick={handleJoinLobby}
+            disabled={!nickname.trim()}
+            className="btn-beer w-full max-w-sm py-4 rounded-2xl text-xl font-black"
+          >
+            Join the Game
+          </button>
         </div>
-        <input
-          type="text"
-          placeholder="Your nickname"
-          value={nickname}
-          onChange={e => setNickname(e.target.value)}
-          onKeyDown={e => e.key === 'Enter' && nickname.trim() && handleJoinLobby()}
-          className="w-full max-w-sm bg-gray-800 text-white rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-yellow-400 text-center text-lg"
-          autoFocus
-        />
-        <button
-          onClick={handleJoinLobby}
-          disabled={!nickname.trim()}
-          className="w-full max-w-sm py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 disabled:opacity-30"
-        >
-          Join Lobby
-        </button>
       </div>
     )
   }
 
   if (phase === 'select_team') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col p-6">
-        <div className="max-w-sm mx-auto w-full pt-10">
-          <h1 className="text-center text-4xl font-black text-yellow-400 mb-8">Tapped In!</h1>
+      <div className="min-h-screen bar-bg text-white flex flex-col p-6">
+        <div className="relative z-10 max-w-sm mx-auto w-full pt-10">
+          <h1 className="neon-title text-center text-4xl font-black mb-1">Tapped In!</h1>
+          <p className="text-center text-gray-500 text-sm mb-8">Grab a table with your crew</p>
           {!showCreate ? (
             <button
               onClick={() => setShowCreate(true)}
-              className="w-full border-2 border-yellow-400 text-yellow-400 rounded-xl px-4 py-3 font-bold mb-6"
+              className="w-full border-2 border-dashed border-amber-400/60 text-amber-300 rounded-xl px-4 py-3 font-bold mb-6 hover:bg-amber-400/10 active:bg-amber-400/15 transition-colors"
             >
               + Create New Team
             </button>
@@ -1743,12 +1755,12 @@ export default function PlayView() {
                 onChange={e => setNewTeamName(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && handleCreateTeam()}
                 autoFocus
-                className="w-full bg-gray-800 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-yellow-400"
+                className="w-full bg-white/5 border border-white/10 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600"
               />
               <button
                 onClick={handleCreateTeam}
                 disabled={loading || !newTeamName.trim()}
-                className="w-full py-3 rounded-xl font-black bg-yellow-400 text-gray-950 disabled:opacity-30"
+                className="btn-beer w-full py-3 rounded-xl font-black"
               >
                 {loading ? 'Creating…' : 'Create & Join'}
               </button>
@@ -1756,16 +1768,24 @@ export default function PlayView() {
           )}
           {teams.length > 0 && (
             <>
-              <p className="text-yellow-400 text-sm uppercase tracking-wider font-black mb-3">Join a team</p>
+              <p className="text-amber-400/80 text-sm uppercase tracking-wider font-black mb-3">Join a team</p>
               <div className="space-y-2 mb-4">
-                {teams.map(team => (
+                {teams.map((team, i) => (
                   <button
                     key={team.id}
                     onClick={() => joinTeam(team)}
                     disabled={loading}
-                    className="w-full bg-gray-800 hover:bg-gray-700 active:bg-gray-600 rounded-xl px-5 py-4 text-left font-semibold transition-colors"
+                    className="w-full glass-card hover:border-amber-400/40 active:scale-[0.99] rounded-xl px-4 py-3.5 text-left font-semibold transition-all flex items-center gap-3"
+                    style={{ animation: `slide-up-in 0.35s ease-out ${i * 0.06}s both` }}
                   >
-                    {team.name}
+                    <span
+                      className="w-9 h-9 rounded-full shrink-0 flex items-center justify-center font-black text-amber-950"
+                      style={{ background: 'linear-gradient(145deg, #fcd34d 0%, #f59e0b 60%, #c2650a 100%)', boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4)' }}
+                    >
+                      {team.name.charAt(0).toUpperCase()}
+                    </span>
+                    <span className="flex-1 truncate">{team.name}</span>
+                    <span className="text-amber-500/60 text-lg">›</span>
                   </button>
                 ))}
               </div>
@@ -1779,26 +1799,34 @@ export default function PlayView() {
 
   if (phase === 'lobby') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
-        <span className="w-3 h-3 rounded-full bg-green-400 mb-6 animate-pulse inline-block" />
-        <p className="text-gray-500 text-xs uppercase tracking-widest mb-1">You're on</p>
-        <h2 className="text-4xl font-black text-yellow-400 mb-2">{myTeam?.name}</h2>
-        <p className="text-gray-500 text-sm mb-10">Waiting for the host to start the game…</p>
-        {teammates.length > 0 && (
-          <div className="bg-gray-900 rounded-2xl px-8 py-5">
-            <p className="text-gray-500 text-xs uppercase tracking-wider mb-3">Team members</p>
-            <ul className="space-y-2">
-              {teammates.map(p => (
-                <li key={p.id} className="text-white font-medium">{p.nickname ?? 'Anonymous'}</li>
-              ))}
-            </ul>
-          </div>
-        )}
-        <button onClick={handleLeave} disabled={loading} className="mt-8 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
-          {loading ? 'Leaving…' : 'Leave Team'}
-        </button>
-        {error && <p className="text-red-400 text-sm text-center mt-3">{error}</p>}
-        <QuipCycler />
+      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
+        <Bubbles />
+        <div className="relative z-10 flex flex-col items-center w-full">
+          <span className="inline-flex items-center gap-2 mb-6 px-3 py-1.5 rounded-full bg-green-400/10 border border-green-400/30">
+            <span className="w-2 h-2 rounded-full bg-green-400 animate-pulse" />
+            <span className="text-green-300 text-xs font-bold uppercase tracking-wider">You're in</span>
+          </span>
+          <p className="text-gray-500 text-xs uppercase tracking-widest mb-1">Playing for</p>
+          <h2 className="text-4xl font-black text-yellow-400 mb-2">{myTeam?.name}</h2>
+          <p className="text-gray-500 text-sm mb-10">Waiting for the host to start the game…</p>
+          {teammates.length > 0 && (
+            <div className="glass-card rounded-2xl px-6 py-5 w-full max-w-xs">
+              <p className="text-amber-400/80 text-xs uppercase tracking-[0.2em] mb-3">At the table</p>
+              <div className="flex flex-wrap justify-center gap-2">
+                {teammates.map(p => (
+                  <span key={p.id} className="px-3 py-1.5 rounded-full bg-white/5 border border-white/10 text-sm font-medium text-white">
+                    {p.nickname ?? 'Anonymous'}
+                  </span>
+                ))}
+              </div>
+            </div>
+          )}
+          <button onClick={handleLeave} disabled={loading} className="mt-8 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
+            {loading ? 'Leaving…' : 'Leave Team'}
+          </button>
+          {error && <p className="text-red-400 text-sm text-center mt-3">{error}</p>}
+          <QuipCycler />
+        </div>
       </div>
     )
   }
@@ -1818,10 +1846,10 @@ export default function PlayView() {
 
   if (fjSubPhase === 'incoming') {
     return (
-      <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen final-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         {scoreChip}
-        <p className="text-6xl mb-6">🍺</p>
+        <p className="text-6xl mb-6" style={{ animation: 'hero-float 3s ease-in-out infinite' }}>🍺</p>
         <p className="text-blue-400 text-xs uppercase tracking-widest mb-3">Final Tap</p>
         <p className="text-3xl font-black text-white mb-4">Starting Soon!</p>
         {fjCategoryName && (
@@ -1848,7 +1876,7 @@ export default function PlayView() {
     const wagerVal = Math.max(0, Math.min(maxWager, parseInt(fjWagerInput) || 0))
     const valid    = fjWagerInput !== '' && wagerVal >= 0
     return (
-      <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen final-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         {scoreChip}
         <p className="text-blue-400 text-xs uppercase tracking-widest mb-2">Final Jeopardy</p>
@@ -1863,7 +1891,7 @@ export default function PlayView() {
             placeholder="0"
             value={fjWagerInput}
             onChange={e => setFjWagerInput(e.target.value)}
-            className="w-full bg-gray-800 text-white text-center text-5xl font-mono font-black rounded-2xl px-4 py-5 outline-none focus:ring-2 focus:ring-yellow-400"
+            className="w-full bg-white/5 border border-white/10 text-white text-center text-5xl font-mono font-black rounded-2xl px-4 py-5 outline-none focus:ring-2 focus:ring-yellow-400"
           />
           {fjWagerInput !== '' && wagerVal !== parseInt(fjWagerInput) && (
             <p className="text-yellow-400 text-xs">Capped at {maxWager}</p>
@@ -1871,7 +1899,7 @@ export default function PlayView() {
           <button
             onClick={handleSubmitWager}
             disabled={!valid}
-            className="w-full py-4 rounded-2xl text-lg font-black bg-yellow-400 text-gray-950 disabled:opacity-30"
+            className="btn-beer w-full py-4 rounded-2xl text-lg font-black"
           >
             Lock In Wager: {wagerVal} pts
           </button>
@@ -1882,7 +1910,7 @@ export default function PlayView() {
 
   if (fjSubPhase === 'wager_locked') {
     return (
-      <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen final-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         {scoreChip}
         <div className="w-3 h-3 rounded-full bg-green-400 mb-6 animate-pulse" />
@@ -1903,10 +1931,10 @@ export default function PlayView() {
     const pct       = (remaining / dur) * 100
     const low       = remaining <= 15
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+      <div className="min-h-screen final-bg text-white flex flex-col">
         {scoreOverlayEl}
         {/* Timer bar */}
-        <div className="h-2 bg-gray-900 w-full shrink-0">
+        <div className="h-2 bg-black/40 w-full shrink-0">
           <div
             className={`h-full transition-all duration-500 ${low ? 'bg-red-500' : 'bg-yellow-400'}`}
             style={{ width: `${pct}%` }}
@@ -1920,15 +1948,15 @@ export default function PlayView() {
               {remaining}
             </span>
           </div>
-          <div className="bg-gray-900 rounded-2xl p-5 mb-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The Answer</p>
+          <div className="glass-card rounded-2xl p-5 mb-4">
+            <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The Answer</p>
             <p className="text-xl font-bold leading-snug">{fjQuestion.answer}</p>
           </div>
           {fjResponseSubmitted ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
               <div className="w-3 h-3 rounded-full bg-yellow-400 animate-pulse" />
               <p className="text-white font-black text-xl">Response submitted</p>
-              <div className="bg-gray-900 border border-gray-800 rounded-2xl px-5 py-3 max-w-xs">
+              <div className="glass-card rounded-2xl px-5 py-3 max-w-xs">
                 <p className="text-gray-300 italic">"{fjResponse}"</p>
               </div>
             </div>
@@ -1942,7 +1970,7 @@ export default function PlayView() {
                 disabled={fjResponseSubmitting}
                 maxLength={500}
                 rows={3}
-                className="w-full bg-gray-800 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-yellow-400 resize-none text-lg mb-4"
+                className="w-full bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
               />
               {fjResponseError && (
                 <p role="alert" className="text-red-400 text-sm text-center mb-3">{fjResponseError}</p>
@@ -1950,7 +1978,7 @@ export default function PlayView() {
               <button
                 onClick={handleSubmitFJResponse}
                 disabled={!fjResponse.trim() || fjResponseSubmitting}
-                className="w-full py-4 rounded-2xl font-black text-lg bg-yellow-400 text-gray-950 disabled:opacity-30"
+                className="btn-beer w-full py-4 rounded-2xl font-black text-lg"
               >
                 {fjResponseSubmitting ? 'Locking…' : 'Submit Response'}
               </button>
@@ -1963,7 +1991,7 @@ export default function PlayView() {
 
   if (fjSubPhase === 'reviewing') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         {scoreChip}
         <div className="w-3 h-3 rounded-full bg-gray-600 mb-6 animate-pulse" />
@@ -1982,7 +2010,7 @@ export default function PlayView() {
     const iWon     = winner != null && winner.id === myTeam?.id
     const medals   = ['🥇', '🥈', '🥉']
     return (
-      <div className="relative min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center overflow-y-auto">
+      <div className="relative min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center overflow-y-auto">
         {scoreOverlayEl}
         <Confetti active={showConfetti} onDone={() => setShowConfetti(false)} />
         {iWon ? (
@@ -2019,7 +2047,7 @@ export default function PlayView() {
           <div className="w-full max-w-xs space-y-2 mb-8">
             {finalStandings.map((t, i) => (
               <div key={t.id}
-                className={`flex items-center gap-3 rounded-xl px-4 py-3 ${t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'bg-gray-900'}`}
+                className={`flex items-center gap-3 rounded-xl px-4 py-3 ${t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'glass-card'}`}
                 style={{ animation: `slide-up-in 0.4s ease-out ${0.5 + i * 0.1}s both` }}>
                 <span className="w-6 text-center shrink-0">
                   {i < 3 ? medals[i] : <span className="text-gray-600 font-mono text-sm">{i + 1}</span>}
@@ -2053,7 +2081,7 @@ export default function PlayView() {
     const gap       = myEntry && leader ? leader.score - myEntry.score : 0
     const medals    = ['🥇', '🥈', '🥉']
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col p-5 overflow-y-auto">
+      <div className="min-h-screen bar-bg text-white flex flex-col p-5 overflow-y-auto">
         <div className="text-center mb-3 shrink-0">
           <p className="text-xs text-gray-500 uppercase tracking-widest mb-1"
             style={{ animation: 'slide-up-in 0.4s ease-out both' }}>Round 1 in the books</p>
@@ -2096,7 +2124,7 @@ export default function PlayView() {
           {standings.map((t, i) => (
             <div key={t.id}
               className={`flex items-center gap-3 rounded-xl px-4 py-3 ${
-                t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'bg-gray-900'
+                t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'glass-card'
               }`}
               style={{ animation: `slide-up-in 0.4s ease-out ${0.55 + i * 0.08}s both` }}>
               <span className="w-6 text-center shrink-0">
@@ -2124,7 +2152,7 @@ export default function PlayView() {
 
   if (buzzResult === 'correct') {
     return (
-      <div className="relative min-h-screen bg-green-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="relative min-h-screen result-bg-correct text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         <Confetti active={showConfetti} onDone={() => setShowConfetti(false)} />
         {scoreChip}
@@ -2142,7 +2170,7 @@ export default function PlayView() {
 
   if (buzzResult === 'wrong') {
     return (
-      <div className="relative min-h-screen bg-red-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="relative min-h-screen result-bg-wrong text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         {scoreChip}
         <div style={{ animation: 'shake-x 0.5s ease-out 0.2s' }} className="flex flex-col items-center">
@@ -2163,7 +2191,7 @@ export default function PlayView() {
 
   if (doubleTapStep === 'reveal') {
     return (
-      <div className="min-h-screen bg-amber-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen dt-bg text-white flex flex-col items-center justify-center p-6 text-center">
         <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
           <p className="text-8xl mb-4">🍺</p>
           <p className="text-5xl font-black text-amber-400 leading-none mb-2">DOUBLE TAP!</p>
@@ -2177,7 +2205,7 @@ export default function PlayView() {
   if (dtRevealForObserver) {
     const dtName = doubleTapTeamId ? (teamNames.get(doubleTapTeamId) ?? 'Another team') : 'Another team'
     return (
-      <div className="min-h-screen bg-amber-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen dt-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreChip}
         <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
           <p className="text-8xl mb-4">🍺</p>
@@ -2195,7 +2223,7 @@ export default function PlayView() {
     const wagerVal = isNaN(parsed) ? 5 : Math.max(5, Math.min(maxWager, parsed))
     const valid    = doubleTapWagerInput !== '' && !isNaN(parsed) && parsed >= 5 && parsed <= maxWager
     return (
-      <div className="min-h-screen bg-amber-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen dt-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreChip}
         <p className="text-5xl mb-4">🍺</p>
         <p className="text-3xl font-black text-amber-400 mb-1">DOUBLE TAP!</p>
@@ -2210,12 +2238,12 @@ export default function PlayView() {
             placeholder="5"
             value={doubleTapWagerInput}
             onChange={e => setDoubleTapWagerInput(e.target.value)}
-            className="w-full bg-gray-800 text-white text-center text-5xl font-mono font-black rounded-2xl px-4 py-5 outline-none focus:ring-2 focus:ring-amber-400"
+            className="w-full bg-white/5 border border-white/10 text-white text-center text-5xl font-mono font-black rounded-2xl px-4 py-5 outline-none focus:ring-2 focus:ring-amber-400"
           />
           <button
             onClick={handleConfirmDoubleTapWager}
             disabled={!valid}
-            className="w-full py-4 rounded-2xl text-lg font-black bg-amber-400 text-gray-950 disabled:opacity-30"
+            className="btn-beer w-full py-4 rounded-2xl text-lg font-black"
           >
             Lock In: {wagerVal} pts
           </button>
@@ -2227,7 +2255,7 @@ export default function PlayView() {
   // Teammates of the tile-clicker see the reveal too while the clicker wagers
   if (dtTeammateWaiting) {
     return (
-      <div className="min-h-screen bg-amber-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="min-h-screen dt-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreChip}
         <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
           <p className="text-8xl mb-4">🍺</p>
@@ -2246,7 +2274,7 @@ export default function PlayView() {
     )].sort((a, b) => a - b)
 
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col">
+      <div className="min-h-screen bar-bg text-white flex flex-col">
         {scoreOverlayEl}
         {scoreChip}
 
@@ -2364,7 +2392,7 @@ export default function PlayView() {
         {/* Preview overlay */}
         {previewInfo && (
           <div onClick={handlePreBuzzTap}
-            className="fixed inset-0 z-50 bg-blue-950 text-white flex flex-col items-center justify-center p-6 text-center"
+            className="fixed inset-0 z-50 wood-bg text-white flex flex-col items-center justify-center p-6 text-center"
             style={tileRect ? (() => {
               const vw = window.innerWidth, vh = window.innerHeight
               const scaleX = tileRect.width  / vw
@@ -2391,7 +2419,7 @@ export default function PlayView() {
                 <p className="text-amber-400 font-black text-sm">🍺 DOUBLE TAP! — {previewInfo.doubleTapWager} pts wagered</p>
               </div>
             )}
-            <p className="text-blue-400 text-xs uppercase tracking-widest mb-6">Category</p>
+            <p className="text-amber-300/80 text-xs uppercase tracking-[0.2em] mb-6">Category</p>
             <p className="font-black text-white leading-tight mb-3"
               style={{ fontSize: 'clamp(1.75rem, 7vw, 3rem)' }}>
               {previewInfo.categoryName}
@@ -2407,7 +2435,7 @@ export default function PlayView() {
                 {previewInfo.answer}
               </p>
             )}
-            <p className="text-gray-500 text-sm animate-pulse">Waiting for host…</p>
+            <p className="text-amber-100/60 text-sm animate-pulse">Waiting for host…</p>
             {buzzLockedOut ? (
               <p className="text-red-400 text-sm font-bold mt-3">🔒 Too many early taps — you're locked out of this one</p>
             ) : preBuzzTaps > 0 ? (
@@ -2430,7 +2458,7 @@ export default function PlayView() {
     const dtTimerPct = (dtTimer / 40) * 100
     const dtTimerLow = dtTimer <= 10
     return (
-      <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-6">
+      <div className="relative min-h-screen bar-bg text-white flex flex-col p-6">
         {scoreOverlayEl}
         {scoreChip}
         <div className="max-w-sm mx-auto w-full flex flex-col flex-1 pt-8">
@@ -2442,15 +2470,15 @@ export default function PlayView() {
             </span>
           </div>
 
-          <div className="w-full h-2 bg-gray-800 rounded-full mb-6 overflow-hidden">
+          <div className="w-full h-2 bg-white/10 rounded-full mb-6 overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-500 ${dtTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
               style={{ width: `${dtTimerPct}%` }}
             />
           </div>
 
-          <div className="bg-gray-900 rounded-2xl p-4 mb-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The answer</p>
+          <div className="glass-card rounded-2xl p-4 mb-4">
+            <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The answer</p>
             <p className="text-lg font-bold leading-snug">{activeQuestion.answer}</p>
           </div>
 
@@ -2467,12 +2495,12 @@ export default function PlayView() {
                 value={responseText}
                 onChange={e => setResponseText(e.target.value)}
                 rows={3}
-                className="w-full bg-gray-800 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-yellow-400 resize-none text-lg mb-4"
+                className="w-full bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
               />
               <button
                 onClick={handleSubmitResponse}
                 disabled={!responseText.trim()}
-                className="w-full py-4 rounded-2xl font-black text-lg bg-yellow-400 text-gray-950 disabled:opacity-30"
+                className="btn-beer w-full py-4 rounded-2xl font-black text-lg"
               >
                 Submit Response
               </button>
@@ -2489,7 +2517,7 @@ export default function PlayView() {
     const ansTimerPct = (ansTimer / 15) * 100
     const ansTimerLow = ansTimer <= 3
     return (
-      <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-6">
+      <div className="relative min-h-screen bar-bg text-white flex flex-col p-6">
         {scoreOverlayEl}
         {scoreChip}
         <div className="max-w-sm mx-auto w-full flex flex-col flex-1 pt-8">
@@ -2501,15 +2529,15 @@ export default function PlayView() {
             </span>
           </div>
 
-          <div className="w-full h-2 bg-gray-800 rounded-full mb-4 overflow-hidden">
+          <div className="w-full h-2 bg-white/10 rounded-full mb-4 overflow-hidden">
             <div
               className={`h-full rounded-full transition-all duration-500 ${ansTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
               style={{ width: `${ansTimerPct}%` }}
             />
           </div>
 
-          <div className="bg-gray-900 rounded-2xl p-4 mb-4">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The answer</p>
+          <div className="glass-card rounded-2xl p-4 mb-4">
+            <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The answer</p>
             <p className="text-lg font-bold leading-snug">{activeQuestion.answer}</p>
           </div>
 
@@ -2526,12 +2554,12 @@ export default function PlayView() {
                 value={responseText}
                 onChange={e => setResponseText(e.target.value)}
                 rows={3}
-                className="w-full bg-gray-800 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-yellow-400 resize-none text-lg mb-4"
+                className="w-full bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
               />
               <button
                 onClick={handleSubmitResponse}
                 disabled={!responseText.trim()}
-                className="w-full py-4 rounded-2xl font-black text-lg bg-yellow-400 text-gray-950 disabled:opacity-30"
+                className="btn-beer w-full py-4 rounded-2xl font-black text-lg"
               >
                 Submit Response
               </button>
@@ -2546,7 +2574,7 @@ export default function PlayView() {
   if (timerPayload?.team_id === myTeam?.id && responseSubmitted) {
     const posLabel = buzzPosition === 1 ? '1st' : buzzPosition === 2 ? '2nd' : buzzPosition === 3 ? '3rd' : `${buzzPosition ?? '?'}th`
     return (
-      <div className="relative min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="relative min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         {scoreChip}
         <div className="w-3 h-3 rounded-full bg-yellow-400 mb-6 animate-pulse" />
@@ -2560,11 +2588,11 @@ export default function PlayView() {
           <p className="text-2xl font-black text-white mb-6">Buzzed in!</p>
         )}
         {responseText ? (
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl px-6 py-4 max-w-xs">
+          <div className="glass-card rounded-2xl px-6 py-4 max-w-xs">
             <p className="text-gray-300 italic">"{responseText}"</p>
           </div>
         ) : (
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl px-6 py-4 max-w-xs">
+          <div className="glass-card rounded-2xl px-6 py-4 max-w-xs">
             <p className="text-gray-600 italic text-sm">No response submitted</p>
           </div>
         )}
@@ -2578,7 +2606,7 @@ export default function PlayView() {
   // responseSubmitted covers: teammates who submitted via team_answer_submitted broadcast
   if (hasBuzzed || responseSubmitted) {
     return (
-      <div className="relative min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="relative min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         {scoreChip}
         <div className="w-3 h-3 rounded-full bg-yellow-400 mb-6 animate-pulse" />
@@ -2587,7 +2615,7 @@ export default function PlayView() {
         </p>
         <p className="text-gray-500 text-sm">Waiting for the host…</p>
         {responseText && (
-          <div className="bg-gray-900 border border-gray-800 rounded-2xl px-6 py-4 max-w-xs mt-6">
+          <div className="glass-card rounded-2xl px-6 py-4 max-w-xs mt-6">
             <p className="text-gray-300 italic">"{responseText}"</p>
           </div>
         )}
@@ -2599,14 +2627,14 @@ export default function PlayView() {
   if (doubleTapTeamId && doubleTapTeamId !== myTeam?.id) {
     const dtTeamName = teamNames.get(doubleTapTeamId) ?? 'Another team'
     return (
-      <div className="relative min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-6 text-center">
+      <div className="relative min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         {scoreChip}
         <div className="text-5xl mb-6">🍺</div>
         <p className="text-2xl font-black text-amber-400 mb-2">Double Tap!</p>
         <p className="text-gray-400 text-lg mb-6">{dtTeamName} is answering</p>
-        <div className="bg-gray-900 rounded-2xl p-5 max-w-sm w-full">
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The answer</p>
+        <div className="glass-card rounded-2xl p-5 max-w-sm w-full">
+          <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The answer</p>
           <p className="text-xl font-bold leading-snug">{activeQuestion.answer}</p>
         </div>
       </div>
@@ -2619,12 +2647,12 @@ export default function PlayView() {
   const buzzWindowPct = ((buzzWindowRemaining ?? 25) / 25) * 100
 
   return (
-    <div className="relative min-h-screen bg-gray-950 text-white flex flex-col p-5">
+    <div className="relative min-h-screen bar-bg text-white flex flex-col p-5">
       {scoreOverlayEl}
       {scoreChip}
       <div className="max-w-sm mx-auto w-full flex flex-col" style={{ minHeight: 'calc(100vh - 2.5rem)' }}>
-        <div className="bg-gray-900 rounded-2xl p-5 mb-4 pt-14">
-          <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The answer</p>
+        <div className="glass-card rounded-2xl p-5 mb-4 pt-14">
+          <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The answer</p>
           <p className="text-2xl font-bold leading-snug">{activeQuestion.answer}</p>
           {activeQuestion.point_value && (
             <p className="text-yellow-400 font-mono text-sm mt-3 font-semibold">{activeQuestion.point_value} pts</p>
@@ -2641,7 +2669,7 @@ export default function PlayView() {
                 {buzzWindowRemaining}s
               </span>
             </div>
-            <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
+            <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
               <div
                 className={`h-full rounded-full transition-all duration-500 ${buzzTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
                 style={{ width: `${buzzWindowPct}%` }}
@@ -2658,36 +2686,60 @@ export default function PlayView() {
             </p>
           )}
           {buzzLockedOut ? (
-            <div className="w-full py-8 rounded-2xl font-black text-xl bg-gray-800 text-red-400/80 text-center leading-snug">
+            <div className="w-full py-8 rounded-2xl font-black text-xl bg-white/5 border border-white/10 text-red-400/80 text-center leading-snug">
               🔒 Locked out
               <span className="block text-sm font-medium text-gray-500 mt-1">You tapped too early — wait for another team to answer</span>
             </div>
           ) : buzzWindowClosed ? (
-            <div className="w-full py-8 rounded-2xl font-black text-xl bg-gray-800 text-gray-500 text-center">
+            <div className="w-full py-8 rounded-2xl font-black text-xl bg-white/5 border border-white/10 text-gray-500 text-center">
               Buzz window closed
             </div>
           ) : (
-            <button
-              onClick={handleBuzzSubmitClick}
-              disabled={buzzing}
-              className="relative overflow-hidden w-full py-8 rounded-2xl font-black text-2xl bg-red-600 hover:bg-red-500 active:bg-red-700 disabled:bg-red-900 text-white transition-colors"
-              style={{ animation: 'buzz-glow 1.6s ease-in-out infinite' }}
-            >
-              {ripples.map(r => (
-                <span
-                  key={r.id}
-                  className="absolute rounded-full bg-white pointer-events-none"
-                  style={{
-                    left: r.x - 24,
-                    top: r.y - 24,
-                    width: 48,
-                    height: 48,
-                    animation: 'buzz-ripple 0.9s ease-out forwards',
-                  }}
-                />
-              ))}
-              {buzzing ? '…' : 'BUZZ!'}
-            </button>
+            <div className="flex flex-col items-center transition-transform active:translate-y-[3px] active:scale-[0.98]">
+              {/* Tap handle — same brass knob + steel neck as the board's tap wall,
+                  so pulling the tap IS the buzz. Decorative; the button below is the target. */}
+              <div
+                aria-hidden
+                className="w-10 h-10 rounded-full z-10 mb-[-4px]"
+                style={{
+                  background: 'radial-gradient(circle at 35% 30%, #f5e6c8, #b8863b 55%, #6b4a1f 100%)',
+                  boxShadow: '0 2px 5px rgba(0,0,0,0.55), inset 0 -2px 4px rgba(0,0,0,0.25)',
+                }}
+              />
+              <div
+                aria-hidden
+                className="w-3.5 h-6 rounded-sm"
+                style={{
+                  background: 'linear-gradient(180deg, #a3a3a3 0%, #525252 100%)',
+                  boxShadow: 'inset 0 0 2px rgba(255,255,255,0.35)',
+                }}
+              />
+              <button
+                onClick={handleBuzzSubmitClick}
+                disabled={buzzing}
+                className="relative overflow-hidden w-full py-8 rounded-2xl font-black text-3xl tracking-wide text-white disabled:opacity-60"
+                style={{
+                  animation: 'buzz-glow 1.6s ease-in-out infinite',
+                  background: 'linear-gradient(180deg, #f87171 0%, #dc2626 45%, #991b1b 100%)',
+                  textShadow: '0 2px 4px rgba(0,0,0,0.4)',
+                }}
+              >
+                {ripples.map(r => (
+                  <span
+                    key={r.id}
+                    className="absolute rounded-full bg-white pointer-events-none"
+                    style={{
+                      left: r.x - 24,
+                      top: r.y - 24,
+                      width: 48,
+                      height: 48,
+                      animation: 'buzz-ripple 0.9s ease-out forwards',
+                    }}
+                  />
+                ))}
+                {buzzing ? '…' : 'TAP IN!'}
+              </button>
+            </div>
           )}
         </div>
       </div>

@@ -48,8 +48,8 @@
 }
 
 @keyframes buzz-glow {
-  0%, 100% { box-shadow: 0 0 40px rgba(220, 38, 38, 0.45); }
-  50%      { box-shadow: 0 0 75px rgba(220, 38, 38, 0.85); }
+  0%, 100% { box-shadow: inset 0 2px 0 rgba(255,255,255,0.25), inset 0 -4px 8px rgba(0,0,0,0.35), 0 0 40px rgba(220, 38, 38, 0.45); }
+  50%      { box-shadow: inset 0 2px 0 rgba(255,255,255,0.25), inset 0 -4px 8px rgba(0,0,0,0.35), 0 0 75px rgba(220, 38, 38, 0.85); }
 }
 
 @keyframes timer-pulse {
@@ -84,6 +84,113 @@
 
 .score-chip-pulse {
   animation: score-pulse 0.5s ease-out;
+}
+
+/* ── Bar atmosphere ─────────────────────────────────────────────
+   Warm "low bar light" backgrounds replacing flat gray-950 fills.
+   One glow from above (the bar lights), a faint wood-toned floor. */
+
+.bar-bg {
+  background:
+    radial-gradient(120% 55% at 50% -10%, rgba(217, 119, 6, 0.14), transparent 60%),
+    radial-gradient(90% 40% at 50% 115%, rgba(120, 53, 15, 0.12), transparent 65%),
+    #0b0906;
+}
+
+/* Final Tap — the lights dim to deep blue for the last question */
+.final-bg {
+  background:
+    radial-gradient(120% 55% at 50% -10%, rgba(59, 130, 246, 0.18), transparent 60%),
+    radial-gradient(90% 40% at 50% 115%, rgba(30, 58, 138, 0.25), transparent 65%),
+    #0d1326;
+}
+
+/* Question preview — same wood as the board's tap wall, so the picked tile
+   feels like it expands into a full-screen plank */
+.wood-bg {
+  background:
+    radial-gradient(120% 50% at 50% -10%, rgba(252, 211, 77, 0.14), transparent 60%),
+    linear-gradient(180deg, #92400e 0%, #78350f 45%, #451a03 100%);
+}
+
+/* Double Tap — everything floods amber */
+.dt-bg {
+  background:
+    radial-gradient(120% 60% at 50% -10%, rgba(245, 158, 11, 0.22), transparent 60%),
+    radial-gradient(90% 45% at 50% 115%, rgba(146, 64, 14, 0.28), transparent 65%),
+    #1c0f02;
+}
+
+.result-bg-correct {
+  background:
+    radial-gradient(120% 60% at 50% -10%, rgba(34, 197, 94, 0.22), transparent 60%),
+    #04170c;
+}
+
+.result-bg-wrong {
+  background:
+    radial-gradient(120% 60% at 50% -10%, rgba(239, 68, 68, 0.22), transparent 60%),
+    #1a0707;
+}
+
+/* Frosted glass panel with a faint amber edge — replaces flat bg-gray-900 cards */
+.glass-card {
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.055), rgba(255, 255, 255, 0.02));
+  border: 1px solid rgba(245, 158, 11, 0.16);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.07), 0 10px 30px rgba(0, 0, 0, 0.45);
+}
+
+/* Beer-pour CTA: foam highlight on top, amber body, presses down like a tap handle */
+.btn-beer {
+  background: linear-gradient(180deg, #fde68a 0%, #f59e0b 55%, #d97706 100%);
+  color: #451a03;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.45), 0 4px 16px rgba(245, 158, 11, 0.25);
+  transition: transform 0.1s ease, box-shadow 0.15s ease, opacity 0.15s ease;
+}
+.btn-beer:not(:disabled):active {
+  transform: translateY(1px) scale(0.99);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.3), 0 2px 8px rgba(245, 158, 11, 0.2);
+}
+.btn-beer:disabled {
+  opacity: 0.3;
+  box-shadow: none;
+}
+
+/* Neon bar-sign wordmark. Amber glow with a rare, subtle flicker. */
+.neon-title {
+  color: #fde68a;
+  text-shadow:
+    0 0 4px rgba(252, 211, 77, 0.6),
+    0 0 12px rgba(245, 158, 11, 0.5),
+    0 0 30px rgba(217, 119, 6, 0.45),
+    0 0 60px rgba(180, 83, 9, 0.35);
+  animation: neon-flicker 9s linear infinite;
+}
+
+@keyframes neon-flicker {
+  0%, 89%, 91.5%, 94.5%, 100% { opacity: 1; }
+  90%   { opacity: 0.7; }
+  91%   { opacity: 1; }
+  94%   { opacity: 0.85; }
+}
+
+/* Ambient bubbles drifting up the screen (Barware.tsx sets --drift per bubble) */
+@keyframes bubble-rise {
+  0%   { transform: translate(0, 0) scale(0.8); opacity: 0; }
+  10%  { opacity: 0.22; }
+  85%  { opacity: 0.22; }
+  100% { transform: translate(var(--drift, 0px), -105vh) scale(1.3); opacity: 0; }
+}
+
+/* Pint hero: beer pours up into the glass on mount, then the glass floats gently */
+@keyframes pour-rise {
+  0%   { transform: translateY(78px); }
+  100% { transform: translateY(0); }
+}
+
+@keyframes hero-float {
+  0%, 100% { transform: translateY(0); }
+  50%      { transform: translateY(-6px); }
 }
 
 /* Accessibility: collapse all animation for users who ask for reduced motion */
