@@ -46,6 +46,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   } | null>(null)
   const [doubleTapWager, setDoubleTapWager] = useState<number | null>(null)
   const [dtPendingTeamId, setDtPendingTeamId] = useState<string | null>(null)
+  // Host-picked Double Tap: team-assignment screen + host wager override input
+  const [hostDtPickQ, setHostDtPickQ] = useState<Question | null>(null)
+  const [hostWagerInput, setHostWagerInput] = useState('')
   const [pendingDeactivation, setPendingDeactivation] = useState(false)
   const [newGameConfirm, setNewGameConfirm] = useState(false)
   const [buzzOpenedAt, setBuzzOpenedAt]     = useState<number | null>(null)
@@ -543,12 +546,11 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   // Host pick from the question list. Runs the same preview flow as a player pick —
   // pending claim in the DB, then a question_preview broadcast so every screen gets
-  // the category splash — instead of jumping straight to the buzzer. Double Taps are
-  // the exception: their wager flow needs a selecting player's device, so they still
-  // activate directly.
+  // the category splash — instead of jumping straight to the buzzer. Double Taps
+  // first ask the host which team is taking it.
   async function hostPreviewQuestion(q: Question) {
     if (q.is_double_tap) {
-      activateQuestion(q.id)
+      setHostDtPickQ(q)
       return
     }
     const category = categories.find(c => c.id === q.category_id)
@@ -583,6 +585,85 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     setDtPendingTeamId(null)
     setDoubleTapWager(null)
     setPreviewInfo(preview)
+  }
+
+  // Host-assigned Double Tap: claim the pick for a team with NO selecting session —
+  // that signals every phone on the team to show the wager screen (first submit wins,
+  // enforced by confirm_question_selection). Falls into the normal waiting-for-wager
+  // flow, where the host can also set the wager directly.
+  async function hostAssignDoubleTap(q: Question, teamId: string) {
+    const category = categories.find(c => c.id === q.category_id)
+    const claimedAt = new Date().toISOString()
+    const { error } = await supabase.from('rooms').update({
+      pending_question_id: q.id,
+      pending_selection_team_id: teamId,
+      pending_selection_session_id: null,
+      pending_selection_claimed_at: claimedAt,
+      pending_selection_wager: null,
+    }).eq('id', roomId)
+    if (error) {
+      console.error('hostAssignDoubleTap failed:', error)
+      return
+    }
+    setRoom(prev => ({
+      ...prev,
+      pending_question_id: q.id,
+      pending_selection_team_id: teamId,
+      pending_selection_session_id: null,
+      pending_selection_claimed_at: claimedAt,
+      pending_selection_wager: null,
+    }))
+    broadcastRef.current?.publish('question_preview', {
+      questionId: q.id,
+      categoryName: category?.name ?? '',
+      pointValue: q.point_value ?? null,
+      startTs: Date.now(),
+      selectorTeamId: teamId,
+      doubleTapPending: true,
+      hostAssigned: true,
+    })
+    setHostDtPickQ(null)
+    setHostWagerInput('')
+    setDoubleTapWager(null)
+    setDtPendingTeamId(teamId)
+  }
+
+  // Host wager override — set or change the pending Double Tap wager at any point
+  // before the reveal, whether the pick came from a player or the host. Broadcasts
+  // the standard post-wager preview, which also closes any open wager screens on
+  // the team's phones.
+  async function hostSetDtWager() {
+    const teamId = room.pending_selection_team_id ?? dtPendingTeamId
+    const questionId = room.pending_question_id ?? previewInfo?.questionId
+    if (!teamId || !questionId) return
+    const q = categories.flatMap(c => c.questions).find(x => x.id === questionId)
+    const category = categories.find(c => c.id === q?.category_id)
+    const roundFloor = room.status === 'round_2' ? 2000 : 500
+    const max = Math.max(scores.get(teamId) ?? 0, roundFloor)
+    const parsed = parseInt(hostWagerInput)
+    if (isNaN(parsed)) return
+    const wager = Math.max(5, Math.min(max, parsed))
+    const { error } = await supabase.from('rooms')
+      .update({ pending_selection_wager: wager })
+      .eq('id', roomId)
+      .eq('pending_question_id', questionId)
+    if (error) {
+      console.error('hostSetDtWager failed:', error)
+      return
+    }
+    setRoom(prev => ({ ...prev, pending_selection_wager: wager }))
+    const preview = {
+      questionId,
+      categoryName: category?.name ?? previewInfo?.categoryName ?? '',
+      pointValue: q?.point_value ?? null,
+      startTs: Date.now(),
+      doubleTapWager: wager,
+    }
+    broadcastRef.current?.publish('question_preview', { ...preview, selectorTeamId: teamId })
+    setDoubleTapWager(wager)
+    setPreviewInfo(preview)
+    setDtPendingTeamId(null)
+    setHostWagerInput('')
   }
 
   async function activateQuestion(questionId: string) {
@@ -656,7 +737,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
         broadcastRef.current?.publish('question_activated', {
           question_id: questionId,
           question: publicQuestion,
-          double_tap_team_id: currentTurnTeamId,
+          // Pending team covers host-assigned Double Taps (which can go to any
+          // team); player picks always match the current turn team anyway.
+          double_tap_team_id: room.pending_selection_team_id ?? currentTurnTeamId,
           debugTiming: debugTimingMode || undefined,
         })
       }
@@ -746,6 +829,8 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     setPreviewInfo(null)
     setDtPendingTeamId(null)
     setDoubleTapWager(null)
+    setHostDtPickQ(null)
+    setHostWagerInput('')
     setRoom(prev => ({
       ...prev,
       pending_question_id: null,
@@ -1770,7 +1855,85 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
           )
 
         ) : !activeQuestion ? (
-          previewInfo ? (
+          hostDtPickQ ? (
+            // ── Host-picked Double Tap: assign a team ─────
+            <div className="flex-1 flex flex-col items-center justify-center gap-5 p-8 max-w-2xl mx-auto w-full">
+              <div className="text-center">
+                <p className="text-4xl mb-2">🍺</p>
+                <p className="text-xs text-amber-400 uppercase tracking-widest font-black mb-1">Double Tap</p>
+                <p className="font-black text-white text-2xl leading-tight">
+                  {categories.find(c => c.id === hostDtPickQ.category_id)?.name}
+                  {hostDtPickQ.point_value != null && (
+                    <span className="text-yellow-400 font-mono text-lg font-bold ml-2">${hostDtPickQ.point_value}</span>
+                  )}
+                </p>
+                <p className="text-gray-500 text-sm mt-2">
+                  Pick the team taking this Double Tap — the wager screen opens on their phones
+                </p>
+              </div>
+              <div className="w-full space-y-2">
+                {sortedTeams.map(team => (
+                  <button
+                    key={team.id}
+                    onClick={() => hostAssignDoubleTap(hostDtPickQ, team.id)}
+                    className={`w-full px-4 py-3 rounded-xl text-sm font-bold transition-colors flex items-center justify-between ${
+                      team.id === currentTurnTeamId
+                        ? 'bg-amber-500 text-gray-950'
+                        : 'bg-gray-800 hover:bg-gray-700 text-white'
+                    }`}
+                  >
+                    <span>{team.name}{team.id === currentTurnTeamId ? ' · picking now' : ''}</span>
+                    <span className="font-mono text-xs opacity-70">{scores.get(team.id) ?? 0}</span>
+                  </button>
+                ))}
+              </div>
+              <button
+                onClick={() => setHostDtPickQ(null)}
+                className="px-4 py-3 rounded-xl text-sm font-semibold text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-colors"
+              >
+                Cancel
+              </button>
+            </div>
+          ) : dtPendingTeamId && !previewInfo ? (
+            // ── Double Tap waiting for wager + host override ──
+            <div className="flex-1 flex flex-col items-center justify-center gap-5 p-8 max-w-2xl mx-auto w-full">
+              <div className="text-center">
+                <p className="text-4xl mb-2">🍺</p>
+                <p className="text-xs text-amber-400 uppercase tracking-widest font-black mb-1">Double Tap</p>
+                <p className="font-black text-white text-2xl leading-tight">
+                  {teams.find(t => t.id === dtPendingTeamId)?.name ?? 'A team'} is wagering…
+                </p>
+                <p className="text-gray-500 text-sm mt-2">
+                  Their phones have the wager screen. You can also set it from here — max{' '}
+                  {Math.max(scores.get(dtPendingTeamId) ?? 0, room.status === 'round_2' ? 2000 : 500)} pts.
+                </p>
+              </div>
+              <div className="w-full max-w-xs flex items-center gap-2">
+                <input
+                  type="number"
+                  inputMode="numeric"
+                  min={5}
+                  placeholder="Wager"
+                  value={hostWagerInput}
+                  onChange={e => setHostWagerInput(e.target.value)}
+                  className="flex-1 bg-gray-900 border border-gray-700 text-white text-center text-2xl font-mono font-black rounded-xl px-3 py-3 outline-none focus:ring-2 focus:ring-amber-400"
+                />
+                <button
+                  onClick={hostSetDtWager}
+                  disabled={hostWagerInput === ''}
+                  className="px-5 py-4 rounded-xl font-black bg-amber-500 text-gray-950 hover:bg-amber-400 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  Set →
+                </button>
+              </div>
+              <button
+                onClick={abortPreview}
+                className="px-4 py-3 rounded-xl text-sm font-semibold text-gray-500 hover:text-red-400 hover:bg-gray-800 transition-colors"
+              >
+                Undo Pick
+              </button>
+            </div>
+          ) : previewInfo ? (
             // ── Category preview ────────────────────────
             <div className="flex-1 flex flex-col items-center justify-center gap-4 p-8 max-w-2xl mx-auto w-full">
               <div className="text-center">
@@ -1780,10 +1943,30 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                   <p className="text-yellow-400 font-mono text-lg font-bold">${previewInfo.pointValue}</p>
                 )}
                 {previewInfo.doubleTapWager !== undefined && (
-                  <div className="mt-2 inline-flex items-center gap-2 bg-amber-500/20 border border-amber-500/40 rounded-xl px-4 py-2">
-                    <span>🍺</span>
-                    <span className="text-amber-400 font-black text-xl">{previewInfo.doubleTapWager} pts wagered</span>
-                  </div>
+                  <>
+                    <div className="mt-2 inline-flex items-center gap-2 bg-amber-500/20 border border-amber-500/40 rounded-xl px-4 py-2">
+                      <span>🍺</span>
+                      <span className="text-amber-400 font-black text-xl">{previewInfo.doubleTapWager} pts wagered</span>
+                    </div>
+                    <div className="mt-2 flex items-center justify-center gap-2">
+                      <input
+                        type="number"
+                        inputMode="numeric"
+                        min={5}
+                        placeholder="Change wager"
+                        value={hostWagerInput}
+                        onChange={e => setHostWagerInput(e.target.value)}
+                        className="w-32 bg-gray-900 border border-gray-700 text-white text-center font-mono font-bold rounded-lg px-2 py-1.5 text-sm outline-none focus:ring-2 focus:ring-amber-400"
+                      />
+                      <button
+                        onClick={hostSetDtWager}
+                        disabled={hostWagerInput === ''}
+                        className="px-3 py-1.5 rounded-lg text-xs font-black bg-gray-800 text-amber-400 hover:bg-gray-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                      >
+                        Update
+                      </button>
+                    </div>
+                  </>
                 )}
               </div>
               {(() => {

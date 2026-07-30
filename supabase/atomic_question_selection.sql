@@ -99,12 +99,26 @@ set search_path = ''
 as $$
 begin
   update public.rooms as r
-  set pending_selection_wager = p_wager
+  set pending_selection_wager = p_wager,
+      pending_selection_session_id = coalesce(r.pending_selection_session_id, p_session_id)
   where r.id = p_room_id
     and r.current_question_id is null
     and r.pending_question_id = p_question_id
     and r.pending_selection_team_id = p_team_id
-    and r.pending_selection_session_id = p_session_id
+    and (
+      r.pending_selection_session_id = p_session_id
+      or (
+        -- Host-assigned DT: no owning session yet — any player on the assigned
+        -- team may claim it. pending_selection_wager is null guards first-wins.
+        r.pending_selection_session_id is null
+        and exists (
+          select 1
+          from public.players as p
+          where p.team_id = p_team_id
+            and p.session_id = p_session_id
+        )
+      )
+    )
     and r.pending_selection_wager is null
     and exists (
       select 1

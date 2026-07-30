@@ -445,7 +445,10 @@ export default function PlayView() {
         })
         return
       }
-      if (room.pending_selection_session_id === getSessionId()) {
+      // No pending session = host-assigned DT: every phone on the chosen team gets
+      // the wager screen (first submit wins), not just a single initiating device.
+      const hostAssignedToMyTeam = !room.pending_selection_session_id && selectingTeamId != null && selectingTeamId === myTeam?.id
+      if (room.pending_selection_session_id === getSessionId() || hostAssignedToMyTeam) {
         setDoubleTapPendingQ({ questionId, rect: null })
         setDoubleTapStep(prev => prev ?? 'wager')
       } else if (selectingTeamId === myTeam?.id) {
@@ -608,21 +611,31 @@ export default function PlayView() {
     const ch = ablyClient.channels.get(`room:${room.id}`)
 
     ch.subscribe('question_preview', ({ data }) => {
-      const p = data as PreviewInfo & { selectorTeamId?: string; doubleTapPending?: boolean }
+      const p = data as PreviewInfo & { selectorTeamId?: string; doubleTapPending?: boolean; hostAssigned?: boolean }
 
       // First DT broadcast (tile tap, before wager) — observers show the reveal animation
       if (p.doubleTapPending && p.selectorTeamId) {
         setDoubleTapTeamId(p.selectorTeamId)
-        // Preserve isInitiator flag if this device already set it (clicker's own echo)
+        const mine = p.selectorTeamId === myTeamRef.current?.id
+        // Preserve isInitiator flag if this device already set it (clicker's own echo).
+        // A host-assigned DT has no clicking device — every phone on the team is an
+        // initiator, so the wager screen opens on all of them (first submit wins).
         const existingDt = (() => { try { return JSON.parse(sessionStorage.getItem('dtWager') ?? 'null') } catch { return null } })()
         sessionStorage.setItem('dtWager', JSON.stringify({
           selectorTeamId: p.selectorTeamId,
           questionId: p.questionId,
-          isInitiator: existingDt?.isInitiator === true,
+          isInitiator: existingDt?.isInitiator === true || (p.hostAssigned === true && mine),
           roomId: roomRef.current?.id,
         }))
-        if (p.selectorTeamId !== myTeamRef.current?.id) {
+        if (!mine) {
           setDtRevealForObserver(true)
+        } else if (p.hostAssigned) {
+          setDoubleTapPendingQ({ questionId: p.questionId, rect: null })
+          setDoubleTapWagerInput('')
+          setDoubleTapStep('reveal')
+          playDoubleTap()
+          navigator.vibrate?.(200)
+          setTimeout(() => setDoubleTapStep('wager'), 2000)
         } else {
           setDtTeammateWaiting(true)
         }
@@ -635,6 +648,10 @@ export default function PlayView() {
       setPreBuzzTaps(0)
       setBuzzLockedOut(false)
       setPreviewInfo(p)
+      // A wager is locked (by a teammate or a host override) — close any wager
+      // screen still open on this device.
+      setDoubleTapStep(null)
+      setDoubleTapPendingQ(null)
       if (p.doubleTapWager !== undefined && p.selectorTeamId) {
         setDoubleTapTeamId(p.selectorTeamId)
         setDtRevealForObserver(false) // transition to preview overlay
@@ -1610,7 +1627,14 @@ export default function PlayView() {
     if (!confirmed) {
       setDoubleTapStep(null)
       setDoubleTapPendingQ(null)
-      showSelectionNotice('That pick was undone by the host.')
+      // Rejected either because the host undid the pick, or because a teammate
+      // (or a host override) locked a wager first — only the undo needs a notice.
+      const { data: r } = await supabase.from('rooms')
+        .select('pending_question_id, pending_selection_wager')
+        .eq('id', room.id).single()
+      if (!(r?.pending_question_id === questionId && r.pending_selection_wager != null)) {
+        showSelectionNotice('That pick was undone by the host.')
+      }
       return
     }
     setRoom(prev => prev ? { ...prev, pending_selection_wager: wager } : prev)
