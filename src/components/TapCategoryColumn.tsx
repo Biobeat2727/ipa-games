@@ -183,7 +183,7 @@ export default function TapCategoryColumn({ categoryName, pointValues }: { categ
   return (
     <div className="flex flex-col gap-2 h-full">
       <TapHeader categoryName={categoryName} />
-      <div className="flex-1 grid gap-2" style={{ gridTemplateRows: `repeat(${pointValues.length}, 1fr)` }}>
+      <div className="flex-1 min-h-0 grid gap-2" style={{ gridTemplateRows: `repeat(${pointValues.length}, minmax(0, 1fr))` }}>
         {pointValues.map((pv, idx) => (
           <BeerGlass key={pv} pointValue={pv} state={states[idx]} onClick={() => handlePour(idx)} />
         ))}

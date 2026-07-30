@@ -969,12 +969,16 @@ export default function ProjectorView() {
           </div>
         </div>
 
-        {/* Jeopardy grid */}
+        {/* Board grid — min-h-0 stops the flex item inflating to the glasses'
+            intrinsic aspect-ratio height and overflowing the viewport bottom */}
         <div
-          className="flex-1 grid gap-2"
+          className="flex-1 min-h-0 grid gap-2"
           style={{
             gridTemplateColumns: `repeat(${categories.length}, minmax(0, 1fr))`,
-            gridTemplateRows: `auto repeat(${pointValues.length}, 1fr)`,
+            // minmax(0, …) on ROWS too: a bare 1fr row can't shrink below the
+            // BeerGlass SVG's intrinsic aspect-ratio height, which overflows
+            // the viewport bottom on wide screens.
+            gridTemplateRows: `auto repeat(${pointValues.length}, minmax(0, 1fr))`,
           }}
         >
           {/* Category headers */}
