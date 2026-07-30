@@ -7,6 +7,7 @@ import Confetti from '../../components/Confetti'
 import { playRoundTransition } from '../../lib/sounds'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
+import { Bubbles, PintHero } from '../../components/Barware'
 import { findCurrentActiveRoom } from '../../lib/roomDiscovery'
 
 interface TimerPayload {
@@ -567,37 +568,65 @@ export default function ProjectorView() {
     )
   }
 
-  // Lobby
+  // Lobby — same bar mood as the phone join screens: warm dark, bubbles, neon sign
   if (room.status === 'lobby') {
     const joinUrl = window.location.origin
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8 text-center">
-        <p className="text-gray-500 uppercase tracking-[0.4em] mb-6" style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
-          Join the game
-        </p>
-        <img
-          src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(joinUrl)}&size=300x300`}
-          alt="Scan to join"
-          className="rounded-2xl bg-white p-3 mb-6"
-          style={{ width: 'clamp(140px, 18vw, 280px)', height: 'clamp(140px, 18vw, 280px)' }}
-        />
-        <p className="font-semibold text-white mb-12" style={{ fontSize: 'clamp(1rem, 3vw, 2.25rem)' }}>
-          {joinUrl}
-        </p>
-        {sortedTeams.length > 0 ? (
-          <div className="flex flex-wrap justify-center gap-4 max-w-5xl">
-            {sortedTeams.map(team => (
-              <div key={team.id} className="bg-gray-900 border border-gray-800 rounded-2xl px-8 py-4 flex items-center gap-3">
-                <span className="w-2.5 h-2.5 rounded-full bg-green-400 shrink-0" />
-                <p className="font-bold" style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>{team.name}</p>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="text-gray-700" style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
-            Waiting for teams to join…
+      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-8 text-center relative overflow-hidden">
+        <Bubbles count={20} />
+        <div className="relative z-10 flex flex-col items-center w-full">
+          <h1 className="neon-title font-black tracking-tight mb-3"
+            style={{ fontSize: 'clamp(3rem, 8vw, 7rem)', animation: 'slide-up-in 0.5s ease-out both' }}>
+            Tapped In!
+          </h1>
+          <p className="text-amber-400/90 uppercase tracking-[0.4em] mb-10"
+            style={{ fontSize: 'clamp(1rem, 2vw, 1.5rem)', animation: 'slide-up-in 0.5s ease-out 0.12s both' }}>
+            Grab your phone — scan to join
           </p>
-        )}
+          <div className="glass-card rounded-3xl p-5 mb-5"
+            style={{ animation: 'slide-up-in 0.5s ease-out 0.24s both' }}>
+            <img
+              src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(joinUrl)}&size=300x300`}
+              alt="Scan to join"
+              className="rounded-2xl bg-white p-3"
+              style={{ width: 'clamp(140px, 18vw, 280px)', height: 'clamp(140px, 18vw, 280px)' }}
+            />
+          </div>
+          <p className="font-semibold text-amber-100/90 mb-12"
+            style={{ fontSize: 'clamp(1rem, 3vw, 2.25rem)', animation: 'slide-up-in 0.5s ease-out 0.36s both' }}>
+            {joinUrl}
+          </p>
+          {sortedTeams.length > 0 ? (
+            <div className="flex flex-wrap justify-center gap-4 max-w-5xl">
+              {sortedTeams.map((team, i) => (
+                <div key={team.id} className="glass-card rounded-2xl px-7 py-4 flex items-center gap-4"
+                  style={{ animation: `slide-up-in 0.4s ease-out ${0.4 + i * 0.08}s both` }}>
+                  <span
+                    className="rounded-full shrink-0 flex items-center justify-center font-black text-amber-950"
+                    style={{
+                      width: 'clamp(2.25rem, 3vw, 3rem)',
+                      height: 'clamp(2.25rem, 3vw, 3rem)',
+                      fontSize: 'clamp(1rem, 1.8vw, 1.5rem)',
+                      background: 'linear-gradient(145deg, #fcd34d 0%, #f59e0b 60%, #c2650a 100%)',
+                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4)',
+                    }}
+                  >
+                    {team.name.charAt(0).toUpperCase()}
+                  </span>
+                  <p className="font-bold" style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>{team.name}</p>
+                  <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse shrink-0" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col items-center" style={{ animation: 'slide-up-in 0.5s ease-out 0.45s both' }}>
+              <PintHero className="w-14 h-22 mb-4 opacity-80" />
+              <p className="text-amber-100/60" style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
+                Waiting for the first team to grab a table…
+              </p>
+            </div>
+          )}
+        </div>
       </div>
     )
   }
