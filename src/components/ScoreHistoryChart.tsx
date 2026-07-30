@@ -85,7 +85,7 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
   const S = steps.length
   const W = 1000
   const PAD_L = 24
-  const PAD_R = 40
+  const PAD_R = 118 // room for the final-score labels that give the y axis a scale
   const PAD_T = 18
   const PAD_B = 40
   const ROW_H = 64
@@ -96,6 +96,15 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
 
   const finalScores = steps[S - 1]
   const finalPositions = positions[S - 1]
+
+  // Which intermediate steps get an x-axis label — thinned to at most ~8 so long
+  // rounds never crowd, and kept clear of the START/FINAL captions at the ends.
+  const labelStride = Math.max(1, Math.ceil((S - 2) / 8))
+  const xTickSteps = Array.from({ length: S }, (_, i) => i).filter(i =>
+    i > 0 && i < S - 1 &&
+    i % labelStride === 0 &&
+    x(i) > PAD_L + 100 && x(i) < plotR - 100
+  )
 
   const pathOf = (id: string) =>
     steps.map((_, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(positions[i].get(id) ?? 0).toFixed(1)}`).join(' ')
@@ -143,6 +152,14 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
             FINAL
           </text>
 
+          {/* X-axis question numbers — where each swing happened during the round */}
+          {xTickSteps.map(i => (
+            <text key={i} x={x(i)} y={H - 8} fill="#4b5563" fontSize={20} fontWeight={600}
+              textAnchor="middle" fontFamily="ui-monospace, monospace">
+              {snapshots[i - 1]?.label ?? `#${i}`}
+            </text>
+          ))}
+
           {/* Team lines — fixed order; first one reports the intro animation finishing */}
           {teamIds.map((id, i) => (
             <path key={id} d={pathOf(id)} fill="none"
@@ -177,6 +194,19 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
               style={dotStyle({ cursor: 'pointer' })}
               onClick={() => toggle(id)}
             />
+          ))}
+
+          {/* Final scores down the right edge — the y axis in points, leader on top */}
+          {teamIds.map(id => (
+            <text key={id} x={plotR + 18} y={y(finalPositions.get(id) ?? 0) + 9}
+              fill={getTeamColor(id, teamIds)} fontSize={26}
+              fontWeight={id === selectedId ? 800 : 700}
+              fontFamily="ui-monospace, monospace"
+              style={dotStyle({ cursor: 'pointer' })}
+              onClick={() => toggle(id)}
+            >
+              {(finalScores.get(id) ?? 0).toLocaleString()}
+            </text>
           ))}
 
           {/* Invisible fat hit-paths on top: make thin lines tappable on phones */}
