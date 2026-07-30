@@ -959,9 +959,10 @@ export default function ProjectorView() {
   if (!activeQuestion && categories.length > 0) {
     const roundLabel = room.status === 'round_2' ? 'Round 2' : 'Round 1'
     return (
-      <div className="h-screen bar-bg text-white flex flex-col overflow-hidden p-3 gap-2">
+      <div className="h-screen bar-bg text-white flex flex-col overflow-hidden p-3 gap-2 relative">
+        <Bubbles count={16} />
         {/* Score bar */}
-        <div className="flex items-center justify-between shrink-0 px-3 py-1">
+        <div className="relative z-10 flex items-center justify-between shrink-0 px-3 py-1">
           <div>
             <p className="text-yellow-400 font-mono font-bold uppercase tracking-widest"
               style={{ fontSize: 'clamp(0.9rem, 2vw, 1.25rem)' }}>
@@ -1002,55 +1003,63 @@ export default function ProjectorView() {
           </div>
         </div>
 
-        {/* Category headers */}
-        <div className="grid gap-2 shrink-0"
-          style={{ gridTemplateColumns: `repeat(${categories.length}, minmax(0, 1fr))` }}>
-          {categories.map(cat => (
-            <TapHeader key={cat.id} categoryName={cat.name} />
-          ))}
-        </div>
+        {/* The board is a centered shelving unit, not a full-bleed stretch: capping
+            its width pulls the columns toward the glasses' own proportions, so the
+            glasses read larger and the dead air between them mostly disappears. */}
+        <div className="relative z-10 flex-1 min-h-0 w-full mx-auto flex flex-col gap-2"
+          style={{ maxWidth: 'min(1180px, 88vw)' }}>
 
-        {/* Glass shelves. The glasses keep their real proportions (fit), which on a
-            16:9 screen leaves air between columns — so the air becomes the bar:
-            bright epoxy-sealed wood planks run the full width under each row and
-            every glass sits on one. min-h-0 + minmax(0,1fr) rows keep it all
-            inside the viewport (bare 1fr can't shrink below the SVG's intrinsic
-            aspect-ratio height). */}
-        <div className="flex-1 min-h-0 relative">
-          {pointValues.map((pv, k) => {
-            const n = pointValues.length
-            const G = 8 // row gap in px (gap-2) — planks land in the gaps
-            return (
-              <div key={pv} aria-hidden className="absolute left-0 right-0 rounded-[3px]"
-                style={{
-                  top: `calc((100% - ${(n - 1) * G}px) * ${(k + 1) / n} + ${k * G}px - 3px)`,
-                  height: 15,
-                  background: [
-                    'linear-gradient(180deg, rgba(255,255,255,0.4), rgba(255,255,255,0.05) 45%, rgba(255,255,255,0) 60%)',
-                    'repeating-linear-gradient(90deg, rgba(122,63,12,0.14) 0 3px, transparent 3px 11px, rgba(122,63,12,0.09) 11px 17px, transparent 17px 31px)',
-                    'linear-gradient(180deg, #e8ba79 0%, #cd9550 55%, #9c6c30 100%)',
-                  ].join(', '),
-                  boxShadow: '0 5px 12px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.65), inset 0 -2px 3px rgba(0,0,0,0.3)',
-                }}
-              />
-            )
-          })}
-          <div className="h-full grid gap-2"
-            style={{
-              gridTemplateColumns: `repeat(${categories.length}, minmax(0, 1fr))`,
-              gridTemplateRows: `repeat(${pointValues.length}, minmax(0, 1fr))`,
-            }}
-          >
-            {pointValues.map(pv =>
-              categories.map(cat => {
-                const q        = cat.questions.find(q => q.point_value === pv)
-                if (!q) return <div key={`${cat.id}-${pv}`} />
-                const answered = q.is_answered
-                return (
-                  <BeerGlass key={`${cat.id}-${pv}`} pointValue={pv} state={answered ? 'empty' : 'full'} disabled fit />
-                )
-              })
-            )}
+          {/* Category headers */}
+          <div className="grid gap-2 shrink-0"
+            style={{ gridTemplateColumns: `repeat(${categories.length}, minmax(0, 1fr))` }}>
+            {categories.map(cat => (
+              <TapHeader key={cat.id} categoryName={cat.name} />
+            ))}
+          </div>
+
+          {/* Glass shelves — every row of glasses stands on a bright epoxy-sealed
+              plank spanning the shelving unit (slight overhang past the columns).
+              min-h-0 + minmax(0,1fr) rows keep it inside the viewport (bare 1fr
+              can't shrink below the SVG's intrinsic aspect-ratio height). */}
+          <div className="flex-1 min-h-0 relative">
+            {pointValues.map((pv, k) => {
+              const n = pointValues.length
+              const G = 8 // row gap in px (gap-2) — planks land in the gaps
+              return (
+                <div key={pv} aria-hidden className="absolute rounded-[2px]"
+                  style={{
+                    left: -16,
+                    right: -16,
+                    top: `calc((100% - ${(n - 1) * G}px) * ${(k + 1) / n} + ${k * G}px - 4px)`,
+                    height: 18,
+                    background: [
+                      // broad soft tonal drift along the plank — grain, not stripes
+                      'linear-gradient(90deg, rgba(101,56,14,0.16) 0%, rgba(101,56,14,0) 18%, rgba(101,56,14,0.08) 38%, rgba(101,56,14,0) 55%, rgba(101,56,14,0.12) 78%, rgba(101,56,14,0) 100%)',
+                      // epoxy-lit wood: bright top face rolling into a darker front edge
+                      'linear-gradient(180deg, #f0c98a 0%, #dca75c 38%, #b07c38 62%, #7d5423 100%)',
+                    ].join(', '),
+                    boxShadow: '0 6px 14px rgba(0,0,0,0.5), inset 0 1px 0 rgba(255,255,255,0.75), inset 0 -3px 4px rgba(0,0,0,0.35)',
+                  }}
+                />
+              )
+            })}
+            <div className="h-full grid gap-2"
+              style={{
+                gridTemplateColumns: `repeat(${categories.length}, minmax(0, 1fr))`,
+                gridTemplateRows: `repeat(${pointValues.length}, minmax(0, 1fr))`,
+              }}
+            >
+              {pointValues.map(pv =>
+                categories.map(cat => {
+                  const q        = cat.questions.find(q => q.point_value === pv)
+                  if (!q) return <div key={`${cat.id}-${pv}`} />
+                  const answered = q.is_answered
+                  return (
+                    <BeerGlass key={`${cat.id}-${pv}`} pointValue={pv} state={answered ? 'empty' : 'full'} disabled fit />
+                  )
+                })
+              )}
+            </div>
           </div>
         </div>
       </div>
