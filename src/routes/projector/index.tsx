@@ -572,32 +572,36 @@ export default function ProjectorView() {
   if (room.status === 'lobby') {
     const joinUrl = window.location.origin
     return (
-      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-8 text-center relative overflow-hidden">
+      <div className="h-screen bar-bg text-white flex flex-col items-center justify-center text-center relative overflow-hidden px-8"
+        style={{ paddingTop: 'clamp(0.75rem, 2.5vh, 2rem)', paddingBottom: 'clamp(0.75rem, 2.5vh, 2rem)' }}>
         <Bubbles count={20} />
-        <div className="relative z-10 flex flex-col items-center w-full">
-          <h1 className="neon-title font-black tracking-tight mb-3"
-            style={{ fontSize: 'clamp(3rem, 8vw, 7rem)', animation: 'slide-up-in 0.5s ease-out both' }}>
+        {/* Every vertical size is vh-aware so the whole stack compresses to fit
+            the screen — the projector must never scroll or clip */}
+        <div className="relative z-10 flex flex-col items-center w-full min-h-0"
+          style={{ gap: 'clamp(0.5rem, 1.8vh, 1.5rem)' }}>
+          <h1 className="neon-title font-black tracking-tight"
+            style={{ fontSize: 'clamp(2.25rem, min(8vw, 10vh), 7rem)', animation: 'slide-up-in 0.5s ease-out both' }}>
             Tapped In!
           </h1>
-          <p className="text-amber-400/90 uppercase tracking-[0.4em] mb-10"
-            style={{ fontSize: 'clamp(1rem, 2vw, 1.5rem)', animation: 'slide-up-in 0.5s ease-out 0.12s both' }}>
+          <p className="text-amber-400/90 uppercase tracking-[0.4em]"
+            style={{ fontSize: 'clamp(0.9rem, min(2vw, 2.6vh), 1.5rem)', animation: 'slide-up-in 0.5s ease-out 0.12s both' }}>
             Grab your phone — scan to join
           </p>
-          <div className="glass-card rounded-3xl p-5 mb-5"
+          <div className="glass-card rounded-3xl p-4"
             style={{ animation: 'slide-up-in 0.5s ease-out 0.24s both' }}>
             <img
               src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(joinUrl)}&size=300x300`}
               alt="Scan to join"
               className="rounded-2xl bg-white p-3"
-              style={{ width: 'clamp(140px, 18vw, 280px)', height: 'clamp(140px, 18vw, 280px)' }}
+              style={{ width: 'clamp(120px, min(18vw, 32vh), 280px)', height: 'clamp(120px, min(18vw, 32vh), 280px)' }}
             />
           </div>
-          <p className="font-semibold text-amber-100/90 mb-12"
-            style={{ fontSize: 'clamp(1rem, 3vw, 2.25rem)', animation: 'slide-up-in 0.5s ease-out 0.36s both' }}>
+          <p className="font-semibold text-amber-100/90"
+            style={{ fontSize: 'clamp(1rem, min(3vw, 3.2vh), 2.25rem)', animation: 'slide-up-in 0.5s ease-out 0.36s both' }}>
             {joinUrl}
           </p>
           {sortedTeams.length > 0 ? (
-            <div className="flex flex-wrap justify-center gap-4 max-w-5xl">
+            <div className="flex flex-wrap justify-center gap-3 max-w-5xl min-h-0 overflow-hidden">
               {sortedTeams.map((team, i) => (
                 <div key={team.id} className="glass-card rounded-2xl px-7 py-4 flex items-center gap-4"
                   style={{ animation: `slide-up-in 0.4s ease-out ${0.4 + i * 0.08}s both` }}>
