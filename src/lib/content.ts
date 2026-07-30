@@ -73,11 +73,12 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
     .eq('room_id', roomId)
   if (clearErr) throw new Error(`Clear failed: ${clearErr.message}`)
 
-  // Track all inserted question IDs per round so we can randomly mark one as Double Tap
-  const insertedByRound = new Map<number, string[]>()
+  // Track all inserted question IDs (with category) per round so we can randomly
+  // mark two per round as Double Taps
+  const insertedByRound = new Map<number, Array<{ id: string; categoryId: string }>>()
 
   for (const round of content.rounds) {
-    const roundIds: string[] = []
+    const roundIds: Array<{ id: string; categoryId: string }> = []
     for (const cat of round.categories) {
       const { data: category, error: catErr } = await supabase
         .from('categories')
@@ -95,17 +96,22 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
         }))
       ).select('id')
       if (qErr) throw new Error(`Questions for "${cat.name}": ${qErr.message}`)
-      if (inserted) roundIds.push(...inserted.map((r: { id: string }) => r.id))
+      if (inserted) roundIds.push(...inserted.map((r: { id: string }) => ({ id: r.id, categoryId: category.id })))
     }
     insertedByRound.set(round.round, roundIds)
   }
 
-  // Randomly pick 1 question per round (rounds 1 & 2 only) and mark as Double Tap
+  // Randomly pick 2 questions per round (rounds 1 & 2 only) and mark as Double Taps —
+  // in different categories when the round has more than one category.
   for (const roundNum of [1, 2]) {
-    const ids = insertedByRound.get(roundNum)
-    if (!ids || ids.length === 0) continue
-    const chosen = ids[Math.floor(Math.random() * ids.length)]
-    await supabase.from('questions').update({ is_double_tap: true }).eq('id', chosen)
+    const pool = insertedByRound.get(roundNum)
+    if (!pool || pool.length === 0) continue
+    const first = pool[Math.floor(Math.random() * pool.length)]
+    const otherCategories = pool.filter(q => q.categoryId !== first.categoryId)
+    const secondPool = otherCategories.length > 0 ? otherCategories : pool.filter(q => q.id !== first.id)
+    const picks = [first.id]
+    if (secondPool.length > 0) picks.push(secondPool[Math.floor(Math.random() * secondPool.length)].id)
+    await supabase.from('questions').update({ is_double_tap: true }).in('id', picks)
   }
 
   // Final Jeopardy — point_value is null (wager determines scoring)

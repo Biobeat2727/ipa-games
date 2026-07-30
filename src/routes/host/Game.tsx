@@ -99,9 +99,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   // rooms.score_snapshots so a host page refresh doesn't lose the round's story.
   const scoreHistoryRef = useRef<ScoreSnapshot[]>(initialRoom.score_snapshots ?? [])
 
-  function recordScoreSnapshot(updatedScores: Map<string, number>) {
+  function recordScoreSnapshot(updatedScores: Map<string, number>, label?: string) {
     const snap: ScoreSnapshot = {
-      label: `#${scoreHistoryRef.current.length + 1}`,
+      label: label ?? `#${scoreHistoryRef.current.length + 1}`,
       scores: teams.map(t => ({ team_id: t.id, score: updatedScores.get(t.id) ?? t.score })),
     }
     scoreHistoryRef.current = [...scoreHistoryRef.current, snap]
@@ -541,6 +541,50 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   // ── Actions ───────────────────────────────────────────────
 
+  // Host pick from the question list. Runs the same preview flow as a player pick —
+  // pending claim in the DB, then a question_preview broadcast so every screen gets
+  // the category splash — instead of jumping straight to the buzzer. Double Taps are
+  // the exception: their wager flow needs a selecting player's device, so they still
+  // activate directly.
+  async function hostPreviewQuestion(q: Question) {
+    if (q.is_double_tap) {
+      activateQuestion(q.id)
+      return
+    }
+    const category = categories.find(c => c.id === q.category_id)
+    const claimedAt = new Date().toISOString()
+    const { error } = await supabase.from('rooms').update({
+      pending_question_id: q.id,
+      pending_selection_team_id: null,
+      pending_selection_session_id: null,
+      pending_selection_claimed_at: claimedAt,
+      pending_selection_wager: null,
+    }).eq('id', roomId)
+    if (error) {
+      console.error('hostPreviewQuestion failed:', error)
+      return
+    }
+    setRoom(prev => ({
+      ...prev,
+      pending_question_id: q.id,
+      pending_selection_team_id: null,
+      pending_selection_session_id: null,
+      pending_selection_claimed_at: claimedAt,
+      pending_selection_wager: null,
+    }))
+    const preview = {
+      questionId: q.id,
+      categoryName: category?.name ?? '',
+      pointValue: q.point_value,
+      startTs: Date.now(),
+    }
+    // No selectorTeamId — receivers treat a selector-less preview as a plain reveal.
+    broadcastRef.current?.publish('question_preview', { ...preview, answer: q.answer })
+    setDtPendingTeamId(null)
+    setDoubleTapWager(null)
+    setPreviewInfo(preview)
+  }
+
   async function activateQuestion(questionId: string) {
     const { error } = await supabase
       .from('rooms').update({
@@ -836,7 +880,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     // Load FJ category + question before touching DB
     const { data: fjCat } = await supabase
       .from('categories').select().eq('room_id', roomId).eq('round', 3).single()
-    const catName = fjCat?.name ?? 'Final Jeopardy'
+    const catName = fjCat?.name ?? 'Final Tap'
     let loadedQuestion: Question | null = null
     if (fjCat) {
       const { data: q } = await supabase.from('questions').select().eq('category_id', fjCat.id).single()
@@ -883,6 +927,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     setFjCategoryName(catName)
     setFjQuestion(loadedQuestion)
     setFjPhase('starting')
+    setIntermissionSnapshots(null)
     broadcastRef.current?.publish('game_state_change', { status: 'final_jeopardy', fj_category: catName, active_team_ids: [...top3ids] })
   }
 
@@ -1053,6 +1098,8 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
     const finalScores = new Map(data.map(row => [row.team_id, row.final_score]))
     setScores(finalScores)
+    // One last chart step so the end-of-game score map shows the Final Tap swings
+    recordScoreSnapshot(finalScores, 'Final Tap')
     setRoom(prev => ({
       ...prev,
       status: 'finished',
@@ -1087,7 +1134,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     let snapshots = scoreHistoryRef.current
     if (snapshots.length === 0) {
       snapshots = [{
-        label: 'Round 1',
+        label: room.status === 'round_2' ? 'Round 2' : 'Round 1',
         scores: teams.map(t => ({ team_id: t.id, score: scores.get(t.id) ?? t.score })),
       }]
       scoreHistoryRef.current = snapshots
@@ -1095,6 +1142,24 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     }
     setIntermissionSnapshots(snapshots)
     broadcastRef.current?.publish('round_intermission', { snapshots })
+  }
+
+  // End-of-game score map — same chart, shown over the winner/podium screens on
+  // every surface until the host closes it.
+  function showFinalScoreMap() {
+    const snapshots = scoreHistoryRef.current.length > 0
+      ? scoreHistoryRef.current
+      : [{
+          label: 'Final',
+          scores: teams.map(t => ({ team_id: t.id, score: scores.get(t.id) ?? t.score })),
+        }]
+    setIntermissionSnapshots(snapshots)
+    broadcastRef.current?.publish('round_intermission', { snapshots })
+  }
+
+  function closeScoreMap() {
+    setIntermissionSnapshots(null)
+    broadcastRef.current?.publish('intermission_closed', {})
   }
 
   function devShowGraph() {
@@ -1317,7 +1382,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                         return (
                           <button
                             key={q.id}
-                            onClick={() => !isAnswered && !isActive && activateQuestion(q.id)}
+                            onClick={() => !isAnswered && !isActive && hostPreviewQuestion(q)}
                             disabled={isAnswered || isActive}
                             className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${
                               isAnswered
@@ -1343,7 +1408,73 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
       {/* ── Right: active question / judging / FJ ────────── */}
       <div className="w-7/12 p-5 flex flex-col gap-4 overflow-y-auto">
-        {fjPhase ? (
+        {intermissionSnapshots ? (
+          // ── Score map — round intermission or end-of-game recap ──
+          <div className="flex-1 flex flex-col gap-4 p-5">
+            <div className="text-center">
+              <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">
+                {room.status === 'finished' ? 'Final Standings'
+                  : room.status === 'round_2' ? 'Round 2 Complete'
+                  : 'Round 1 Complete'}
+              </p>
+              <p className="text-xl font-black text-white">Score History</p>
+              <p className="text-gray-500 text-xs mt-1">Players are seeing this on their phones</p>
+            </div>
+            <div className="flex-1 min-h-0">
+              <ScoreHistoryChart
+                snapshots={intermissionSnapshots}
+                teamNames={new Map(teams.map(t => [t.id, t.name]))}
+                teamIds={teams.map(t => t.id)}
+              />
+            </div>
+            {room.status === 'round_2' ? (
+              <div className="space-y-2">
+                {fjTransitionError && <p className="text-red-400 text-sm text-center">{fjTransitionError}</p>}
+                <button
+                  onClick={startFinalJeopardy}
+                  className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+                >
+                  Start Final Tap →
+                </button>
+              </div>
+            ) : room.status === 'finished' ? (
+              <button
+                onClick={closeScoreMap}
+                className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+              >
+                Back to Results →
+              </button>
+            ) : (
+              <div className="space-y-2">
+                <div className="w-full space-y-1">
+                  <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">First pick for Round 2</p>
+                  {sortedTeams.map(team => (
+                    <button
+                      key={team.id}
+                      onClick={() => assignTurn(
+                        team.id === currentTurnTeamId ? null : team.id
+                      )}
+                      className={`w-full px-4 py-2 rounded-xl text-sm font-bold transition-colors flex items-center justify-between ${
+                        team.id === currentTurnTeamId
+                          ? 'bg-yellow-400 text-gray-950'
+                          : 'bg-gray-800 hover:bg-gray-700 text-white'
+                      }`}
+                    >
+                      <span>{team.name}</span>
+                      <span className="font-mono text-xs opacity-70">{scores.get(team.id) ?? 0}</span>
+                    </button>
+                  ))}
+                </div>
+                <button
+                  onClick={beginRound2}
+                  className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+                >
+                  Begin Round 2 →
+                </button>
+              </div>
+            )}
+          </div>
+        ) : fjPhase ? (
 
           fjPhase === 'starting' ? (
             <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8 text-center">
@@ -1376,7 +1507,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
           ) : fjPhase === 'wager' ? (
             <div className="flex-1 flex flex-col gap-4">
               <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
-                <p className="text-xs text-yellow-400 uppercase tracking-widest font-semibold mb-1">Final Jeopardy</p>
+                <p className="text-xs text-yellow-400 uppercase tracking-widest font-semibold mb-1">Final Tap</p>
                 <p className="text-2xl font-black text-white mb-1">{fjCategoryName}</p>
                 <p className="text-gray-500 text-sm">Collecting wagers — reveal the question when all teams are ready</p>
               </div>
@@ -1415,7 +1546,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
             <div className="flex-1 flex flex-col gap-4">
               <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800">
                 <div className="flex items-center justify-between mb-3">
-                  <p className="text-xs text-gray-500 uppercase tracking-widest">Final Jeopardy — Answering</p>
+                  <p className="text-xs text-gray-500 uppercase tracking-widest">Final Tap — Answering</p>
                   <span className={`font-mono text-4xl font-black tabular-nums ${fjTimerSeconds <= 15 ? 'text-red-400' : 'text-yellow-400'}`}>
                     {fjTimerSeconds}
                   </span>
@@ -1607,6 +1738,12 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                   </div>
                 ))}
               </div>
+              <button
+                onClick={showFinalScoreMap}
+                className="w-full py-3 rounded-xl text-sm font-bold bg-gray-800 text-yellow-400 hover:bg-gray-700 transition-colors"
+              >
+                📈 Show Score Map
+              </button>
               {newGameConfirm ? (
                 <div className="flex flex-col gap-2 w-full">
                   <p className="text-sm text-center text-gray-400">Start a new game? This will clear everything.</p>
@@ -1632,49 +1769,6 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
             </div>
           )
 
-        ) : intermissionSnapshots ? (
-          // ── Round Intermission (score history graph) ──────
-          <div className="flex-1 flex flex-col gap-4 p-5">
-            <div className="text-center">
-              <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">Round 1 Complete</p>
-              <p className="text-xl font-black text-white">Score History</p>
-              <p className="text-gray-500 text-xs mt-1">Players are seeing this on their phones</p>
-            </div>
-            <div className="flex-1 min-h-0">
-              <ScoreHistoryChart
-                snapshots={intermissionSnapshots}
-                teamNames={new Map(teams.map(t => [t.id, t.name]))}
-                teamIds={teams.map(t => t.id)}
-              />
-            </div>
-            <div className="space-y-2">
-              <div className="w-full space-y-1">
-                <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">First pick for Round 2</p>
-                {sortedTeams.map(team => (
-                  <button
-                    key={team.id}
-                    onClick={() => assignTurn(
-                      team.id === currentTurnTeamId ? null : team.id
-                    )}
-                    className={`w-full px-4 py-2 rounded-xl text-sm font-bold transition-colors flex items-center justify-between ${
-                      team.id === currentTurnTeamId
-                        ? 'bg-yellow-400 text-gray-950'
-                        : 'bg-gray-800 hover:bg-gray-700 text-white'
-                    }`}
-                  >
-                    <span>{team.name}</span>
-                    <span className="font-mono text-xs opacity-70">{scores.get(team.id) ?? 0}</span>
-                  </button>
-                ))}
-              </div>
-              <button
-                onClick={beginRound2}
-                className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
-              >
-                Begin Round 2 →
-              </button>
-            </div>
-          </div>
         ) : !activeQuestion ? (
           previewInfo ? (
             // ── Category preview ────────────────────────
@@ -1728,7 +1822,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
             <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8">
               <div className="text-center">
                 <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">Round 2 Complete</p>
-                <p className="text-2xl font-black text-white">Ready for Final Jeopardy?</p>
+                <p className="text-2xl font-black text-white">Ready for Final Tap?</p>
                 <p className="text-gray-500 text-sm mt-2">Top 3 teams advance</p>
               </div>
               <div className="w-full space-y-2">
@@ -1752,10 +1846,10 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 )}
               </div>
               <button
-                onClick={startFinalJeopardy}
+                onClick={showRoundIntermission}
                 className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
               >
-                Start Final Jeopardy →
+                Show Scores &amp; Start Final Tap →
               </button>
             </div>
           ) : round1Complete ? (

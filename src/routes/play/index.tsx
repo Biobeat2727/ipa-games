@@ -839,6 +839,9 @@ export default function PlayView() {
       const { snapshots } = data as { snapshots: ScoreSnapshot[] }
       setIntermissionSnapshots(snapshots)
     })
+    ch.subscribe('intermission_closed', () => {
+      setIntermissionSnapshots(null)
+    })
     ch.subscribe('game_state_change', ({ data }) => {
       const { status, fj_category } = data as { status: string; fj_category?: string }
       const r = roomRef.current
@@ -875,7 +878,8 @@ export default function PlayView() {
         return
       }
       if (status === 'final_jeopardy') {
-        setFjCategoryName(fj_category ?? 'Final Jeopardy')
+        setIntermissionSnapshots(null)
+        setFjCategoryName(fj_category ?? 'Final Tap')
         setFjWagerInput(''); setFjWagerId(null); setFjLockedWagerAmount(null); setFjQuestion(null)
         setFjResponse(''); setFjResponseSubmitted(false); setFjResponseSubmitting(false); setFjResponseError('')
         setFjResponseDeadline(null); setFjTimeRemaining(null); setFjFinalScores([])
@@ -1007,7 +1011,7 @@ export default function PlayView() {
 
       setMyTeam(team)
       setMyScore(team.score)
-      setFjCategoryName(category?.name ?? 'Final Jeopardy')
+      setFjCategoryName(category?.name ?? 'Final Tap')
       if (wager) {
         setFjWagerId(wager.id)
         setFjLockedWagerAmount(wager.amount)
@@ -1850,7 +1854,7 @@ export default function PlayView() {
         {scoreOverlayEl}
         {scoreChip}
         <p className="text-6xl mb-6" style={{ animation: 'hero-float 3s ease-in-out infinite' }}>🍺</p>
-        <p className="text-blue-400 text-xs uppercase tracking-widest mb-3">Final Tap</p>
+        <p className="text-amber-400 text-xs uppercase tracking-widest mb-3">Final Tap</p>
         <p className="text-3xl font-black text-white mb-4">Starting Soon!</p>
         {fjCategoryName && (
           <div className="mb-4">
@@ -1862,9 +1866,9 @@ export default function PlayView() {
           Get a drink and discuss with your team!
         </p>
         <div className="mt-10 flex gap-1">
-          <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '0ms' }} />
-          <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '150ms' }} />
-          <span className="w-2 h-2 rounded-full bg-blue-400 animate-bounce" style={{ animationDelay: '300ms' }} />
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: '0ms' }} />
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: '150ms' }} />
+          <span className="w-2 h-2 rounded-full bg-amber-400 animate-bounce" style={{ animationDelay: '300ms' }} />
         </div>
         <QuipCycler />
       </div>
@@ -1879,7 +1883,7 @@ export default function PlayView() {
       <div className="min-h-screen final-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
         {scoreChip}
-        <p className="text-blue-400 text-xs uppercase tracking-widest mb-2">Final Jeopardy</p>
+        <p className="text-amber-400 text-xs uppercase tracking-widest mb-2">Final Tap</p>
         <p className="text-3xl font-black text-white mb-1">{fjCategoryName}</p>
         <p className="text-gray-400 text-sm mb-8">Enter your wager (max: {maxWager} pts)</p>
         <div className="w-full max-w-xs space-y-4">
@@ -1919,7 +1923,7 @@ export default function PlayView() {
           <p className="text-5xl font-mono font-black text-yellow-400 mb-3">{fjLockedWagerAmount} pts</p>
         )}
         <p className="text-gray-400 text-sm">Waiting for other teams…</p>
-        <p className="text-blue-400 text-xs uppercase tracking-widest mt-10">{fjCategoryName}</p>
+        <p className="text-amber-400 text-xs uppercase tracking-widest mt-10">{fjCategoryName}</p>
         <QuipCycler />
       </div>
     )
@@ -1942,7 +1946,7 @@ export default function PlayView() {
         </div>
         <div className="flex-1 flex flex-col p-5 max-w-sm mx-auto w-full">
           <div className="flex items-center justify-between mb-4 pt-3">
-            <p className="text-blue-400 text-xs uppercase tracking-widest">Final Jeopardy</p>
+            <p className="text-amber-400 text-xs uppercase tracking-widest">Final Tap</p>
             <span className={`inline-block font-mono text-3xl font-black tabular-nums ${low ? 'text-red-400' : 'text-white'}`}
               style={low ? { animation: 'timer-pulse 0.8s ease-in-out infinite' } : undefined}>
               {remaining}
@@ -2002,7 +2006,7 @@ export default function PlayView() {
     )
   }
 
-  if (fjSubPhase === 'done') {
+  if (fjSubPhase === 'done' && !intermissionSnapshots) {
     const finalStandings = [...fjFinalScores].sort((a, b) => b.score - a.score)
     const winner   = finalStandings[0]
     const myFinIdx = finalStandings.findIndex(t => t.id === myTeam?.id)
@@ -2080,14 +2084,21 @@ export default function PlayView() {
     const myEntry   = myIdx >= 0 ? standings[myIdx] : null
     const gap       = myEntry && leader ? leader.score - myEntry.score : 0
     const medals    = ['🥇', '🥈', '🥉']
+    const mapPhase: 'r1' | 'r2' | 'final' =
+      fjSubPhase === 'done' || room?.status === 'finished' ? 'final'
+        : room?.status === 'round_2' ? 'r2' : 'r1'
     return (
       <div className="min-h-screen bar-bg text-white flex flex-col p-5 overflow-y-auto">
         <div className="text-center mb-3 shrink-0">
           <p className="text-xs text-gray-500 uppercase tracking-widest mb-1"
-            style={{ animation: 'slide-up-in 0.4s ease-out both' }}>Round 1 in the books</p>
+            style={{ animation: 'slide-up-in 0.4s ease-out both' }}>
+            {mapPhase === 'final' ? 'The whole game, every swing'
+              : mapPhase === 'r2' ? 'Round 2 in the books'
+              : 'Round 1 in the books'}
+          </p>
           <p className="text-3xl font-black text-yellow-400"
             style={{ animation: 'pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both' }}>
-            🍻 Halftime
+            {mapPhase === 'final' ? '🍻 The Final Pour' : mapPhase === 'r2' ? '🍻 Last Call' : '🍻 Halftime'}
           </p>
         </div>
 
@@ -2142,7 +2153,9 @@ export default function PlayView() {
 
         <p className="text-center text-gray-500 text-sm mt-4 pb-4 shrink-0"
           style={{ animation: `slide-up-in 0.4s ease-out ${0.6 + standings.length * 0.08}s both` }}>
-          Round 2 is coming — bigger points on the board. Refill while you can 🍺
+          {mapPhase === 'final' ? "That's the whole story. Cheers! 🍻"
+            : mapPhase === 'r2' ? 'Final Tap is next — one question, wager what you dare 🍺'
+            : 'Round 2 is coming — bigger points on the board. Refill while you can 🍺'}
         </p>
       </div>
     )

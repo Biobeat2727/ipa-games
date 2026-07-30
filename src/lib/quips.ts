@@ -9,7 +9,7 @@ export const QUIPS: string[] = [
   '💡 Whisper your answer to your teammates first. Shouting it defeats the purpose.',
   'The world\'s oldest known beer recipe is over 4,000 years old. It\'s Sumerian.',
   'IPAs get their bitterness from hops. Fun to taste. Less fun to explain.',
-  'Fun fact: Jeopardy! has been on air since 1964. Alex Trebek hosted for 37 years.',
+  'Fun fact: the modern pub quiz took off in 1970s Britain — invented to fill bars on slow weeknights.',
   '💡 If in doubt, blame the designated wrong-answerer on your team.',
   'Canada has more lakes than the rest of the world combined.',
   'There are more possible games of chess than atoms in the observable universe.',

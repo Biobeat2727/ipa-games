@@ -417,7 +417,7 @@ export default function HostView() {
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-gray-300">
               {summary
-                ? `R1: ${summary.round1} cats · R2: ${summary.round2} cats${summary.hasFinalJeopardy ? ' · FJ ✓' : ''}`
+                ? `R1: ${summary.round1} cats · R2: ${summary.round2} cats${summary.hasFinalJeopardy ? ' · Final Tap ✓' : ''}`
                 : 'No content loaded'}
             </p>
             <button

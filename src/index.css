@@ -97,12 +97,13 @@
     #0b0906;
 }
 
-/* Final Tap — the lights dim to deep blue for the last question */
+/* Final Tap — the bar lights flare hot for last call: same amber family as
+   bar-bg, but a stronger burnt-orange glow so the final question feels bigger */
 .final-bg {
   background:
-    radial-gradient(120% 55% at 50% -10%, rgba(59, 130, 246, 0.18), transparent 60%),
-    radial-gradient(90% 40% at 50% 115%, rgba(30, 58, 138, 0.25), transparent 65%),
-    #0d1326;
+    radial-gradient(120% 55% at 50% -10%, rgba(234, 88, 12, 0.26), transparent 60%),
+    radial-gradient(90% 40% at 50% 115%, rgba(120, 53, 15, 0.3), transparent 65%),
+    #100803;
 }
 
 /* Question preview — same wood as the board's tap wall, so the picked tile

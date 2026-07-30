@@ -123,7 +123,7 @@ export default function ProjectorView() {
         supabase.from('categories').select('name').eq('room_id', roomId).eq('round', 3).single(),
         supabase.from('wagers').select().eq('room_id', roomId),
       ])
-      setFjCategoryName(category?.name ?? 'Final Jeopardy')
+      setFjCategoryName(category?.name ?? 'Final Tap')
       setFjWagerStatus(new Set((wagers ?? []).map(w => w.team_id)))
 
       if (freshRoom.final_phase === 'question'
@@ -354,6 +354,9 @@ export default function ProjectorView() {
       const { snapshots } = data as { snapshots: ScoreSnapshot[] }
       setIntermissionSnapshots(snapshots)
     })
+    ch.subscribe('intermission_closed', () => {
+      setIntermissionSnapshots(null)
+    })
     // Fired by the host when the game starts — transition from lobby to board
     ch.subscribe('game_state_change', ({ data }) => {
       const { status, fj_category } = data as { status?: string; fj_category?: string }
@@ -363,6 +366,9 @@ export default function ProjectorView() {
         setRoundSplash('ROUND 2')
         playRoundTransition()
         setTimeout(() => setRoundSplash(null), 2500)
+      }
+      if (status === 'final_jeopardy') {
+        setIntermissionSnapshots(null)
       }
       resyncAll()
     })
@@ -644,18 +650,18 @@ export default function ProjectorView() {
       const pct  = (rem / dur) * 100
       const low  = rem <= 15
       return (
-        <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
+        <div className="h-screen final-bg text-white flex flex-col overflow-hidden">
           {/* Timer bar */}
-          <div className="h-3 bg-gray-900 w-full shrink-0">
+          <div className="h-3 bg-black/40 w-full shrink-0">
             <div
               className={`h-full transition-all duration-500 ${low ? 'bg-red-500' : 'bg-yellow-400'}`}
               style={{ width: `${pct}%` }}
             />
           </div>
           <div className="flex-1 flex flex-col items-center justify-center px-16 text-center">
-            <p className="text-blue-400 uppercase tracking-[0.3em] mb-6"
+            <p className="text-amber-400 uppercase tracking-[0.3em] mb-6"
               style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
-              Final Jeopardy — {fjCategoryName}
+              Final Tap — {fjCategoryName}
             </p>
             <p className="font-black text-white leading-tight mb-10 max-w-5xl"
               style={{ fontSize: 'clamp(2rem, 5.5vw, 5rem)' }}>
@@ -689,10 +695,10 @@ export default function ProjectorView() {
 
     // Wager collection phase
     return (
-      <div className="min-h-screen bg-blue-950 text-white flex flex-col items-center justify-center p-12 text-center">
-        <p className="text-blue-400 uppercase tracking-[0.4em] mb-4"
+      <div className="min-h-screen final-bg text-white flex flex-col items-center justify-center p-12 text-center">
+        <p className="text-amber-400 uppercase tracking-[0.4em] mb-4"
           style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
-          Final Jeopardy
+          Final Tap
         </p>
         <p className="font-black text-white leading-none mb-12"
           style={{ fontSize: 'clamp(3rem, 12vw, 9rem)' }}>
@@ -718,8 +724,9 @@ export default function ProjectorView() {
     )
   }
 
-  // Game over — full-screen winner celebration
-  if (room.status === 'finished') {
+  // Game over — full-screen winner celebration (yields to the score map
+  // while the host has it up)
+  if (room.status === 'finished' && !intermissionSnapshots) {
     const finalSorted = [...teams].sort(
       (a, b) => (scores.get(b.id) ?? b.score) - (scores.get(a.id) ?? a.score)
     )
@@ -779,8 +786,8 @@ export default function ProjectorView() {
   // Category preview (player selected, waiting for host to open buzzer)
   if (previewInfo && !activeQuestion) {
     return (
-      <div className="h-screen bg-blue-950 text-white flex flex-col items-center justify-center text-center p-8">
-        <p className="text-blue-400 uppercase tracking-[0.3em] mb-8"
+      <div className="h-screen wood-bg text-white flex flex-col items-center justify-center text-center p-8">
+        <p className="text-amber-300 uppercase tracking-[0.3em] mb-8"
           style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>
           Category
         </p>
@@ -794,7 +801,7 @@ export default function ProjectorView() {
             ${previewInfo.pointValue}
           </p>
         )}
-        <p className="text-blue-700 uppercase tracking-widest animate-pulse"
+        <p className="text-amber-200/60 uppercase tracking-widest animate-pulse"
           style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
           Listening…
         </p>
@@ -819,24 +826,30 @@ export default function ProjectorView() {
     )
   }
 
-  // Round intermission — score history graph
+  // Round intermission / end-of-game score map
   if (intermissionSnapshots) {
     const teamIds  = sortedTeams.map(t => t.id)
     const teamNameMap = new Map(teams.map(t => [t.id, t.name]))
+    const mapPhase: 'r1' | 'r2' | 'final' =
+      room.status === 'finished' ? 'final' : room.status === 'round_2' ? 'r2' : 'r1'
     return (
-      <div className="h-screen bg-gray-950 text-white flex flex-col p-8 gap-6">
+      <div className="h-screen bar-bg text-white flex flex-col p-8 gap-6">
         <div className="text-center shrink-0">
           <p className="text-gray-500 uppercase tracking-[0.4em] mb-2"
             style={{ fontSize: 'clamp(1rem, 2vw, 1.5rem)', animation: 'slide-up-in 0.4s ease-out both' }}>
-            Round 1 in the books
+            {mapPhase === 'final' ? 'The whole game, every swing'
+              : mapPhase === 'r2' ? 'Round 2 in the books'
+              : 'Round 1 in the books'}
           </p>
           <p className="font-black text-yellow-400"
             style={{ fontSize: 'clamp(3rem, 8vw, 6rem)', animation: 'pop-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s both' }}>
-            🍻 Halftime
+            {mapPhase === 'final' ? '🍻 The Final Pour' : mapPhase === 'r2' ? '🍻 Last Call' : '🍻 Halftime'}
           </p>
           <p className="text-gray-400 font-semibold"
             style={{ fontSize: 'clamp(0.9rem, 1.8vw, 1.4rem)', animation: 'slide-up-in 0.4s ease-out 0.4s both' }}>
-            Round 2 up next — bigger points on the board
+            {mapPhase === 'final' ? 'Cheers to every team 🍻'
+              : mapPhase === 'r2' ? 'Final Tap up next — one wager decides it all'
+              : 'Round 2 up next — bigger points on the board'}
           </p>
         </div>
         <div className="flex-1 min-h-0">
