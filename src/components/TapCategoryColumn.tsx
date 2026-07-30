@@ -10,12 +10,17 @@ export function BeerGlass({
   onClick,
   disabled = false,
   dimmed = false,
+  fit = false,
 }: {
   pointValue: number
   state: GlassState
   onClick?: (e: MouseEvent<HTMLButtonElement>) => void
   disabled?: boolean
   dimmed?: boolean
+  /** Keep the glass's real proportions and bottom-align it in the cell
+   *  (projector: wide short cells would otherwise squash the glass).
+   *  Default stretches to fill — the phone board's cells are cut for that. */
+  fit?: boolean
 }) {
   const fillPct  = state === 'empty' ? 0 : state === 'draining' ? 45 : 86
   const fillY    = 98 - (fillPct / 100) * 88
@@ -30,7 +35,7 @@ export function BeerGlass({
         dimmed ? 'opacity-60 grayscale-[35%]' : !isDisabled ? 'hover:brightness-110 active:brightness-95' : ''
       }`}
     >
-      <svg viewBox="0 0 70 104" preserveAspectRatio="none" className="w-full h-full" style={{ filter: 'drop-shadow(0 3px 3px rgba(0,0,0,0.45))' }}>
+      <svg viewBox="0 0 70 104" preserveAspectRatio={fit ? 'xMidYMax meet' : 'none'} className="w-full h-full" style={{ filter: 'drop-shadow(0 3px 3px rgba(0,0,0,0.45))' }}>
         <defs>
           <clipPath id={`glass-clip-${pointValue}`}>
             <path d={GLASS_PATH} />

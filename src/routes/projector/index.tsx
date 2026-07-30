@@ -992,7 +992,7 @@ export default function ProjectorView() {
               if (!q) return <div key={`${cat.id}-${pv}`} className="rounded-xl bg-gray-900/20" />
               const answered = q.is_answered
               return (
-                <BeerGlass key={`${cat.id}-${pv}`} pointValue={pv} state={answered ? 'empty' : 'full'} disabled />
+                <BeerGlass key={`${cat.id}-${pv}`} pointValue={pv} state={answered ? 'empty' : 'full'} disabled fit />
               )
             })
           )}
