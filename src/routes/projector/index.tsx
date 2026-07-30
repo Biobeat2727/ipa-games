@@ -353,9 +353,13 @@ export default function ProjectorView() {
     ch.subscribe('round_intermission', ({ data }) => {
       const { snapshots } = data as { snapshots: ScoreSnapshot[] }
       setIntermissionSnapshots(snapshots)
+      // Broadcast-only state — persist so a refresh restores the chart
+      const r = roomRef.current
+      if (r) sessionStorage.setItem('intermission', JSON.stringify({ roomId: r.id, status: r.status, snapshots }))
     })
     ch.subscribe('intermission_closed', () => {
       setIntermissionSnapshots(null)
+      sessionStorage.removeItem('intermission')
     })
     // Fired by the host when the game starts — transition from lobby to board
     ch.subscribe('game_state_change', ({ data }) => {
@@ -363,12 +367,14 @@ export default function ProjectorView() {
       if (fj_category) setFjCategoryName(fj_category)
       if (status === 'round_2') {
         setIntermissionSnapshots(null)
+        sessionStorage.removeItem('intermission')
         setRoundSplash('ROUND 2')
         playRoundTransition()
         setTimeout(() => setRoundSplash(null), 2500)
       }
       if (status === 'final_jeopardy') {
         setIntermissionSnapshots(null)
+        sessionStorage.removeItem('intermission')
       }
       resyncAll()
     })
@@ -482,6 +488,26 @@ export default function ProjectorView() {
     confettiBurstsRef.current = 0
     setConfettiActive(true)
   }, [room?.status])
+
+  // Refresh survival for the score-map intermission (broadcast-only state): restore
+  // the chart from sessionStorage as long as the room hasn't moved on.
+  useEffect(() => {
+    if (!room?.id || intermissionSnapshots) return
+    const saved = sessionStorage.getItem('intermission')
+    if (!saved) return
+    try {
+      const parsed = JSON.parse(saved) as { roomId: string; status: string; snapshots: ScoreSnapshot[] }
+      if (parsed.roomId !== room.id || parsed.status !== room.status) {
+        sessionStorage.removeItem('intermission')
+        return
+      }
+      if (Array.isArray(parsed.snapshots) && parsed.snapshots.length > 0) {
+        setIntermissionSnapshots(parsed.snapshots)
+      }
+    } catch {
+      sessionStorage.removeItem('intermission')
+    }
+  }, [room?.id, room?.status, intermissionSnapshots])
 
   // ── Cleanup ───────────────────────────────────────────────
 

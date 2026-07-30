@@ -418,6 +418,27 @@ export default function PlayView() {
     }
   }, [room?.current_turn_team_id, phase])
 
+  // Refresh survival for the score-map intermission (broadcast-only state): restore
+  // the chart from sessionStorage as long as the room hasn't moved on to the next
+  // phase; discard the saved copy the moment it has.
+  useEffect(() => {
+    if (phase !== 'game' || !room?.id || intermissionSnapshots) return
+    const saved = sessionStorage.getItem('intermission')
+    if (!saved) return
+    try {
+      const parsed = JSON.parse(saved) as { roomId: string; status: string; snapshots: ScoreSnapshot[] }
+      if (parsed.roomId !== room.id || parsed.status !== room.status) {
+        sessionStorage.removeItem('intermission')
+        return
+      }
+      if (Array.isArray(parsed.snapshots) && parsed.snapshots.length > 0) {
+        setIntermissionSnapshots(parsed.snapshots)
+      }
+    } catch {
+      sessionStorage.removeItem('intermission')
+    }
+  }, [phase, room?.id, room?.status, intermissionSnapshots])
+
   // Database fallback for an accepted pick whose broadcast was missed or for a
   // device that reconnected during the preview.
   useEffect(() => {
@@ -855,9 +876,14 @@ export default function PlayView() {
     ch.subscribe('round_intermission', ({ data }) => {
       const { snapshots } = data as { snapshots: ScoreSnapshot[] }
       setIntermissionSnapshots(snapshots)
+      // Broadcast-only state — persist so an accidental refresh restores the
+      // chart instead of dumping the player back on the finished board.
+      const r = roomRef.current
+      if (r) sessionStorage.setItem('intermission', JSON.stringify({ roomId: r.id, status: r.status, snapshots }))
     })
     ch.subscribe('intermission_closed', () => {
       setIntermissionSnapshots(null)
+      sessionStorage.removeItem('intermission')
     })
     ch.subscribe('game_state_change', ({ data }) => {
       const { status, fj_category } = data as { status: string; fj_category?: string }
@@ -873,6 +899,7 @@ export default function PlayView() {
         }
         // New round — wipe all mid-game state
         setIntermissionSnapshots(null)
+        sessionStorage.removeItem('intermission')
         setBuzzFailed(false)
         setPreviewInfo(null)
         setActiveQuestion(null)
@@ -896,6 +923,7 @@ export default function PlayView() {
       }
       if (status === 'final_jeopardy') {
         setIntermissionSnapshots(null)
+        sessionStorage.removeItem('intermission')
         setFjCategoryName(fj_category ?? 'Final Tap')
         setFjWagerInput(''); setFjWagerId(null); setFjLockedWagerAmount(null); setFjQuestion(null)
         setFjResponse(''); setFjResponseSubmitted(false); setFjResponseSubmitting(false); setFjResponseError('')
