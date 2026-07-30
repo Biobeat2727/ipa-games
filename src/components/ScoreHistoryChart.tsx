@@ -42,10 +42,18 @@ function ordinal(n: number): string {
   return n + (s[(v - 20) % 10] || s[v] || s[0])
 }
 
-// Mario-Party-style bump chart: y-axis is POSITION (1st place = top lane), not score.
-// Lines cross whenever teams swap places, so comebacks and collapses read as literal
-// crossings. No in-chart name labels — lines run the full width, and tapping a line
-// (or its end dot) selects that team in the detail bar below the chart.
+/** Round a raw interval up to a friendly 1/2/5 × 10^k value for gridlines */
+function niceStep(raw: number): number {
+  const pow = 10 ** Math.floor(Math.log10(Math.max(raw, 1)))
+  const n = raw / pow
+  return (n <= 1 ? 1 : n <= 2 ? 2 : n <= 5 ? 5 : 10) * pow
+}
+
+// Score line chart: y-axis is POINTS. The scale runs from the highest score any team
+// held at any moment of the game (top) down to the lowest (bottom), so every question's
+// swing shows as a real vertical move. No in-chart name labels — lines run the full
+// width, and tapping a line (or its end dot / score label) selects that team in the
+// detail bar below the chart.
 //
 // DOM order is FIXED (teamIds order); the selected team renders as a separate overlay
 // path instead of being re-sorted on top. Re-sorting keyed SVG children moves DOM nodes,
@@ -67,35 +75,47 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
     }),
   ]
 
-  // Position (0-based lane) per team at each step. Ties keep their previous order so
-  // lines don't jitter when scores are equal (especially the all-zero start).
-  let prevPos = new Map(teamIds.map((id, i) => [id, i]))
-  const positions: Array<Map<string, number>> = steps.map(scoreMap => {
-    const sorted = [...teamIds].sort((a, b) =>
-      (scoreMap.get(b) ?? 0) - (scoreMap.get(a) ?? 0) ||
-      (prevPos.get(a) ?? 0) - (prevPos.get(b) ?? 0)
-    )
-    const pos = new Map(sorted.map((id, i) => [id, i]))
-    prevPos = pos
-    return pos
-  })
+  // The y scale: highest and lowest score held at ANY point of the game
+  let maxV = -Infinity
+  let minV = Infinity
+  steps.forEach(m => m.forEach(v => {
+    if (v > maxV) maxV = v
+    if (v < minV) minV = v
+  }))
+  if (maxV === minV) maxV = minV + 100 // degenerate all-equal case: keep a real range
 
   // ── Geometry (viewBox units; SVG scales to fit its container) ──
-  const N = teamIds.length
   const S = steps.length
   const W = 1000
-  const PAD_L = 24
-  const PAD_R = 118 // room for the final-score labels that give the y axis a scale
-  const PAD_T = 18
+  const PAD_L = 92  // room for the y-axis point labels
+  const PAD_R = 118 // room for the final-score labels at the line ends
+  const PAD_T = 26
   const PAD_B = 40
-  const ROW_H = 64
-  const H = PAD_T + N * ROW_H + PAD_B
+  const H = 640
   const plotR = W - PAD_R
+  const plotB = H - PAD_B
+  const range = maxV - minV
   const x = (i: number) => S > 1 ? PAD_L + (i * (plotR - PAD_L)) / (S - 1) : PAD_L
-  const y = (pos: number) => PAD_T + pos * ROW_H + ROW_H / 2
+  const yOf = (v: number) => PAD_T + ((maxV - v) * (plotB - PAD_T)) / range
 
   const finalScores = steps[S - 1]
-  const finalPositions = positions[S - 1]
+
+  // Final ranking (for the detail bar ordinal), ties broken stably by team order
+  const finalRank = new Map(
+    [...teamIds].sort((a, b) => (finalScores.get(b) ?? 0) - (finalScores.get(a) ?? 0))
+      .map((id, i) => [id, i])
+  )
+
+  // Y gridlines on friendly values between the extremes; the exact max/min get their
+  // own labels at the very top/bottom, and gridline labels too close to them yield.
+  const step = niceStep(range / 4)
+  const gridTicks: number[] = []
+  // `v === 0 ? 0 : v` normalizes JS negative zero (Math.ceil of a negative fraction)
+  for (let v = Math.ceil(minV / step) * step; v <= maxV + 1e-9; v += step) gridTicks.push(v === 0 ? 0 : v)
+  const EDGE_GAP = 34
+  const labeledTicks = gridTicks.filter(v =>
+    yOf(v) > PAD_T + EDGE_GAP && yOf(v) < plotB - EDGE_GAP
+  )
 
   // Which intermediate steps get an x-axis label — thinned to at most ~8 so long
   // rounds never crowd, and kept clear of the START/FINAL captions at the ends.
@@ -106,8 +126,25 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
     x(i) > PAD_L + 100 && x(i) < plotR - 100
   )
 
+  // Right-edge final score labels sit at each line's end y — nudged apart so teams
+  // that finish close together stay readable.
+  const scoreLabelY: Map<string, number> = (() => {
+    const MIN_GAP = 30
+    const entries = teamIds
+      .map(id => ({ id, y: yOf(finalScores.get(id) ?? 0) }))
+      .sort((a, b) => a.y - b.y)
+    for (let i = 1; i < entries.length; i++) {
+      if (entries[i].y - entries[i - 1].y < MIN_GAP) entries[i].y = entries[i - 1].y + MIN_GAP
+    }
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const limit = i === entries.length - 1 ? plotB + 20 : entries[i + 1].y - MIN_GAP
+      if (entries[i].y > limit) entries[i].y = limit
+    }
+    return new Map(entries.map(e => [e.id, e.y]))
+  })()
+
   const pathOf = (id: string) =>
-    steps.map((_, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${y(positions[i].get(id) ?? 0).toFixed(1)}`).join(' ')
+    steps.map((m, i) => `${i === 0 ? 'M' : 'L'} ${x(i).toFixed(1)} ${yOf(m.get(id) ?? 0).toFixed(1)}`).join(' ')
 
   // Intro animation styles, frozen to their end state once the intro has played
   const lineStyle = drew
@@ -125,22 +162,39 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
 
   const selName  = selectedId ? (teamNames.get(selectedId) ?? '?') : null
   const selScore = selectedId ? (finalScores.get(selectedId) ?? 0) : 0
-  const selPos   = selectedId ? (finalPositions.get(selectedId) ?? 0) : 0
+  const selPos   = selectedId ? (finalRank.get(selectedId) ?? 0) : 0
   const selColor = selectedId ? getTeamColor(selectedId, teamIds) : '#6b7280'
 
   return (
     <div className="w-full h-full flex flex-col">
       <div className="flex-1 min-h-0">
         <svg viewBox={`0 0 ${W} ${H}`} className="w-full h-full" preserveAspectRatio="xMidYMid meet">
-          {/* Lane guides — one per position slot */}
-          {Array.from({ length: N }, (_, i) => (
-            <line key={i} x1={PAD_L} y1={y(i)} x2={plotR} y2={y(i)}
-              stroke="#1f2937" strokeWidth={1.5} strokeDasharray="3 8" />
+          {/* Y gridlines on friendly point values */}
+          {gridTicks.map(v => (
+            <line key={v} x1={PAD_L} y1={yOf(v)} x2={plotR} y2={yOf(v)}
+              stroke={v === 0 ? '#374151' : '#1f2937'} strokeWidth={v === 0 ? 2 : 1.5}
+              strokeDasharray={v === 0 ? undefined : '3 8'} />
           ))}
+          {labeledTicks.map(v => (
+            <text key={v} x={PAD_L - 14} y={yOf(v) + 8} fill="#4b5563" fontSize={22}
+              fontWeight={600} textAnchor="end" fontFamily="ui-monospace, monospace">
+              {v.toLocaleString()}
+            </text>
+          ))}
+
+          {/* The y-axis extremes: highest and lowest score held at any point */}
+          <text x={PAD_L - 14} y={PAD_T + 8} fill="#9ca3af" fontSize={24} fontWeight={800}
+            textAnchor="end" fontFamily="ui-monospace, monospace">
+            {maxV.toLocaleString()}
+          </text>
+          <text x={PAD_L - 14} y={plotB + 8} fill="#9ca3af" fontSize={24} fontWeight={800}
+            textAnchor="end" fontFamily="ui-monospace, monospace">
+            {minV.toLocaleString()}
+          </text>
 
           {/* Step ticks along the baseline */}
           {Array.from({ length: S }, (_, i) => (
-            <line key={i} x1={x(i)} y1={H - PAD_B + 6} x2={x(i)} y2={H - PAD_B + 14}
+            <line key={i} x1={x(i)} y1={plotB + 6} x2={x(i)} y2={plotB + 14}
               stroke="#374151" strokeWidth={2} />
           ))}
           <text x={PAD_L} y={H - 8} fill="#6b7280" fontSize={22} fontWeight={700}
@@ -188,7 +242,7 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
 
           {/* End dots */}
           {teamIds.map(id => (
-            <circle key={id} cx={plotR} cy={y(finalPositions.get(id) ?? 0)}
+            <circle key={id} cx={plotR} cy={yOf(finalScores.get(id) ?? 0)}
               r={id === selectedId ? 14 : 10}
               fill={getTeamColor(id, teamIds)}
               style={dotStyle({ cursor: 'pointer' })}
@@ -196,9 +250,9 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
             />
           ))}
 
-          {/* Final scores down the right edge — the y axis in points, leader on top */}
+          {/* Final scores down the right edge, nudged apart when teams finish close */}
           {teamIds.map(id => (
-            <text key={id} x={plotR + 18} y={y(finalPositions.get(id) ?? 0) + 9}
+            <text key={id} x={plotR + 18} y={(scoreLabelY.get(id) ?? yOf(finalScores.get(id) ?? 0)) + 9}
               fill={getTeamColor(id, teamIds)} fontSize={26}
               fontWeight={id === selectedId ? 800 : 700}
               fontFamily="ui-monospace, monospace"
