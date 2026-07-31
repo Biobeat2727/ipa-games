@@ -1945,6 +1945,16 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 <p className="font-black text-white text-2xl leading-tight">
                   {teams.find(t => t.id === dtPendingTeamId)?.name ?? 'A team'} is wagering…
                 </p>
+                {(() => {
+                  const qId = room.pending_question_id
+                  const cat = qId ? categories.find(c => c.questions.some(q => q.id === qId)) : undefined
+                  const q   = cat?.questions.find(q => q.id === qId)
+                  return cat ? (
+                    <p className="text-amber-300 font-bold text-lg mt-1">
+                      {cat.name}{q?.point_value != null ? ` — $${q.point_value}` : ''}
+                    </p>
+                  ) : null
+                })()}
                 <p className="text-gray-500 text-sm mt-2">
                   Their phones have the wager screen. You can also set it from here — max{' '}
                   {Math.max(scores.get(dtPendingTeamId) ?? 0, room.status === 'round_2' ? 2000 : 500)} pts.
@@ -2129,6 +2139,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 <div className="flex items-center gap-2 flex-wrap">
                   <span className="text-xs bg-yellow-400 text-gray-950 font-bold px-2 py-0.5 rounded-full">
                     Active
+                  </span>
+                  <span className="text-xs text-gray-300 font-bold uppercase tracking-wide">
+                    {categories.find(c => c.id === activeQuestion.category_id)?.name}
                   </span>
                   {doubleTapWager !== null ? (
                     <span className="text-xs bg-amber-500 text-gray-950 font-black px-2 py-0.5 rounded-full">

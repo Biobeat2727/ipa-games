@@ -449,19 +449,23 @@ export default function ProjectorView() {
 
   // ── Timer countdown ───────────────────────────────────────
 
+  // Counts down for the team actually next up — the FIRST pending buzz, using its
+  // server-written response deadline. (timer_start broadcasts arrive for every
+  // buzzer, so driving the display from the latest one made the "Responding" team
+  // flip to whoever buzzed most recently.)
   useEffect(() => {
-    if (!timerPayload) { setTimeRemaining(null); return }
+    const first = buzzes.find(b => b.status === 'pending')
+    if (!first?.response_deadline_at) { setTimeRemaining(null); return }
+    const deadline = new Date(first.response_deadline_at).getTime()
     const tick = () => {
-      const remaining = Math.max(0, Math.floor(
-        (timerPayload.start_timestamp + timerPayload.duration_seconds * 1000 - Date.now()) / 1000
-      ))
+      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
       setTimeRemaining(remaining)
       if (remaining === 0) clearInterval(id)
     }
     tick()
     const id = setInterval(tick, 500)
     return () => clearInterval(id)
-  }, [timerPayload])
+  }, [buzzes])
 
   // ── FJ countdown ──────────────────────────────────────────
 
@@ -536,17 +540,22 @@ export default function ProjectorView() {
 
   if (phase === 'checking') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-        <p className="text-gray-400 text-2xl animate-pulse">Connecting…</p>
+      <div className="min-h-screen bar-bg text-white flex items-center justify-center">
+        <p className="text-amber-200/70 text-2xl animate-pulse">Connecting…</p>
       </div>
     )
   }
 
   if (phase === 'waiting') {
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8 text-center">
-        <h1 className="text-5xl font-black text-yellow-400 mb-4">Tapped In!</h1>
-        <p className="text-gray-500 animate-pulse">Waiting for host to create a lobby…</p>
+      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-8 text-center relative overflow-hidden">
+        <Bubbles count={14} />
+        <div className="relative z-10 flex flex-col items-center">
+          <h1 className="neon-title font-black mb-4" style={{ fontSize: 'clamp(3rem, 8vw, 6rem)' }}>Tapped In!</h1>
+          <p className="text-amber-200/70 animate-pulse" style={{ fontSize: 'clamp(1rem, 2vw, 1.5rem)' }}>
+            Waiting for host to create a lobby…
+          </p>
+        </div>
       </div>
     )
   }
@@ -640,7 +649,7 @@ export default function ProjectorView() {
     const { teamName: rName, response, result, wager, newScore } = fjReveal
     return (
       <div className={`min-h-screen text-white flex flex-col items-center justify-center p-12 text-center ${
-        result === 'correct' ? 'bg-green-950' : result === 'wrong' ? 'bg-red-950' : 'bg-gray-950'
+        result === 'correct' ? 'bg-green-950' : result === 'wrong' ? 'bg-red-950' : 'final-bg'
       }`}>
         <p className="text-gray-500 uppercase tracking-widest mb-4"
           style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
@@ -650,7 +659,7 @@ export default function ProjectorView() {
           style={{ fontSize: 'clamp(3rem, 10vw, 8rem)' }}>
           {rName}
         </p>
-        <div className="bg-gray-900/60 border border-gray-700 rounded-3xl px-12 py-8 max-w-4xl mb-6">
+        <div className="glass-card rounded-3xl px-12 py-8 max-w-4xl mb-6">
           <p className={`font-bold leading-snug ${response ? 'text-white' : 'text-gray-600 italic'}`}
             style={{ fontSize: 'clamp(1.5rem, 4vw, 3.5rem)' }}>
             {response ?? 'No response'}
@@ -667,7 +676,7 @@ export default function ProjectorView() {
           </div>
         )}
         {/* Score strip */}
-        <div className="fixed bottom-0 left-0 right-0 bg-gray-900/90 border-t border-gray-800 py-3 px-10 flex justify-center gap-12">
+        <div className="fixed bottom-0 left-0 right-0 bg-[#17120b]/95 border-t border-amber-500/15 py-3 px-10 flex justify-center gap-12">
           {sortedTeams.map(team => {
             const delta = scoreDeltas.find(d => d.teamId === team.id)
             return (
@@ -732,7 +741,7 @@ export default function ProjectorView() {
             </p>
           </div>
           {/* Score strip */}
-          <div className="shrink-0 bg-gray-900 border-t border-gray-800 py-3 px-10 flex justify-center gap-12">
+          <div className="relative z-10 shrink-0 bg-[#17120b]/95 border-t border-amber-500/15 py-3 px-10 flex justify-center gap-12">
             {fjTeams.map(team => (
               <div key={team.id} className="text-center relative">
                 <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1.1rem)' }}>
@@ -768,7 +777,7 @@ export default function ProjectorView() {
             const wagered = fjWagerStatus.has(team.id)
             return (
               <div key={team.id} className={`rounded-2xl px-8 py-5 flex items-center gap-4 ${
-                wagered ? 'bg-green-900/40 border-2 border-green-500/60' : 'bg-gray-900 border border-gray-700'
+                wagered ? 'bg-green-900/40 border-2 border-green-500/60' : 'glass-card'
               }`}>
                 <span className={`w-3 h-3 rounded-full shrink-0 ${wagered ? 'bg-green-400' : 'bg-gray-600 animate-pulse'}`} />
                 <p className="font-bold" style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>{team.name}</p>
@@ -791,7 +800,8 @@ export default function ProjectorView() {
     )
     const winner = finalSorted[0]
     return (
-      <div className="min-h-screen bg-gray-950 text-white flex flex-col items-center justify-center p-8 text-center">
+      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-8 text-center relative overflow-hidden">
+        <Bubbles count={14} />
         <Confetti
           active={confettiActive}
           onDone={() => {
@@ -802,23 +812,23 @@ export default function ProjectorView() {
             }
           }}
         />
-        <p className="text-gray-500 uppercase tracking-widest mb-4" style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)', animation: 'slide-up-in 0.5s ease-out both' }}>
+        <p className="relative z-10 text-amber-200/70 uppercase tracking-widest mb-4" style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)', animation: 'slide-up-in 0.5s ease-out both' }}>
           🏆 Winner 🏆
         </p>
-        <p className="font-black text-yellow-400 leading-none mb-2"
+        <p className="relative z-10 font-black text-yellow-400 leading-none mb-2"
           style={{ fontSize: 'clamp(3.5rem, 14vw, 10rem)', animation: 'pop-in 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both' }}>
           {winner?.name ?? '—'}
         </p>
         <AnimatedScore
           value={scores.get(winner?.id ?? '') ?? winner?.score ?? 0}
-          className="font-mono font-black text-yellow-300 mb-12 block"
+          className="relative z-10 font-mono font-black text-yellow-300 mb-12 block"
           style={{ fontSize: 'clamp(2rem, 6vw, 5rem)' }}
         />
-        <p className="text-yellow-300 mb-12" style={{ fontSize: 'clamp(1rem, 2vw, 1.75rem)', marginTop: '-3rem' }}>pts</p>
-        <div className="space-y-3 w-full max-w-2xl">
+        <p className="relative z-10 text-yellow-300 mb-12" style={{ fontSize: 'clamp(1rem, 2vw, 1.75rem)', marginTop: '-3rem' }}>pts</p>
+        <div className="relative z-10 space-y-3 w-full max-w-2xl">
           {finalSorted.map((team, i) => (
             <div key={team.id} className={`flex items-center gap-4 rounded-2xl px-8 py-5 ${
-              i === 0 ? 'bg-yellow-400/10 border-2 border-yellow-400/60' : 'bg-gray-900 border border-gray-800'
+              i === 0 ? 'bg-yellow-400/10 border-2 border-yellow-400/60' : 'glass-card'
             }`}
               style={{ animation: `slide-up-in 0.5s ease-out ${0.6 + i * 0.15}s both` }}>
               <span className="w-12 shrink-0 text-right"
@@ -877,6 +887,16 @@ export default function ProjectorView() {
           <p className="font-black text-amber-400 leading-none" style={{ fontSize: 'clamp(4rem, 12vw, 10rem)' }}>
             DOUBLE TAP!
           </p>
+          {(() => {
+            const qId = room.pending_question_id
+            const cat = qId ? categories.find(c => c.questions.some(q => q.id === qId)) : undefined
+            const q   = cat?.questions.find(q => q.id === qId)
+            return cat ? (
+              <p className="text-white font-black mt-4" style={{ fontSize: 'clamp(2rem, 5vw, 4rem)' }}>
+                {cat.name}{q?.point_value != null ? ` — $${q.point_value}` : ''}
+              </p>
+            ) : null
+          })()}
           <p className="text-amber-200 font-bold mt-4" style={{ fontSize: 'clamp(1.5rem, 4vw, 3rem)' }}>
             A player is wagering…
           </p>
@@ -944,7 +964,7 @@ export default function ProjectorView() {
   // Round transition splash
   if (roundSplash) {
     return (
-      <div className="h-screen bg-gray-950 text-white flex items-center justify-center">
+      <div className="h-screen bar-bg text-white flex items-center justify-center">
         <p
           className="font-black text-yellow-400 text-center"
           style={{ fontSize: 'clamp(5rem, 18vw, 14rem)', animation: 'round-splash-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}
@@ -1068,17 +1088,22 @@ export default function ProjectorView() {
 
   // Active question
   if (activeQuestion) {
-    const dur       = timerPayload?.duration_seconds ?? 30
-    const remaining = timeRemaining ?? dur
-    const timerPct  = (remaining / dur) * 100
+    const firstPending = pendingBuzzes[0] ?? null
+    const responderDur = firstPending?.response_deadline_at
+      ? Math.max(1, Math.round(
+          (new Date(firstPending.response_deadline_at).getTime() - new Date(firstPending.buzzed_at).getTime()) / 1000
+        ))
+      : 30
+    const remaining = timeRemaining ?? responderDur
+    const timerPct  = (remaining / responderDur) * 100
     const timerLow  = remaining <= 10
-    const isJudging = !!timerPayload
 
     return (
-      <div className="h-screen bg-gray-950 text-white flex flex-col overflow-hidden">
-        {/* Timer bar */}
-        <div className="h-3 bg-gray-900 w-full shrink-0">
-          {isJudging && (
+      <div className="h-screen bar-bg text-white flex flex-col overflow-hidden relative">
+        <Bubbles count={10} />
+        {/* Timer bar — runs for the team currently responding */}
+        <div className="relative z-10 h-3 bg-black/40 w-full shrink-0">
+          {firstPending && (
             <div
               className={`h-full transition-all duration-500 ${timerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
               style={{ width: `${timerPct}%` }}
@@ -1087,61 +1112,80 @@ export default function ProjectorView() {
         </div>
 
         {/* Main content */}
-        <div className="flex-1 flex flex-col items-center justify-center px-16 text-center">
-          <p className="font-black leading-tight mb-12 max-w-6xl"
-            style={{ fontSize: 'clamp(2rem, 5.5vw, 5rem)' }}>
+        <div className="relative z-10 flex-1 min-h-0 flex flex-col items-center justify-center px-16 text-center">
+          {/* Which glass this is — category and value stay visible during the question */}
+          <p className="text-amber-400 font-bold uppercase tracking-[0.3em] mb-5"
+            style={{ fontSize: 'clamp(1rem, 2.2vw, 1.6rem)' }}>
+            {activeQuestion.is_double_tap && '🍺 Double Tap · '}
+            {categories.find(c => c.id === activeQuestion.category_id)?.name}
+            {activeQuestion.point_value != null && ` — $${activeQuestion.point_value}`}
+          </p>
+          <p className="font-black leading-tight mb-10 max-w-6xl"
+            style={{ fontSize: 'clamp(2rem, 5vw, 4.5rem)' }}>
             {activeQuestion.answer}
           </p>
 
-          {isJudging ? (
-            <div className="space-y-2 text-center">
-              <p className="text-gray-500 uppercase tracking-widest"
+          {buzzes.length > 0 ? (
+            // Every team that tapped in, in buzz order. First pending = responding
+            // now (amber + countdown); judged-wrong rows stay visible but dimmed.
+            <div className="w-full max-w-2xl space-y-3">
+              <p className="text-amber-400 font-black uppercase tracking-[0.3em] mb-4"
                 style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>
-                Responding
+                🍺 Tapped In!
               </p>
-              <p className="font-black text-yellow-400 leading-tight"
-                style={{ fontSize: 'clamp(3rem, 7vw, 6rem)' }}>
-                {timerPayload!.team_name}
-              </p>
-              <p className={`font-mono font-black tabular-nums leading-none ${timerLow ? 'text-red-400' : 'text-gray-300'}`}
-                style={{ fontSize: 'clamp(4rem, 12vw, 9rem)', animation: timerLow ? 'timer-pulse 0.8s ease-in-out infinite' : undefined }}>
-                {remaining}
-              </p>
-            </div>
-          ) : pendingBuzzes.length > 0 ? (
-            <div className="w-full max-w-lg space-y-3">
-              <p className="text-gray-500 uppercase tracking-widest mb-4"
-                style={{ fontSize: 'clamp(0.8rem, 2vw, 1.5rem)' }}>
-                Buzz Queue
-              </p>
-              {pendingBuzzes.slice(0, 5).map((buzz, i) => (
-                <div key={buzz.id}
-                  className={`flex items-center gap-5 rounded-2xl px-8 py-4 ${
-                    i === 0
-                      ? 'bg-yellow-400/20 border-2 border-yellow-400/60'
-                      : 'bg-gray-900 border border-gray-800'
-                  }`}
-                >
-                  <span className="font-mono text-gray-600 w-6 shrink-0"
-                    style={{ fontSize: 'clamp(1rem, 2vw, 1.5rem)' }}>
-                    {i + 1}
-                  </span>
-                  <span className={`font-black flex-1 text-left ${i === 0 ? 'text-yellow-400' : 'text-white'}`}
-                    style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)' }}>
-                    {teamName(buzz.team_id)}
-                  </span>
-                </div>
-              ))}
+              {buzzes.slice(0, 6).map((buzz, i) => {
+                const isResponder = firstPending !== null && buzz.id === firstPending.id
+                const missed = buzz.status === 'wrong' || buzz.status === 'expired' || buzz.status === 'skipped'
+                const won    = buzz.status === 'correct'
+                return (
+                  <div key={buzz.id}
+                    className={`flex items-center gap-5 rounded-2xl px-8 py-4 ${
+                      isResponder ? 'bg-amber-500/20 border-2 border-amber-400/70'
+                        : won ? 'bg-green-500/15 border-2 border-green-400/60'
+                        : missed ? 'glass-card opacity-45'
+                        : 'glass-card'
+                    }`}
+                  >
+                    <span className="font-mono text-amber-200/50 w-8 shrink-0 text-left"
+                      style={{ fontSize: 'clamp(1rem, 2vw, 1.5rem)' }}>
+                      {i + 1}
+                    </span>
+                    <span className={`font-black flex-1 text-left truncate ${
+                      isResponder ? 'text-amber-300' : won ? 'text-green-300' : missed ? 'text-gray-400 line-through' : 'text-white'
+                    }`} style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)' }}>
+                      {teamName(buzz.team_id)}
+                    </span>
+                    {isResponder && (
+                      <>
+                        <span className="text-amber-200/80 uppercase tracking-widest shrink-0"
+                          style={{ fontSize: 'clamp(0.7rem, 1.4vw, 1rem)' }}>
+                          Responding
+                        </span>
+                        <span className={`font-mono font-black tabular-nums shrink-0 ${timerLow ? 'text-red-400' : 'text-white'}`}
+                          style={{ fontSize: 'clamp(1.5rem, 3.5vw, 3rem)', animation: timerLow ? 'timer-pulse 0.8s ease-in-out infinite' : undefined }}>
+                          {remaining}
+                        </span>
+                      </>
+                    )}
+                    {won && (
+                      <span className="text-green-400 font-black shrink-0" style={{ fontSize: 'clamp(1.25rem, 2.5vw, 2rem)' }}>✓</span>
+                    )}
+                    {missed && (
+                      <span className="text-red-400/80 font-black shrink-0" style={{ fontSize: 'clamp(1.25rem, 2.5vw, 2rem)' }}>✗</span>
+                    )}
+                  </div>
+                )
+              })}
             </div>
           ) : (
-            <p className="text-gray-700" style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)' }}>
-              Waiting for buzzes…
+            <p className="text-amber-100/50" style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)' }}>
+              Waiting for taps…
             </p>
           )}
         </div>
 
         {/* Score strip */}
-        <div className="shrink-0 bg-gray-900 border-t border-gray-800 py-3 px-10 flex justify-center gap-12">
+        <div className="relative z-10 shrink-0 bg-[#17120b]/95 border-t border-amber-500/15 py-3 px-10 flex justify-center gap-12">
           {sortedTeams.map(team => {
             const delta = scoreDeltas.find(d => d.teamId === team.id)
             return (
@@ -1174,8 +1218,8 @@ export default function ProjectorView() {
 
   // Fallback
   return (
-    <div className="min-h-screen bg-gray-950 text-white flex items-center justify-center">
-      <p className="text-gray-600 text-2xl animate-pulse">Loading game state…</p>
+    <div className="min-h-screen bar-bg text-white flex items-center justify-center">
+      <p className="text-amber-200/60 text-2xl animate-pulse">Loading game state…</p>
     </div>
   )
 }

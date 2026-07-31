@@ -1480,16 +1480,30 @@ export default function PlayView() {
     })
   }
 
-  function handleBuzzSubmitClick(e: React.MouseEvent<HTMLButtonElement>) {
-    const rect = e.currentTarget.getBoundingClientRect()
-    const x = e.clientX - rect.left
-    const y = e.clientY - rect.top
+  function fireBuzz(clientX: number, clientY: number, target: HTMLButtonElement) {
+    const rect = target.getBoundingClientRect()
+    const x = clientX - rect.left
+    const y = clientY - rect.top
     const id = Date.now()
     setRipples(prev => [...prev, { id, x, y }])
     setTimeout(() => setRipples(prev => prev.filter(r => r.id !== id)), 900)
     playBuzz()
     navigator.vibrate?.(100)
     handleSubmitBuzz()
+  }
+
+  // The buzz fires on pointerDOWN — the instant the finger lands — so iOS can't
+  // swallow the tap as a scroll gesture or delay it until the finger lifts.
+  // (Players reported taps "not registering" when a touch drifted into a slide.)
+  const lastPointerBuzzRef = useRef(0)
+  function handleBuzzPointerDown(e: React.PointerEvent<HTMLButtonElement>) {
+    lastPointerBuzzRef.current = Date.now()
+    fireBuzz(e.clientX, e.clientY, e.currentTarget)
+  }
+  // Keyboard activation (Enter/Space) arrives as a click with no preceding pointer
+  function handleBuzzClick(e: React.MouseEvent<HTMLButtonElement>) {
+    if (Date.now() - lastPointerBuzzRef.current < 700) return
+    fireBuzz(e.clientX, e.clientY, e.currentTarget)
   }
 
   async function handleSubmitResponse() {
@@ -2275,12 +2289,22 @@ export default function PlayView() {
 
   // ── Double Tap reveal screens ─────────────────────────────
 
+  // Which glass is being wagered on — the pick is public info, so every DT screen
+  // shows it (players kept forgetting which category they'd chosen mid-wager)
+  const dtPendingId   = doubleTapPendingQ?.questionId ?? room?.pending_question_id ?? null
+  const dtPendingCat  = dtPendingId ? boardCategories.find(c => c.questions.some(q => q.id === dtPendingId)) : undefined
+  const dtPendingQRow = dtPendingCat?.questions.find(q => q.id === dtPendingId)
+  const dtPendingLabel = dtPendingCat
+    ? `${dtPendingCat.name}${dtPendingQRow?.point_value != null ? ` — $${dtPendingQRow.point_value}` : ''}`
+    : null
+
   if (doubleTapStep === 'reveal') {
     return (
       <div className="min-h-screen dt-bg text-white flex flex-col items-center justify-center p-6 text-center">
         <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
           <p className="text-8xl mb-4">🍺</p>
           <p className="text-5xl font-black text-amber-400 leading-none mb-2">DOUBLE TAP!</p>
+          {dtPendingLabel && <p className="text-white font-black text-2xl mb-2">{dtPendingLabel}</p>}
           <p className="text-amber-200 text-xl font-semibold">Get ready to wager!</p>
         </div>
       </div>
@@ -2292,10 +2316,12 @@ export default function PlayView() {
     const dtName = doubleTapTeamId ? (teamNames.get(doubleTapTeamId) ?? 'Another team') : 'Another team'
     return (
       <div className="min-h-screen dt-bg text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
         {scoreChip}
         <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
           <p className="text-8xl mb-4">🍺</p>
           <p className="text-5xl font-black text-amber-400 leading-none mb-2">DOUBLE TAP!</p>
+          {dtPendingLabel && <p className="text-white font-black text-2xl mb-2">{dtPendingLabel}</p>}
           <p className="text-amber-200 text-xl font-semibold">{dtName} is wagering!</p>
         </div>
       </div>
@@ -2310,9 +2336,11 @@ export default function PlayView() {
     const valid    = doubleTapWagerInput !== '' && !isNaN(parsed) && parsed >= 5 && parsed <= maxWager
     return (
       <div className="min-h-screen dt-bg text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
         {scoreChip}
         <p className="text-5xl mb-4">🍺</p>
         <p className="text-3xl font-black text-amber-400 mb-1">DOUBLE TAP!</p>
+        {dtPendingLabel && <p className="text-white font-black text-2xl mb-1">{dtPendingLabel}</p>}
         <p className="text-gray-400 text-sm mb-8">Min: $5 — Max: ${maxWager.toLocaleString()}</p>
         <div className="w-full max-w-xs space-y-4">
           <input
@@ -2342,10 +2370,12 @@ export default function PlayView() {
   if (dtTeammateWaiting) {
     return (
       <div className="min-h-screen dt-bg text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
         {scoreChip}
         <div style={{ animation: 'double-tap-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
           <p className="text-8xl mb-4">🍺</p>
           <p className="text-5xl font-black text-amber-400 leading-none mb-2">DOUBLE TAP!</p>
+          {dtPendingLabel && <p className="text-white font-black text-2xl mb-2">{dtPendingLabel}</p>}
           <p className="text-amber-200 text-xl font-semibold">Your team is wagering!</p>
         </div>
       </div>
@@ -2475,9 +2505,10 @@ export default function PlayView() {
         </button>
         {error && <p className="shrink-0 text-red-400 text-sm text-center">{error}</p>}
 
-        {/* Preview overlay */}
+        {/* Preview overlay — pointerdown so eager pre-buzz taps register the same
+            way the real buzzer does (and count toward the anti-spam lockout) */}
         {previewInfo && (
-          <div onClick={handlePreBuzzTap}
+          <div onPointerDown={handlePreBuzzTap}
             className="fixed inset-0 z-50 wood-bg text-white flex flex-col items-center justify-center p-6 text-center"
             style={tileRect ? (() => {
               const vw = window.innerWidth, vh = window.innerHeight
@@ -2733,10 +2764,13 @@ export default function PlayView() {
   const buzzWindowPct = ((buzzWindowRemaining ?? 25) / 25) * 100
 
   return (
-    <div className="relative min-h-screen bar-bg text-white flex flex-col p-5">
+    // Locked to exactly the viewport: no scroll, no rubber-band, no chance for iOS
+    // to read a drifting tap as a slide and swallow the buzz.
+    <div className="relative bar-bg text-white flex flex-col p-5 overflow-hidden select-none"
+      style={{ height: '100dvh', touchAction: 'manipulation', overscrollBehavior: 'none' }}>
       {scoreOverlayEl}
       {scoreChip}
-      <div className="max-w-sm mx-auto w-full flex flex-col" style={{ minHeight: 'calc(100vh - 2.5rem)' }}>
+      <div className="max-w-sm mx-auto w-full flex-1 min-h-0 flex flex-col">
         <div className="glass-card rounded-2xl p-5 mb-4 pt-14">
           <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The answer</p>
           <p className="text-2xl font-bold leading-snug">{activeQuestion.answer}</p>
@@ -2764,9 +2798,10 @@ export default function PlayView() {
           </div>
         )}
 
-        <div className="flex-1 flex flex-col justify-end pb-4">
+        {/* Centered in the remaining space — the bar is the star of this screen */}
+        <div className="flex-1 min-h-0 flex flex-col justify-center pb-4">
           {buzzFailed && !buzzLockedOut && !buzzWindowClosed && (
-            <p className="text-red-400 text-center font-black text-sm mb-3"
+            <p role="alert" className="text-red-400 text-center font-black text-sm mb-3"
               style={{ animation: 'shake-x 0.5s ease-out' }}>
               ⚠️ Buzz didn't go through — tap again!
             </p>
@@ -2800,31 +2835,49 @@ export default function PlayView() {
                   boxShadow: 'inset 0 0 2px rgba(255,255,255,0.35)',
                 }}
               />
-              <button
-                onClick={handleBuzzSubmitClick}
-                disabled={buzzing}
-                className="relative overflow-hidden w-full py-8 rounded-2xl font-black text-3xl tracking-wide text-white disabled:opacity-60"
-                style={{
-                  animation: 'buzz-glow 1.6s ease-in-out infinite',
-                  background: 'linear-gradient(180deg, #f87171 0%, #dc2626 45%, #991b1b 100%)',
-                  textShadow: '0 2px 4px rgba(0,0,0,0.4)',
-                }}
-              >
-                {ripples.map(r => (
-                  <span
-                    key={r.id}
-                    className="absolute rounded-full bg-white pointer-events-none"
-                    style={{
-                      left: r.x - 24,
-                      top: r.y - 24,
-                      width: 48,
-                      height: 48,
-                      animation: 'buzz-ripple 0.9s ease-out forwards',
-                    }}
-                  />
-                ))}
-                {buzzing ? '…' : 'TAP IN!'}
-              </button>
+              <div className="relative w-full">
+                {/* Glow lives on its own layer animating opacity (composited) — the old
+                    box-shadow keyframe animation repainted the big button every frame,
+                    a suspect in the iOS "bar hangs" reports */}
+                <span
+                  aria-hidden
+                  className="absolute inset-0 rounded-3xl pointer-events-none"
+                  style={{
+                    boxShadow: '0 0 55px 10px rgba(220, 38, 38, 0.7)',
+                    animation: 'glow-pulse 1.6s ease-in-out infinite',
+                  }}
+                />
+                <button
+                  onPointerDown={handleBuzzPointerDown}
+                  onClick={handleBuzzClick}
+                  disabled={buzzing}
+                  className="relative overflow-hidden w-full rounded-3xl font-black text-5xl tracking-wide text-white disabled:opacity-60 select-none"
+                  style={{
+                    minHeight: 'clamp(150px, 26vh, 250px)',
+                    touchAction: 'none',
+                    WebkitTapHighlightColor: 'transparent',
+                    WebkitUserSelect: 'none',
+                    background: 'linear-gradient(180deg, #f87171 0%, #dc2626 45%, #991b1b 100%)',
+                    boxShadow: 'inset 0 2px 0 rgba(255,255,255,0.25), inset 0 -4px 8px rgba(0,0,0,0.35)',
+                    textShadow: '0 2px 4px rgba(0,0,0,0.4)',
+                  }}
+                >
+                  {ripples.map(r => (
+                    <span
+                      key={r.id}
+                      className="absolute rounded-full bg-white pointer-events-none"
+                      style={{
+                        left: r.x - 24,
+                        top: r.y - 24,
+                        width: 48,
+                        height: 48,
+                        animation: 'buzz-ripple 0.9s ease-out forwards',
+                      }}
+                    />
+                  ))}
+                  {buzzing ? '…' : 'TAP IN!'}
+                </button>
+              </div>
             </div>
           )}
         </div>

@@ -57,6 +57,19 @@
   50%      { transform: scale(1.12); }
 }
 
+/* Buzz button glow — opacity-only pulse on a dedicated layer (compositor-friendly;
+   animating box-shadow itself repaints the whole button every frame) */
+@keyframes glow-pulse {
+  0%, 100% { opacity: 0.45; }
+  50%      { opacity: 1; }
+}
+
+/* Phones: no 350ms double-tap-zoom delay on any control, no gray tap flash */
+button {
+  touch-action: manipulation;
+  -webkit-tap-highlight-color: transparent;
+}
+
 @keyframes slide-up-in {
   0%   { opacity: 0; transform: translateY(18px); }
   100% { opacity: 1; transform: translateY(0); }
