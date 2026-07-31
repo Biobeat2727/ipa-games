@@ -1163,6 +1163,16 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     }
   }
 
+  // Escape hatch for rooms whose content never had a Final Tap question (e.g. a
+  // content file the importer couldn't read a final block from): any collected
+  // wagers can never be judged, so clear them and finish on current scores.
+  async function endFinalTapWithoutQuestion() {
+    await supabase.from('wagers').delete().eq('room_id', roomId)
+    setFjWagers([])
+    setFjWagerStatus(new Map())
+    await finishGame()
+  }
+
   async function finishGame() {
     if (gameFinishInFlightRef.current) return
     gameFinishInFlightRef.current = true
@@ -1582,11 +1592,27 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
               </div>
               <button
                 onClick={openFJWagering}
-                disabled={fjTransitionSaving}
+                disabled={fjTransitionSaving || !fjQuestion}
                 className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 disabled:opacity-50 transition-colors"
               >
                 {fjTransitionSaving ? 'Opening…' : 'Open Wagering →'}
               </button>
+              {!fjQuestion && (
+                <div className="w-full rounded-xl border border-amber-500/40 bg-amber-950/40 p-3 space-y-2">
+                  <p className="text-sm text-amber-200 font-semibold">
+                    No Final Tap question found in this game's content — check that your
+                    import file has a final_tap block.
+                  </p>
+                  <button
+                    onClick={endFinalTapWithoutQuestion}
+                    disabled={gameFinishSaving}
+                    className="w-full py-3 rounded-xl font-black bg-amber-500 text-gray-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
+                  >
+                    {gameFinishSaving ? 'Finishing…' : 'End Game with Current Scores →'}
+                  </button>
+                  {gameFinishError && <p className="text-red-400 text-sm">{gameFinishError}</p>}
+                </div>
+              )}
               {fjTransitionError && <p className="text-red-400 text-sm">{fjTransitionError}</p>}
             </div>
           ) : fjPhase === 'wager' ? (
@@ -1624,6 +1650,22 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                   : fjWagerStatus.size >= fjActiveTeamIds.size && fjActiveTeamIds.size > 0
                     ? 'Reveal Question →' : 'Reveal Anyway →'}
               </button>
+              {!fjQuestion && (
+                <div className="rounded-xl border border-amber-500/40 bg-amber-950/40 p-3 space-y-2">
+                  <p className="text-sm text-amber-200 font-semibold">
+                    No Final Tap question found in this game's content, so the reveal can't
+                    run. Collected wagers will be discarded — nothing can judge them.
+                  </p>
+                  <button
+                    onClick={endFinalTapWithoutQuestion}
+                    disabled={gameFinishSaving}
+                    className="w-full py-3 rounded-xl font-black bg-amber-500 text-gray-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
+                  >
+                    {gameFinishSaving ? 'Finishing…' : 'End Game with Current Scores →'}
+                  </button>
+                  {gameFinishError && <p className="text-red-400 text-sm">{gameFinishError}</p>}
+                </div>
+              )}
               {fjTransitionError && <p className="text-red-400 text-sm text-center">{fjTransitionError}</p>}
             </div>
 

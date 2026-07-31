@@ -23,7 +23,15 @@ interface ImportFinalJeopardy {
 
 export interface ContentJSON {
   rounds: ImportRound[]
+  /** Preferred key for the final question block */
+  final_tap?: ImportFinalJeopardy
+  /** Legacy key — still accepted so old content files keep importing */
   final_jeopardy?: ImportFinalJeopardy
+}
+
+/** The final question under either its current or legacy key */
+function finalBlock(content: ContentJSON): ImportFinalJeopardy | undefined {
+  return content.final_tap ?? content.final_jeopardy
 }
 
 export interface ContentSummary {
@@ -53,10 +61,10 @@ function validate(content: ContentJSON): void {
       }
     }
   }
-  if (content.final_jeopardy) {
-    const fj = content.final_jeopardy
+  const fj = finalBlock(content)
+  if (fj) {
     if (!fj.category?.trim() || !fj.answer?.trim() || !fj.correct_question?.trim())
-      throw new Error('final_jeopardy must have category, answer, and correct_question.')
+      throw new Error('final_tap must have category, answer, and correct_question.')
   }
 }
 
@@ -114,9 +122,10 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
     await supabase.from('questions').update({ is_double_tap: true }).in('id', picks)
   }
 
-  // Final Jeopardy — point_value is null (wager determines scoring)
-  if (content.final_jeopardy) {
-    const fj = content.final_jeopardy
+  // Final Tap — point_value is null (wager determines scoring)
+  const finalTap = finalBlock(content)
+  if (finalTap) {
+    const fj = finalTap
     const { data: fjCat, error: fjCatErr } = await supabase
       .from('categories')
       .insert({ room_id: roomId, name: fj.category, round: 3 })
