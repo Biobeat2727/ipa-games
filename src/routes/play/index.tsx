@@ -2058,6 +2058,27 @@ export default function PlayView() {
     )
   }
 
+  // Eliminated before Final Tap: 'done' with no final scores yet means the game is
+  // still running for the top 3 — show a spectator screen instead of an empty podium.
+  if (fjSubPhase === 'done' && fjFinalScores.length === 0 && !intermissionSnapshots) {
+    return (
+      <div className="min-h-screen final-bg text-white flex flex-col items-center justify-center p-6 text-center">
+        {scoreOverlayEl}
+        {scoreChip}
+        <p className="text-5xl mb-5">🍻</p>
+        <p className="text-amber-400 text-xs uppercase tracking-widest mb-2">Final Tap</p>
+        <p className="text-2xl font-black text-white mb-3">Your night ends here</p>
+        <p className="text-gray-300 leading-relaxed max-w-xs mb-6">
+          The top 3 teams are battling it out — watch the big screen! Final standings
+          will show up here when it's all over.
+        </p>
+        <p className="text-gray-400 text-sm">You finished with</p>
+        <p className="text-4xl font-mono font-black text-yellow-400">{myScore.toLocaleString()} pts</p>
+        <QuipCycler />
+      </div>
+    )
+  }
+
   if (fjSubPhase === 'done' && !intermissionSnapshots) {
     const finalStandings = [...fjFinalScores].sort((a, b) => b.score - a.score)
     const winner   = finalStandings[0]
