@@ -416,6 +416,36 @@ export default function PlayView() {
     return () => { supabase.removeChannel(ch); clearInterval(poll) }
   }, [room?.id])
 
+  // Ably reconnect → re-read scores from the database.
+  // During gameplay myScore/allTeamScores are fed ONLY by the 'score_update'
+  // broadcast (the teams postgres_changes subscription is gated to the
+  // select_team phase), so a drop across a judgment leaves this phone showing a
+  // stale score until some later phase change happens to refresh it.
+  useEffect(() => {
+    const roomId = room?.id
+    if (!roomId) return
+    let dropped = false
+    const onDown = () => { dropped = true }
+    const onUp = async () => {
+      // 'connected' also fires on the first ever connect, which needs no resync.
+      if (!dropped) return
+      dropped = false
+      const { data } = await supabase.from('teams').select('id, name, score').eq('room_id', roomId)
+      if (!data) return
+      setAllTeamScores(data)
+      const mine = data.find(t => t.id === myTeamRef.current?.id)
+      if (mine) setMyScore(mine.score)
+    }
+    ablyClient.connection.on('disconnected', onDown)
+    ablyClient.connection.on('suspended', onDown)
+    ablyClient.connection.on('connected', onUp)
+    return () => {
+      ablyClient.connection.off('disconnected', onDown)
+      ablyClient.connection.off('suspended', onDown)
+      ablyClient.connection.off('connected', onUp)
+    }
+  }, [room?.id])
+
   // Hydrate currentTurnTeamId from room.current_turn_team_id (polling fallback for turn persistence)
   useEffect(() => {
     if (phase === 'game' && room?.current_turn_team_id !== undefined) {
