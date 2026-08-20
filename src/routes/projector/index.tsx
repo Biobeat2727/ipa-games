@@ -24,6 +24,10 @@ type CategoryRow = {
   questions: QuestionPublic[]
 }
 
+// Players always join at the production domain, whatever host the projector
+// itself is served from. public/qr-join.png encodes exactly this string.
+const JOIN_URL = 'https://tappedin.lol'
+
 type Phase = 'checking' | 'waiting' | 'connected'
 
 export default function ProjectorView() {
@@ -32,9 +36,15 @@ export default function ProjectorView() {
   const [teams, setTeams]               = useState<Team[]>([])
   const [categories, setCategories]     = useState<CategoryRow[]>([])
   const [buzzes, setBuzzes]             = useState<Buzz[]>([])
-  const [timerPayload, setTimerPayload] = useState<TimerPayload | null>(null)
+  // Only the setter is used: the countdown below derives from the first pending
+  // buzz (server deadline), not from timer_start broadcasts.
+  const [, setTimerPayload]             = useState<TimerPayload | null>(null)
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null)
   const [scores, setScores]             = useState<Map<string, number>>(new Map())
+  // The QR is a local static asset, so this should never trip — it is insurance
+  // against a bad deploy (missing/corrupt file). 'failed' swaps in a typed-URL
+  // panel so the join path can never silently vanish in front of a room.
+  const [qrState, setQrState]                     = useState<'loading' | 'ok' | 'failed'>('loading')
   const [feedbackTeam, setFeedbackTeam]           = useState<string | null>(null)
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
   const [previewInfo, setPreviewInfo]             = useState<{
@@ -447,6 +457,14 @@ export default function ProjectorView() {
     return () => { supabase.removeChannel(ch) }
   }, [room?.current_question_id])
 
+  // A hung image load is as bad as a failed one on a lobby screen, so cap the
+  // wait rather than trusting the browser to fire onError promptly.
+  useEffect(() => {
+    if (qrState !== 'loading') return
+    const id = setTimeout(() => setQrState(prev => (prev === 'loading' ? 'failed' : prev)), 6000)
+    return () => clearTimeout(id)
+  }, [qrState])
+
   // ── Timer countdown ───────────────────────────────────────
 
   // Counts down for the team actually next up — the FIRST pending buzz, using its
@@ -457,14 +475,18 @@ export default function ProjectorView() {
     const first = buzzes.find(b => b.status === 'pending')
     if (!first?.response_deadline_at) { setTimeRemaining(null); return }
     const deadline = new Date(first.response_deadline_at).getTime()
+    // `id` must be declared before tick() runs: reconnecting to an ALREADY-expired
+    // deadline makes the first tick hit remaining === 0, and a `const id` below
+    // would throw (TDZ) and blank the projector. Same shape as the FJ countdown.
+    let id: ReturnType<typeof setInterval> | null = null
     const tick = () => {
-      const remaining = Math.max(0, Math.ceil((deadline - Date.now()) / 1000))
+      const remaining = Math.max(0, Math.ceil((deadline - serverNow()) / 1000))
       setTimeRemaining(remaining)
-      if (remaining === 0) clearInterval(id)
+      if (remaining === 0 && id) { clearInterval(id); id = null }
+      return remaining
     }
-    tick()
-    const id = setInterval(tick, 500)
-    return () => clearInterval(id)
+    if (tick() > 0) id = setInterval(tick, 500)
+    return () => { if (id) clearInterval(id) }
   }, [buzzes])
 
   // ── FJ countdown ──────────────────────────────────────────
@@ -579,7 +601,11 @@ export default function ProjectorView() {
 
   // Lobby — same bar mood as the phone join screens: warm dark, bubbles, neon sign
   if (room.status === 'lobby') {
-    const joinUrl = window.location.origin
+    // Fixed, not window.location.origin: /qr-join.png is pre-generated for this
+    // exact URL, so the printed address must always agree with what the QR encodes
+    // (the projector may be driven from localhost or a preview deploy).
+    // If the domain ever changes, regenerate the QR — see public/README-qr.md.
+    const joinUrl = JOIN_URL
     return (
       <div className="h-screen bar-bg text-white flex flex-col items-center justify-center text-center relative overflow-hidden px-8"
         style={{ paddingTop: 'clamp(0.75rem, 2.5vh, 2rem)', paddingBottom: 'clamp(0.75rem, 2.5vh, 2rem)' }}>
@@ -594,21 +620,42 @@ export default function ProjectorView() {
           </h1>
           <p className="text-amber-400/90 uppercase tracking-[0.4em]"
             style={{ fontSize: 'clamp(0.9rem, min(2vw, 2.6vh), 1.5rem)', animation: 'slide-up-in 0.5s ease-out 0.12s both' }}>
-            Grab your phone — scan to join
+            {qrState === 'failed' ? 'Grab your phone — type the address below' : 'Grab your phone — scan to join'}
           </p>
           <div className="glass-card rounded-3xl p-4"
             style={{ animation: 'slide-up-in 0.5s ease-out 0.24s both' }}>
-            <img
-              src={`https://api.qrserver.com/v1/create-qr-code/?data=${encodeURIComponent(joinUrl)}&size=300x300`}
-              alt="Scan to join"
-              className="rounded-2xl bg-white p-3"
-              style={{ width: 'clamp(120px, min(18vw, 32vh), 280px)', height: 'clamp(120px, min(18vw, 32vh), 280px)' }}
-            />
+            {qrState === 'failed' ? (
+              // No QR — make typing the URL the obvious path. Deliberately a WIDE
+              // banner, not the QR square: a square forces a typed URL to wrap
+              // mid-token ("tappedin.vercel.ap / p"), which is unreadable at 30ft.
+              <div className="rounded-2xl bg-amber-50 text-amber-950 flex flex-col items-center justify-center"
+                style={{ minWidth: 'min(70vw, 560px)', maxWidth: '80vw', padding: 'clamp(0.75rem, 2vh, 1.25rem) clamp(1rem, 3vw, 2rem)' }}>
+                <p className="font-black uppercase leading-tight opacity-75"
+                  style={{ fontSize: 'clamp(0.7rem, min(1.4vw, 1.9vh), 1.05rem)', letterSpacing: '0.18em' }}>
+                  Open your browser and go to
+                </p>
+                <p className="font-black leading-tight mt-2"
+                  style={{ fontSize: 'clamp(1.1rem, min(3.4vw, 4.5vh), 2.6rem)', overflowWrap: 'anywhere' }}>
+                  {joinUrl.replace(/^https?:\/\//, '')}
+                </p>
+              </div>
+            ) : (
+              <img
+                src="/qr-join.png"
+                alt="Scan to join"
+                className="rounded-2xl bg-white p-3"
+                style={{ width: 'clamp(120px, min(18vw, 32vh), 280px)', height: 'clamp(120px, min(18vw, 32vh), 280px)' }}
+                onLoad={() => setQrState('ok')}
+                onError={() => setQrState('failed')}
+              />
+            )}
           </div>
-          <p className="font-semibold text-amber-100/90"
-            style={{ fontSize: 'clamp(1rem, min(3vw, 3.2vh), 2.25rem)', animation: 'slide-up-in 0.5s ease-out 0.36s both' }}>
-            {joinUrl}
-          </p>
+          {qrState !== 'failed' && (
+            <p className="font-semibold text-amber-100/90"
+              style={{ fontSize: 'clamp(1rem, min(3vw, 3.2vh), 2.25rem)', animation: 'slide-up-in 0.5s ease-out 0.36s both' }}>
+              {joinUrl}
+            </p>
+          )}
           {sortedTeams.length > 0 ? (
             <div className="flex flex-wrap justify-center gap-3 max-w-5xl min-h-0 overflow-hidden">
               {sortedTeams.map((team, i) => (

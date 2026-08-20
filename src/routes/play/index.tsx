@@ -1183,20 +1183,21 @@ export default function PlayView() {
   useEffect(() => {
     if (!timerPayload) { setTimeRemaining(null); return }
 
+    // `id` must be declared before tick() runs: restoring into an ALREADY-expired
+    // answer window makes the first tick hit remaining === 0, and a `const id`
+    // below would throw (TDZ) and blank the player screen mid-question.
+    let id: ReturnType<typeof setInterval> | null = null
     const tick = () => {
       const remaining = Math.max(0, Math.floor(
         (timerPayload.start_timestamp + timerPayload.duration_seconds * 1000 - serverNow()) / 1000
       ))
       setTimeRemaining(remaining)
-
-      if (remaining === 0) {
-        clearInterval(id)
-      }
+      if (remaining === 0 && id) { clearInterval(id); id = null }
+      return remaining
     }
 
-    tick()
-    const id = setInterval(tick, 500)
-    return () => clearInterval(id)
+    if (tick() > 0) id = setInterval(tick, 500)
+    return () => { if (id) clearInterval(id) }
   }, [timerPayload])
 
   // Double Tap: auto-buzz + local timer for the selecting team (no manual buzz needed)

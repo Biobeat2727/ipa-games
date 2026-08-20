@@ -11,6 +11,9 @@ export default defineConfig({
     VitePWA({
       registerType: 'autoUpdate',
       devOptions: { enabled: false },
+      // Additive (globPatterns would REPLACE the defaults): keeps the join QR
+      // available even if the network hiccups at the venue.
+      includeAssets: ['qr-join.png'],
       workbox: {
         skipWaiting: true,
         clientsClaim: true,
