@@ -1025,6 +1025,19 @@ export default function ProjectorView() {
   // Category grid (no active question)
   if (!activeQuestion && categories.length > 0) {
     const roundLabel = room.status === 'round_2' ? 'Round 2' : 'Round 1'
+    // The strip must stay ONE fixed-height row: the board grid below is vh-budgeted,
+    // so wrapping to a second line would push glasses out of frame. At 15-20 teams
+    // show the leaders plus whoever is picking, and count the remainder.
+    const STRIP_MAX = 6
+    const stripTeams = (() => {
+      if (sortedTeams.length <= STRIP_MAX) return sortedTeams
+      const top = sortedTeams.slice(0, STRIP_MAX)
+      if (!currentTurnTeamId || top.some(t => t.id === currentTurnTeamId)) return top
+      const picking = sortedTeams.find(t => t.id === currentTurnTeamId)
+      // Swap the lowest-ranked visible team for the one actually on the clock.
+      return picking ? [...top.slice(0, STRIP_MAX - 1), picking] : top
+    })()
+    const hiddenTeamCount = sortedTeams.length - stripTeams.length
     return (
       <div className="h-screen bar-bg text-white flex flex-col overflow-hidden p-3 gap-2 relative">
         <Bubbles count={16} />
@@ -1036,17 +1049,21 @@ export default function ProjectorView() {
               {roundLabel}
             </p>
             {currentTurnTeamId && (
-              <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1rem)' }}>
+              // Capped + truncating: an unbounded team name here would widen the
+              // left block and could push the score strip past the screen edge.
+              <p className="text-gray-300 leading-tight truncate"
+                style={{ fontSize: 'clamp(0.75rem, 1.6vw, 1.1rem)', maxWidth: 'clamp(8rem, 20vw, 22rem)' }}>
                 <span className="text-white font-bold">{teamName(currentTurnTeamId)}</span>'s pick
               </p>
             )}
           </div>
-          <div className="flex gap-8">
-            {sortedTeams.map(team => {
+          <div className="flex items-end" style={{ gap: 'clamp(0.6rem, 1.8vw, 2rem)' }}>
+            {stripTeams.map(team => {
               const delta = scoreDeltas.find(d => d.teamId === team.id)
               return (
-                <div key={team.id} className="text-center relative">
-                  <p className="text-gray-400 leading-tight" style={{ fontSize: 'clamp(0.7rem, 1.5vw, 1rem)' }}>
+                <div key={team.id} className="text-center relative shrink-0">
+                  <p className={`leading-tight truncate ${team.id === currentTurnTeamId ? 'text-white font-bold' : 'text-gray-300'}`}
+                    style={{ fontSize: 'clamp(0.8rem, 1.7vw, 1.25rem)', maxWidth: 'clamp(4rem, 12vw, 13rem)' }}>
                     {team.name}
                   </p>
                   <AnimatedScore
@@ -1067,6 +1084,17 @@ export default function ProjectorView() {
                 </div>
               )
             })}
+            {hiddenTeamCount > 0 && (
+              <div className="text-center shrink-0">
+                <p className="text-gray-500 leading-tight" style={{ fontSize: 'clamp(0.8rem, 1.7vw, 1.25rem)' }}>
+                  &nbsp;
+                </p>
+                <p className="font-mono font-black text-gray-400 tabular-nums"
+                  style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
+                  +{hiddenTeamCount}
+                </p>
+              </div>
+            )}
           </div>
         </div>
 
@@ -1223,6 +1251,14 @@ export default function ProjectorView() {
                   </div>
                 )
               })}
+              {buzzes.length > 6 && (
+                // Without this, teams past the 6th see no trace of their tap and
+                // assume it was lost. Say the queue is deeper instead.
+                <p className="text-amber-200/60 font-bold tracking-wide pt-1"
+                  style={{ fontSize: 'clamp(0.9rem, 1.8vw, 1.4rem)' }}>
+                  + {buzzes.length - 6} more in the queue
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-amber-100/50" style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)' }}>
