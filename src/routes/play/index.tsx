@@ -119,6 +119,11 @@ export default function PlayView() {
   // Anti-spam: taps landing on the pre-buzzer (preview) screen. 3+ before the buzzer
   // actually appears locks this device out of buzzing for the current question.
   const [preBuzzTaps, setPreBuzzTaps]         = useState(0)
+  // Timestamps of recent preview taps. The lockout triggers on a BURST, not on a
+  // running total: the overlay covers the whole screen, so three incidental
+  // touches spread across a long preview (regripping, handing the phone over, a
+  // tremor) are not spam and must not cost someone the question.
+  const preBuzzTapTimesRef                   = useRef<number[]>([])
   const [buzzLockedOut, setBuzzLockedOut]     = useState(false)
   // Buzz insert failed (flaky wifi) — surface it loudly so the player retries
   // instead of silently believing they're in the queue.
@@ -1474,11 +1479,15 @@ export default function PlayView() {
   // appears = this device is locked out of buzzing until another player answers.
   function handlePreBuzzTap() {
     if (buzzLockedOut) return
-    setPreBuzzTaps(n => {
-      const next = n + 1
-      if (next >= 3) setBuzzLockedOut(true)
-      return next
-    })
+    const SPAM_TAPS = 3
+    const SPAM_WINDOW_MS = 1500
+    const now = Date.now()
+    // Self-expiring window: taps older than the window drop out on their own, so
+    // this needs no reset alongside the other per-question state.
+    const recent = [...preBuzzTapTimesRef.current, now].filter(t => now - t <= SPAM_WINDOW_MS)
+    preBuzzTapTimesRef.current = recent
+    setPreBuzzTaps(recent.length)
+    if (recent.length >= SPAM_TAPS) setBuzzLockedOut(true)
   }
 
   function fireBuzz(clientX: number, clientY: number, target: HTMLButtonElement) {
