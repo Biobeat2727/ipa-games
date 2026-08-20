@@ -2548,7 +2548,7 @@ export default function PlayView() {
         {/* Preview overlay — pointerdown so eager pre-buzz taps register the same
             way the real buzzer does (and count toward the anti-spam lockout) */}
         {previewInfo && (
-          <div onPointerDown={handlePreBuzzTap}
+          <div
             className="fixed inset-0 z-50 wood-bg text-white flex flex-col items-center justify-center p-6 text-center"
             style={tileRect ? (() => {
               const vw = window.innerWidth, vh = window.innerHeight
@@ -2599,6 +2599,19 @@ export default function PlayView() {
               <p className="text-amber-400 text-xs font-semibold mt-3">Easy — tapping before the buzzer opens will lock you out</p>
             ) : null}
             <QuipCycler />
+            {/* Anti-spam catcher. Only taps landing where the buzz button WILL be
+                count toward the lockout: pre-loading a tap means parking a thumb on
+                the button's spot, whereas a tap up on the clue text is someone
+                reading. On the buzz screen the answer card and buzz-window bar take
+                the top of the viewport and the button fills the centered flex-1
+                below, so that band is roughly the bottom 60%. Transparent, and
+                clear of the score chip (top-4 right-4). */}
+            <div
+              aria-hidden
+              onPointerDown={handlePreBuzzTap}
+              className="absolute inset-x-0 bottom-0"
+              style={{ height: '60%' }}
+            />
           </div>
         )}
       </div>

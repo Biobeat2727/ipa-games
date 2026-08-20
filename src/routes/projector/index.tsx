@@ -41,9 +41,10 @@ export default function ProjectorView() {
   const [, setTimerPayload]             = useState<TimerPayload | null>(null)
   const [timeRemaining, setTimeRemaining] = useState<number | null>(null)
   const [scores, setScores]             = useState<Map<string, number>>(new Map())
-  // The QR is a local static asset, so this should never trip — it is insurance
-  // against a bad deploy (missing/corrupt file). 'failed' swaps in a typed-URL
-  // panel so the join path can never silently vanish in front of a room.
+  // The QR is a local static asset, so this only trips if the file is genuinely
+  // missing (bad deploy), via the img's onError. Do NOT add a timeout here: the
+  // lobby mounts long after this component does, so any mount-time timer fires
+  // before the <img> exists and marks a perfectly good QR as failed.
   const [qrState, setQrState]                     = useState<'loading' | 'ok' | 'failed'>('loading')
   const [feedbackTeam, setFeedbackTeam]           = useState<string | null>(null)
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
@@ -456,14 +457,6 @@ export default function ProjectorView() {
       .subscribe()
     return () => { supabase.removeChannel(ch) }
   }, [room?.current_question_id])
-
-  // A hung image load is as bad as a failed one on a lobby screen, so cap the
-  // wait rather than trusting the browser to fire onError promptly.
-  useEffect(() => {
-    if (qrState !== 'loading') return
-    const id = setTimeout(() => setQrState(prev => (prev === 'loading' ? 'failed' : prev)), 6000)
-    return () => clearTimeout(id)
-  }, [qrState])
 
   // ── Timer countdown ───────────────────────────────────────
 
