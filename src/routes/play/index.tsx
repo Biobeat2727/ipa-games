@@ -353,8 +353,13 @@ export default function PlayView() {
       }
     }
 
-    async function resume(teamId: string) {
-      const [{ data: teamData }, { data: playerMembership }] = await Promise.all([
+    // Resume must distinguish "the server says you are not on this team" from "the
+    // query did not come back". Both used to look identical (data === null), and
+    // both cleared the saved team — so one flaky request on a mid-game refresh
+    // ejected a live player AND destroyed the seat, making further refreshes
+    // useless. Only a clean answer from the server is allowed to clear anything.
+    async function resume(teamId: string, attempt = 0): Promise<void> {
+      const [teamRes, playerRes] = await Promise.all([
         supabase.from('teams').select().eq('id', teamId).maybeSingle(),
         supabase.from('players')
           .select('id')
@@ -362,14 +367,24 @@ export default function PlayView() {
           .eq('session_id', getSessionId())
           .maybeSingle(),
       ])
+
+      if (teamRes.error || playerRes.error) return retryResume(teamId, attempt)
+
+      const teamData = teamRes.data
+      const playerMembership = playerRes.data
+      // Clean answer, genuinely not a member (team deleted, or removed by the host).
       if (!teamData || !playerMembership) { clearPlayerSession(); return autoResolve() }
-      const { data: roomData } = await supabase
+
+      const roomRes = await supabase
         .from('rooms')
         .select()
         .eq('id', teamData.room_id)
         .neq('status', 'finished')
         .gte('created_at', getLocalDayStartIso())
         .maybeSingle()
+
+      if (roomRes.error) return retryResume(teamId, attempt)
+      const roomData = roomRes.data
       if (!roomData) { clearPlayerSession(); return autoResolve() }
       setRoom(roomData)
       setMyTeam(teamData)
@@ -383,8 +398,17 @@ export default function PlayView() {
       setPhase(roomData.status === 'lobby' ? 'lobby' : 'game')
     }
 
-    if (savedTeamId) resume(savedTeamId)
-    else autoResolve()
+    // Keep retrying rather than ejecting. The saved team is left untouched, so even
+    // if the player closes the tab mid-outage they can still resume later.
+    async function retryResume(teamId: string, attempt: number): Promise<void> {
+      if (attempt >= 6) return          // stay on the loading screen; a refresh retries
+      const backoff = Math.min(4000, 400 * 2 ** attempt)
+      await new Promise(r => setTimeout(r, backoff))
+      return resume(teamId, attempt + 1)
+    }
+
+    if (savedTeamId) void resume(savedTeamId)
+    else void autoResolve()
   }, [fetchTeammates, refreshAllScores])
 
   // Poll for an active room while in 'no_lobby' phase (every 3 seconds)
