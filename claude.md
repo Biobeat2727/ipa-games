@@ -7,10 +7,14 @@ React + Vite, TypeScript, Tailwind CSS, Supabase (Postgres + Realtime), Vercel, 
 
 ## Commands
 - Dev: `npm run dev`
-- Build: `npm run build`
-- Test: `npm test`
-- Types: `npx tsc --noEmit`
-- Lint: `npm run lint`
+- Build: `npm run build` (runs `tsc -b` first — a type error fails the build)
+- Types: `npx tsc -b`
+
+Note: `npx tsc --noEmit` reports success without checking anything. The root
+`tsconfig.json` is solution-style (`"files": []` + project references), so
+`--noEmit` checks an empty file list; only `-b` walks the referenced projects.
+
+No test or lint script is configured — `npm test` and `npm run lint` do not exist.
 
 ## Key Architecture
 - One Supabase Realtime channel per room: `room:{room_code}`
