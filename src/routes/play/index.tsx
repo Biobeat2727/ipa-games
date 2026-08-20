@@ -23,7 +23,13 @@ import {
   playDoubleTap,
 } from '../../lib/sounds'
 
-type Phase = 'checking' | 'no_lobby' | 'join_lobby' | 'select_team' | 'lobby' | 'game'
+type Phase = 'checking' | 'no_lobby' | 'choose_mode' | 'solo_name' | 'join_lobby' | 'select_team' | 'lobby' | 'game'
+
+// Every phase before the game itself. Listed once so that adding a join screen
+// cannot silently skip the finished-room bounce or the host's lobby_closed kick —
+// both used to inline this array, and both would have stranded players on the
+// Team-or-Solo screens.
+const PRE_GAME_PHASES: Phase[] = ['choose_mode', 'solo_name', 'join_lobby', 'select_team', 'lobby']
 
 interface TimerPayload {
   start_timestamp: number
@@ -118,6 +124,7 @@ export default function PlayView() {
   const [buzzResult, setBuzzResult]           = useState<'correct' | 'wrong' | null>(null)
   // Anti-spam: taps landing on the pre-buzzer (preview) screen. 3+ before the buzzer
   // actually appears locks this device out of buzzing for the current question.
+  const [soloName, setSoloName]               = useState('')
   const [preBuzzTaps, setPreBuzzTaps]         = useState(0)
   // Timestamps of recent preview taps. The lockout triggers on a BURST, not on a
   // running total: the overlay covers the whole screen, so three incidental
@@ -340,7 +347,7 @@ export default function PlayView() {
         const activeRoom = await findCurrentActiveRoom()
         if (!activeRoom) { setPhase('no_lobby'); return }
         setRoom(activeRoom)
-        setPhase('join_lobby')
+        setPhase('choose_mode')
       } catch {
         setPhase('no_lobby')
       }
@@ -388,7 +395,7 @@ export default function PlayView() {
         const activeRoom = await findCurrentActiveRoom()
         if (!activeRoom) return
         setRoom(activeRoom)
-        setPhase('join_lobby')
+        setPhase('choose_mode')
       } catch { /* keep polling through transient connection errors */ }
     }, 3000)
     return () => clearInterval(id)
@@ -542,7 +549,7 @@ export default function PlayView() {
   // Pre-game visitors leave the old room; active players recover the final scoreboard.
   useEffect(() => {
     if (room?.status !== 'finished') return
-    if (['join_lobby', 'select_team', 'lobby'].includes(phase)) {
+    if (PRE_GAME_PHASES.includes(phase)) {
       clearPlayerSession()
       setRoom(null); setMyTeam(null); setTeams([])
       setPhase('no_lobby')
@@ -567,7 +574,7 @@ export default function PlayView() {
 
   // Kick via broadcast: host sends lobby_closed on the room channel
   useEffect(() => {
-    if (!room?.id || !['join_lobby', 'select_team', 'lobby'].includes(phase)) return
+    if (!room?.id || !PRE_GAME_PHASES.includes(phase)) return
     const ch = ablyClient.channels.get(`play-kick-${room.id}`)
     ch.subscribe('lobby_closed', () => {
       clearPlayerSession()
@@ -1395,6 +1402,37 @@ export default function PlayView() {
     setPhase('select_team')
   }
 
+  // Load the team list before either branch: the team path needs it to show
+  // joinable teams, the solo path needs it to spot a duplicate name.
+  async function loadTeamsThen(next: Phase) {
+    if (!room) return
+    setError('')
+    const { data: teamData } = await supabase
+      .from('teams').select().eq('room_id', room.id).order('created_at', { ascending: true })
+    setTeams(teamData ?? [])
+    setPhase(next)
+  }
+
+  async function handleSoloJoin() {
+    const name = soloName.trim()
+    if (!name || !room) return
+    // Team names are not unique in the schema, so two solo players sharing a first
+    // name would put two identical rows on the projector. Catch it here instead.
+    if (teams.some(t => t.name.trim().toLowerCase() === name.toLowerCase())) {
+      setError(`"${name}" is already on the board — add a last initial or something to tell you apart.`)
+      return
+    }
+    setLoading(true); setError('')
+    const { data: team, error: err } = await supabase
+      .from('teams').insert({ room_id: room.id, name }).select().single()
+    if (!team || err) { setLoading(false); setError('Could not get you in. Check your connection and try again.'); return }
+    // A solo player IS their team: the one name they typed is both the team name
+    // on the projector and their own nickname. Passed explicitly because the
+    // setNickname below has not applied yet when joinTeam inserts.
+    setNickname(name)
+    await joinTeam(team, name)
+  }
+
   async function handleLeave() {
     setLoading(true)
     setError('')
@@ -1424,14 +1462,17 @@ export default function PlayView() {
     setMyBuzzId(null); setTimerPayload(null)
     setBuzzResult(null); setMyScore(0)
     setError('')
-    setPhase('select_team')
+    // Back to the Team-or-Solo choice: dropping a solo player straight into the
+    // team picker is exactly the confusion this flow exists to remove.
+    setSoloName('')
+    setPhase('choose_mode')
   }
 
-  async function joinTeam(team: Team) {
+  async function joinTeam(team: Team, nicknameOverride?: string) {
     setLoading(true); setError('')
     const { data: player, error: err } = await supabase
       .from('players')
-      .insert({ team_id: team.id, session_id: getSessionId(), nickname: nickname.trim() || null })
+      .insert({ team_id: team.id, session_id: getSessionId(), nickname: (nicknameOverride ?? nickname).trim() || null })
       .select().single()
     setLoading(false)
     if (!player || err) { setError('Failed to join team. Try again.'); return }
@@ -1446,6 +1487,14 @@ export default function PlayView() {
 
   async function handleCreateTeam() {
     if (!newTeamName.trim() || !room) return
+    const name = newTeamName.trim()
+    // Same guard as the solo path: nothing in the schema stops two identical team
+    // names, and two matching rows on the projector is exactly the confusion this
+    // flow is meant to remove.
+    if (teams.some(t => t.name.trim().toLowerCase() === name.toLowerCase())) {
+      setError(`"${name}" is already taken — pick another name.`)
+      return
+    }
     setLoading(true)
     const { data: team, error: err } = await supabase
       .from('teams').insert({ room_id: room.id, name: newTeamName.trim() }).select().single()
@@ -1808,6 +1857,92 @@ export default function PlayView() {
     )
   }
 
+  // Team-or-Solo choice. Split out because a single "nickname" box followed by a
+  // separate "team name" box read as the same question asked twice, and players
+  // regularly filled one in expecting it to be the other.
+  if (phase === 'choose_mode' && room) {
+    const openedAt = new Date(room.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
+    return (
+      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
+        <Bubbles />
+        <div className="relative z-10 w-full max-w-sm flex flex-col items-center">
+          <PintHero className="w-16 h-24 mb-4" />
+          <h1 className="neon-title text-5xl font-black mb-6 tracking-tight">Tapped In!</h1>
+          <div className="glass-card rounded-2xl p-5 w-full mb-8"
+            style={{ animation: 'slide-up-in 0.4s ease-out both' }}>
+            <p className="text-amber-400/80 text-xs uppercase tracking-[0.2em] mb-2">Now pouring</p>
+            <p className="text-white font-black text-2xl mb-1">Tonight's Game</p>
+            <p className="text-gray-500 text-sm">Doors opened at {openedAt}</p>
+          </div>
+
+          <p className="text-amber-300 font-black text-lg mb-4">How are you playing?</p>
+
+          <button
+            onClick={() => loadTeamsThen('join_lobby')}
+            className="glass-card hover:border-amber-400/40 active:scale-[0.99] w-full rounded-2xl p-5 mb-3 text-left transition-all"
+            style={{ animation: 'slide-up-in 0.4s ease-out 0.1s both' }}
+          >
+            <p className="font-black text-xl mb-1">&#128101;&nbsp; With a team</p>
+            <p className="text-gray-400 text-sm leading-snug">
+              Playing with friends. You&rsquo;ll pick a team name and buzz in together.
+            </p>
+          </button>
+
+          <button
+            onClick={() => loadTeamsThen('solo_name')}
+            className="glass-card hover:border-amber-400/40 active:scale-[0.99] w-full rounded-2xl p-5 text-left transition-all"
+            style={{ animation: 'slide-up-in 0.4s ease-out 0.18s both' }}
+          >
+            <p className="font-black text-xl mb-1">&#127866;&nbsp; On my own</p>
+            <p className="text-gray-400 text-sm leading-snug">
+              Just you. Your name goes on the big screen &mdash; nothing else to fill in.
+            </p>
+          </button>
+        </div>
+      </div>
+    )
+  }
+
+  // Solo: ONE name, which becomes both the team on the projector and the nickname.
+  if (phase === 'solo_name' && room) {
+    return (
+      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
+        <Bubbles />
+        <div className="relative z-10 w-full max-w-sm flex flex-col items-center">
+          <PintHero className="w-16 h-24 mb-4" />
+          <h1 className="neon-title text-4xl font-black mb-2 tracking-tight">Playing solo</h1>
+          <p className="text-gray-400 text-sm mb-8 leading-snug">
+            This is the name everyone sees on the big screen.
+          </p>
+          <input
+            type="text"
+            placeholder="Your name"
+            value={soloName}
+            onChange={e => { setSoloName(e.target.value); if (error) setError('') }}
+            onKeyDown={e => e.key === 'Enter' && soloName.trim() && handleSoloJoin()}
+            className="w-full bg-white/5 border border-white/10 text-white rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent text-center text-lg placeholder:text-gray-600"
+            autoFocus
+            maxLength={24}
+          />
+          {error && <p className="text-red-400 text-sm mb-4 leading-snug">{error}</p>}
+          <button
+            onClick={handleSoloJoin}
+            disabled={loading || !soloName.trim()}
+            className="btn-beer w-full py-4 rounded-2xl text-xl font-black mb-3"
+          >
+            {loading ? 'Getting you in…' : "Let's Go"}
+          </button>
+          <button
+            onClick={() => { setError(''); setPhase('choose_mode') }}
+            className="text-gray-500 text-sm py-2 hover:text-amber-300 transition-colors"
+          >
+            &lsaquo; Back
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (phase === 'join_lobby' && room) {
     const openedAt = new Date(room.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     return (
@@ -1822,21 +1957,34 @@ export default function PlayView() {
             <p className="text-white font-black text-2xl mb-1">Tonight's Game</p>
             <p className="text-gray-500 text-sm">Doors opened at {openedAt}</p>
           </div>
+          {/* Spelling out that this is step 1 of 2, and what the OTHER name is for,
+              is the whole point: the two boxes used to look like the same question. */}
+          <p className="text-amber-300 font-black text-lg mb-1">First, your name</p>
+          <p className="text-gray-400 text-sm mb-4 leading-snug max-w-sm">
+            Just so your teammates know who you are. You&rsquo;ll name the team on the next screen.
+          </p>
           <input
             type="text"
-            placeholder="Your nickname"
+            placeholder="Your name"
             value={nickname}
             onChange={e => setNickname(e.target.value)}
             onKeyDown={e => e.key === 'Enter' && nickname.trim() && handleJoinLobby()}
             className="w-full max-w-sm bg-white/5 border border-white/10 text-white rounded-xl px-4 py-3 mb-4 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent text-center text-lg placeholder:text-gray-600"
             autoFocus
+            maxLength={24}
           />
           <button
             onClick={handleJoinLobby}
             disabled={!nickname.trim()}
             className="btn-beer w-full max-w-sm py-4 rounded-2xl text-xl font-black"
           >
-            Join the Game
+            Next &rsaquo;
+          </button>
+          <button
+            onClick={() => { setError(''); setPhase('choose_mode') }}
+            className="text-gray-500 text-sm py-2 mt-3 hover:text-amber-300 transition-colors"
+          >
+            &lsaquo; Back
           </button>
         </div>
       </div>
@@ -1848,7 +1996,10 @@ export default function PlayView() {
       <div className="min-h-screen bar-bg text-white flex flex-col p-6">
         <div className="relative z-10 max-w-sm mx-auto w-full pt-10">
           <h1 className="neon-title text-center text-4xl font-black mb-1">Tapped In!</h1>
-          <p className="text-center text-gray-500 text-sm mb-8">Grab a table with your crew</p>
+          <p className="text-center text-amber-300 font-black text-lg mb-1">Now pick your team</p>
+          <p className="text-center text-gray-500 text-sm mb-6">
+            Start a new one, or tap a team a friend already made.
+          </p>
           {!showCreate ? (
             <button
               onClick={() => setShowCreate(true)}
@@ -1862,7 +2013,7 @@ export default function PlayView() {
                 type="text"
                 placeholder="Team name"
                 value={newTeamName}
-                onChange={e => setNewTeamName(e.target.value)}
+                onChange={e => { setNewTeamName(e.target.value); if (error) setError('') }}
                 onKeyDown={e => e.key === 'Enter' && handleCreateTeam()}
                 autoFocus
                 className="w-full bg-white/5 border border-white/10 text-white rounded-xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600"
@@ -1902,6 +2053,12 @@ export default function PlayView() {
             </>
           )}
           {error && <p className="text-red-400 text-sm text-center mt-4">{error}</p>}
+          <button
+            onClick={() => { setError(''); setShowCreate(false); setPhase('choose_mode') }}
+            className="w-full text-gray-500 text-sm py-2 mt-2 hover:text-amber-300 transition-colors"
+          >
+            &lsaquo; Back
+          </button>
         </div>
       </div>
     )
