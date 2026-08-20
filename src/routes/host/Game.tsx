@@ -37,6 +37,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   const [judgingBuzzId, setJudgingBuzzId]     = useState<string | null>(null)
   const [judgmentSaving, setJudgmentSaving]   = useState(false)
   const [judgmentError, setJudgmentError]     = useState('')
+  // Writes that used to fail silently: local state and the broadcast would still
+  // say "done", leaving phones/projector disagreeing with the database mid-game.
+  const [actionError, setActionError]         = useState('')
   const [judgmentRetry, setJudgmentRetry]     = useState<'correct' | 'wrong' | null>(null)
   const [judgeStartTime, setJudgeStartTime]   = useState<number | null>(null)
   const [timerSeconds, setTimerSeconds]       = useState(RESPONSE_SECONDS)
@@ -794,9 +797,16 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   async function skipQuestion() {
     if (!activeQuestion) return
-    await supabase.from('questions')
+    const { error } = await supabase.from('questions')
       .update({ is_answered: true })
       .eq('id', activeQuestion.id)
+    if (error) {
+      // Bail before touching local state: a board that shows the glass emptied
+      // while the row is still unanswered desyncs every client.
+      setActionError(`Couldn't skip that question: ${error.message}. Try again.`)
+      return
+    }
+    setActionError('')
     setCategories(prev => prev.map(cat => ({
       ...cat,
       questions: cat.questions.map(q =>
@@ -814,18 +824,30 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   async function clearBuzzQueue() {
     if (!activeQuestion) return
-    await supabase.from('buzzes').delete().eq('question_id', activeQuestion.id)
+    const { error } = await supabase.from('buzzes').delete().eq('question_id', activeQuestion.id)
+    if (error) {
+      setActionError(`Couldn't clear the buzz queue: ${error.message}. Try again.`)
+      return
+    }
+    setActionError('')
     setBuzzes([])
   }
 
   async function abortPreview() {
-    await supabase.from('rooms').update({
+    const { error } = await supabase.from('rooms').update({
       pending_question_id: null,
       pending_selection_team_id: null,
       pending_selection_session_id: null,
       pending_selection_claimed_at: null,
       pending_selection_wager: null,
     }).eq('id', roomId)
+    if (error) {
+      // Clearing locally while the row still holds the pending selection would
+      // strand players on a preview the host thinks is gone.
+      setActionError(`Couldn't undo that pick: ${error.message}. Try again.`)
+      return
+    }
+    setActionError('')
     setPreviewInfo(null)
     setDtPendingTeamId(null)
     setDoubleTapWager(null)
@@ -1217,7 +1239,13 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     const parsed = parseInt(editingScoreValue)
     setEditingScoreTeamId(null)
     if (isNaN(parsed)) return
-    await supabase.from('teams').update({ score: parsed }).eq('id', teamId)
+    const { error } = await supabase.from('teams').update({ score: parsed }).eq('id', teamId)
+    if (error) {
+      // Never broadcast a score the database did not accept.
+      setActionError(`Score change didn't save: ${error.message}. Try again.`)
+      return
+    }
+    setActionError('')
     const updatedScores = new Map([...scores, [teamId, parsed]])
     setScores(updatedScores)
     broadcastRef.current?.publish('score_update', { teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })) })
@@ -1331,6 +1359,21 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   return (
     <div className="h-screen bg-gray-950 text-white flex overflow-hidden">
+
+      {/* ── Failed host action ───────────────────────────── */}
+      {actionError && (
+        <div role="alert"
+          className="fixed top-4 left-1/2 -translate-x-1/2 rounded-xl border border-red-500/60 bg-red-950/95 px-5 py-3 shadow-2xl flex items-center gap-4"
+          style={{ zIndex: 60, maxWidth: '90vw' }}>
+          <p className="text-sm font-semibold text-red-100">{actionError}</p>
+          <button
+            onClick={() => setActionError('')}
+            className="shrink-0 rounded-lg bg-red-200 px-3 py-1 text-sm font-black text-red-950 hover:bg-white"
+          >
+            Dismiss
+          </button>
+        </div>
+      )}
 
       {/* ── Double Tap selected notification ─────────────── */}
       {dtPendingTeamId && !previewInfo && (
