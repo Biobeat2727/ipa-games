@@ -1861,20 +1861,14 @@ export default function PlayView() {
   // separate "team name" box read as the same question asked twice, and players
   // regularly filled one in expecting it to be the other.
   if (phase === 'choose_mode' && room) {
-    const openedAt = new Date(room.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     return (
       <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
         <Bubbles />
         <div className="relative z-10 w-full max-w-sm flex flex-col items-center">
           <PintHero className="w-16 h-24 mb-4" />
           <h1 className="neon-title text-5xl font-black mb-6 tracking-tight">Tapped In!</h1>
-          <div className="glass-card rounded-2xl p-5 w-full mb-8"
-            style={{ animation: 'slide-up-in 0.4s ease-out both' }}>
-            <p className="text-amber-400/80 text-xs uppercase tracking-[0.2em] mb-2">Now pouring</p>
-            <p className="text-white font-black text-2xl mb-1">Tonight's Game</p>
-            <p className="text-gray-500 text-sm">Doors opened at {openedAt}</p>
-          </div>
-
+          {/* No "tonight's game" card: only one game runs at a time, so naming it
+              told players nothing and pushed the second choice off short screens. */}
           <p className="text-amber-300 font-black text-lg mb-4">How are you playing?</p>
 
           {/* Two different pours so the choice reads at a glance, not just from the
@@ -1954,19 +1948,12 @@ export default function PlayView() {
   }
 
   if (phase === 'join_lobby' && room) {
-    const openedAt = new Date(room.created_at).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })
     return (
       <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
         <Bubbles />
         <div className="relative z-10 w-full flex flex-col items-center">
           <PintHero className="w-16 h-24 mb-4" />
           <h1 className="neon-title text-5xl font-black mb-8 tracking-tight">Tapped In!</h1>
-          <div className="glass-card rounded-2xl p-6 w-full max-w-sm mb-6"
-            style={{ animation: 'slide-up-in 0.4s ease-out both' }}>
-            <p className="text-amber-400/80 text-xs uppercase tracking-[0.2em] mb-2">Now pouring</p>
-            <p className="text-white font-black text-2xl mb-1">Tonight's Game</p>
-            <p className="text-gray-500 text-sm">Doors opened at {openedAt}</p>
-          </div>
           {/* Spelling out that this is step 1 of 2, and what the OTHER name is for,
               is the whole point: the two boxes used to look like the same question. */}
           <p className="text-amber-300 font-black text-lg mb-1">First, your name</p>
