@@ -83,6 +83,56 @@ export function PintHero({ className = 'w-20 h-32' }: { className?: string }) {
   )
 }
 
+// Small glass icons for the Team-or-Solo choice. Same silhouette DNA as
+// PintHero (tapered glass, foam head, vertical highlight) but stripped of the
+// fine detail, which turns to mush at icon size. Colours are passed in so the
+// two choices can read as two different pours.
+const ICON_GLASS = 'M 7 6 L 11 44 Q 24 49 37 44 L 41 6 Z'
+
+function Glass({ uid, from, to }: { uid: string; from: string; to: string }) {
+  return (
+    <>
+      <defs>
+        <clipPath id={`g-clip-${uid}`}><path d={ICON_GLASS} /></clipPath>
+        <linearGradient id={`g-beer-${uid}`} x1="0" y1="0" x2="0" y2="1">
+          <stop offset="0%" stopColor={from} />
+          <stop offset="100%" stopColor={to} />
+        </linearGradient>
+      </defs>
+      <path d={ICON_GLASS} fill="rgba(255,255,255,0.06)" stroke="rgba(255,255,255,0.45)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+      <g clipPath={`url(#g-clip-${uid})`}>
+        <rect x="0" y="14" width="48" height="40" fill={`url(#g-beer-${uid})`} />
+        <rect x="0" y="11" width="48" height="4.5" fill="#fff8e7" />
+        <rect x="16" y="17" width="1.6" height="28" fill="rgba(255,255,255,0.25)" />
+      </g>
+      <ellipse cx="24" cy="6" rx="17" ry="1.8" fill="none" stroke="rgba(255,255,255,0.5)" strokeWidth="2" vectorEffect="non-scaling-stroke" />
+    </>
+  )
+}
+
+export function SoloPint({ className = 'w-12 h-14', from = '#fcd34d', to = '#c2650a' }:
+  { className?: string; from?: string; to?: string }) {
+  const uid = useId()
+  return (
+    <svg viewBox="0 0 48 52" className={className} aria-hidden>
+      <Glass uid={uid} from={from} to={to} />
+    </svg>
+  )
+}
+
+export function CheersPints({ className = 'w-12 h-14', from = '#fcd34d', to = '#c2650a' }:
+  { className?: string; from?: string; to?: string }) {
+  const a = useId()
+  const b = useId()
+  return (
+    <svg viewBox="0 0 84 52" className={className} aria-hidden>
+      {/* tilted toward each other so they read as a clink, not two parked glasses */}
+      <g transform="translate(2 3) rotate(-11 24 26)"><Glass uid={a} from={from} to={to} /></g>
+      <g transform="translate(34 3) rotate(11 24 26)"><Glass uid={b} from={from} to={to} /></g>
+    </svg>
+  )
+}
+
 export function Bubbles({ count = 14 }: { count?: number }) {
   const bubbles = useMemo(
     () =>

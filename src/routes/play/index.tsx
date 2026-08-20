@@ -13,7 +13,7 @@ import Confetti from '../../components/Confetti'
 import ScoreOverlay from '../../components/ScoreOverlay'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
-import { Bubbles, PintHero } from '../../components/Barware'
+import { Bubbles, PintHero, CheersPints, SoloPint } from '../../components/Barware'
 import { QUIPS } from '../../lib/quips'
 import { findCurrentActiveRoom, getLocalDayStartIso } from '../../lib/roomDiscovery'
 import {
@@ -1877,26 +1877,36 @@ export default function PlayView() {
 
           <p className="text-amber-300 font-black text-lg mb-4">How are you playing?</p>
 
+          {/* Two different pours so the choice reads at a glance, not just from the
+              label. Equal min-height keeps them balanced even though only one
+              carries a subtitle. */}
           <button
             onClick={() => loadTeamsThen('join_lobby')}
-            className="glass-card hover:border-amber-400/40 active:scale-[0.99] w-full rounded-2xl p-5 mb-3 text-left transition-all"
-            style={{ animation: 'slide-up-in 0.4s ease-out 0.1s both' }}
+            className="active:scale-[0.99] w-full rounded-2xl px-5 py-6 mb-3 flex flex-col items-center justify-center gap-2 border-2 transition-all"
+            style={{
+              minHeight: '11rem',
+              borderColor: 'rgba(251,191,36,0.55)',
+              background: 'linear-gradient(180deg, rgba(251,191,36,0.14), rgba(251,191,36,0.04))',
+              animation: 'slide-up-in 0.4s ease-out 0.1s both',
+            }}
           >
-            <p className="font-black text-xl mb-1">&#128101;&nbsp; With a team</p>
-            <p className="text-gray-400 text-sm leading-snug">
-              Playing with friends. You&rsquo;ll pick a team name and buzz in together.
-            </p>
+            <CheersPints className="w-24 h-14" from="#fde68a" to="#d97706" />
+            <p className="font-black text-2xl text-amber-100">With a team</p>
+            <p className="text-amber-200/70 text-sm">Play with friends!</p>
           </button>
 
           <button
             onClick={() => loadTeamsThen('solo_name')}
-            className="glass-card hover:border-amber-400/40 active:scale-[0.99] w-full rounded-2xl p-5 text-left transition-all"
-            style={{ animation: 'slide-up-in 0.4s ease-out 0.18s both' }}
+            className="active:scale-[0.99] w-full rounded-2xl px-5 py-6 flex flex-col items-center justify-center gap-2 border-2 transition-all"
+            style={{
+              minHeight: '11rem',
+              borderColor: 'rgba(45,212,191,0.5)',
+              background: 'linear-gradient(180deg, rgba(45,212,191,0.12), rgba(45,212,191,0.03))',
+              animation: 'slide-up-in 0.4s ease-out 0.18s both',
+            }}
           >
-            <p className="font-black text-xl mb-1">&#127866;&nbsp; On my own</p>
-            <p className="text-gray-400 text-sm leading-snug">
-              Just you. Your name goes on the big screen &mdash; nothing else to fill in.
-            </p>
+            <SoloPint className="w-12 h-14" from="#99f6e4" to="#0d9488" />
+            <p className="font-black text-2xl text-teal-100">On my own</p>
           </button>
         </div>
       </div>
