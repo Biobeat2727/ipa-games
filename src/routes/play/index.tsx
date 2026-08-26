@@ -12,6 +12,7 @@ import AnimatedScore from '../../components/AnimatedScore'
 import Confetti from '../../components/Confetti'
 import ScoreOverlay from '../../components/ScoreOverlay'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
+import { TipJar, VenueFooter } from '../../components/TipJar'
 import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
 import { Bubbles, PintHero, CheersPints, SoloPint } from '../../components/Barware'
 import { QUIPS } from '../../lib/quips'
@@ -178,6 +179,9 @@ export default function PlayView() {
 
   // Round intermission (score history graph)
   const [intermissionSnapshots, setIntermissionSnapshots] = useState<ScoreSnapshot[] | null>(null)
+  // Chart highlight — driven from both the chart lines AND the standings list below it.
+  // undefined = untouched (defaults to my team), null = explicitly deselected.
+  const [intermissionSelectedId, setIntermissionSelectedId] = useState<string | null | undefined>(undefined)
 
   const fjResponseRef = useRef('')
   const fjWagerIdRef  = useRef<string | null>(null)
@@ -942,6 +946,7 @@ export default function PlayView() {
     ch.subscribe('round_intermission', ({ data }) => {
       const { snapshots } = data as { snapshots: ScoreSnapshot[] }
       setIntermissionSnapshots(snapshots)
+      setIntermissionSelectedId(undefined) // fresh chart re-defaults to my team
       // Broadcast-only state — persist so an accidental refresh restores the
       // chart instead of dumping the player back on the finished board.
       const r = roomRef.current
@@ -2301,11 +2306,12 @@ export default function PlayView() {
         <p className="text-amber-400 text-xs uppercase tracking-widest mb-2">Final Tap</p>
         <p className="text-2xl font-black text-white mb-3">Your night ends here</p>
         <p className="text-gray-300 leading-relaxed max-w-xs mb-6">
-          The top 3 teams are battling it out — watch the big screen! Final standings
-          will show up here when it's all over.
+          The teams still in the black are battling it out — watch the big screen!
+          Final standings will show up here when it's all over.
         </p>
         <p className="text-gray-400 text-sm">You finished with</p>
         <p className="text-4xl font-mono font-black text-yellow-400">{myScore.toLocaleString()} pts</p>
+        <TipJar style={{ marginTop: '1.5rem', width: '100%', maxWidth: '20rem' }} />
         <QuipCycler />
       </div>
     )
@@ -2370,6 +2376,8 @@ export default function PlayView() {
         {myEntry && !iWon && (
           <p className="text-gray-400 text-sm">Your final score: <span className="text-white font-black">{myEntry.score.toLocaleString()}</span></p>
         )}
+        <TipJar style={{ marginTop: '1.5rem', width: '100%', maxWidth: '20rem', animation: 'slide-up-in 0.4s ease-out 0.8s both' }} />
+        <VenueFooter style={{ marginTop: '1.5rem', animation: 'slide-up-in 0.4s ease-out 0.9s both' }} />
         <button onClick={handleLeave} disabled={loading} className="mt-6 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
           {loading ? 'Leaving…' : 'Leave'}
         </button>
@@ -2383,6 +2391,10 @@ export default function PlayView() {
   if (intermissionSnapshots) {
     const teamIds = allTeamScores.map(t => t.id)
     const teamNameMap = new Map(allTeamScores.map(t => [t.id, t.name]))
+    // undefined = untouched → default the highlight to my own team
+    const chartSelectedId = intermissionSelectedId === undefined ? (myTeam?.id ?? null) : intermissionSelectedId
+    const toggleChartTeam = (id: string) =>
+      setIntermissionSelectedId(chartSelectedId === id ? null : id)
     const standings = [...allTeamScores].sort((a, b) => b.score - a.score)
     const myIdx     = standings.findIndex(t => t.id === myTeam?.id)
     const leader    = standings[0]
@@ -2432,17 +2444,23 @@ export default function PlayView() {
             snapshots={intermissionSnapshots}
             teamNames={teamNameMap}
             teamIds={teamIds}
-            highlightTeamId={myTeam?.id}
+            selectedTeamId={chartSelectedId}
+            onSelectTeam={setIntermissionSelectedId}
           />
         </div>
 
         <div className="mt-3 space-y-2 shrink-0">
           {standings.map((t, i) => (
-            <div key={t.id}
-              className={`flex items-center gap-3 rounded-xl px-4 py-3 ${
+            <button key={t.id}
+              onClick={() => toggleChartTeam(t.id)}
+              className={`w-full flex items-center gap-3 rounded-xl px-4 py-3 text-left ${
                 t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'glass-card'
               }`}
-              style={{ animation: `slide-up-in 0.4s ease-out ${0.55 + i * 0.08}s both` }}>
+              style={{
+                animation: `slide-up-in 0.4s ease-out ${0.55 + i * 0.08}s both`,
+                // Selected row echoes the chart highlight in the team's line color
+                boxShadow: t.id === chartSelectedId ? `inset 0 0 0 2px ${getTeamColor(t.id, teamIds)}` : undefined,
+              }}>
               <span className="w-6 text-center shrink-0">
                 {i < 3 ? medals[i] : <span className="text-gray-600 font-mono text-sm">{i + 1}</span>}
               </span>
@@ -2452,9 +2470,11 @@ export default function PlayView() {
               <span className={`font-mono font-black tabular-nums ${t.score < 0 ? 'text-red-400' : 'text-yellow-400'}`}>
                 {t.score.toLocaleString()}
               </span>
-            </div>
+            </button>
           ))}
         </div>
+
+        <TipJar style={{ marginTop: '1rem', animation: `slide-up-in 0.4s ease-out ${0.6 + standings.length * 0.08}s both` }} />
 
         <p className="text-center text-gray-500 text-sm mt-4 pb-4 shrink-0"
           style={{ animation: `slide-up-in 0.4s ease-out ${0.6 + standings.length * 0.08}s both` }}>

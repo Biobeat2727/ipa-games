@@ -10,6 +10,10 @@ interface Props {
   teamIds: string[]
   /** Player view: this team starts selected (bold line + detail bar below) */
   highlightTeamId?: string | null
+  /** Controlled selection: pass both to drive selection from outside (e.g. a tappable
+   *  standings list). When selectedTeamId is undefined the chart manages its own. */
+  selectedTeamId?: string | null
+  onSelectTeam?: (id: string | null) => void
 }
 
 // Distinct colors that pop on dark backgrounds — enough for 12 teams before cycling
@@ -59,8 +63,10 @@ function niceStep(raw: number): number {
 // path instead of being re-sorted on top. Re-sorting keyed SVG children moves DOM nodes,
 // which restarts their CSS intro animations — the whole chart would blank and redraw on
 // every tap. Same reason `drew` freezes the intro styles once the animation finishes.
-export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highlightTeamId }: Props) {
-  const [selectedId, setSelectedId] = useState<string | null>(highlightTeamId ?? null)
+export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highlightTeamId, selectedTeamId, onSelectTeam }: Props) {
+  const [internalSelectedId, setInternalSelectedId] = useState<string | null>(highlightTeamId ?? null)
+  const controlled = selectedTeamId !== undefined
+  const selectedId = controlled ? selectedTeamId : internalSelectedId
   const [drew, setDrew] = useState(false)
 
   if (snapshots.length === 0 || teamIds.length === 0) return null
@@ -158,7 +164,11 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
     ? { opacity: 1, ...extra }
     : { opacity: 0, animation: 'bump-label-in 0.5s ease-out 1.7s forwards', ...extra }
 
-  const toggle = (id: string) => setSelectedId(prev => prev === id ? null : id)
+  const toggle = (id: string) => {
+    const next = selectedId === id ? null : id
+    if (!controlled) setInternalSelectedId(next)
+    onSelectTeam?.(next)
+  }
 
   const selName  = selectedId ? (teamNames.get(selectedId) ?? '?') : null
   const selScore = selectedId ? (finalScores.get(selectedId) ?? 0) : 0

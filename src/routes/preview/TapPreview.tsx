@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react'
 import TapCategoryColumn from '../../components/TapCategoryColumn'
 import ScoreHistoryChart, { type ScoreSnapshot } from '../../components/ScoreHistoryChart'
+import { TipJar, TipJarProjector, VenueFooter } from '../../components/TipJar'
 
 const CATEGORIES = ['Beer History', 'Local Breweries', 'Hops & Barley', 'Bar Trivia']
 const POINT_VALUES = [100, 200, 300, 400, 500]
@@ -67,6 +68,15 @@ export default function TapPreview() {
             highlightTeamId="team-1"
           />
         </div>
+      </div>
+
+      {/* ── Tip jar + venue footer sandbox (intermission & final screens) ── */}
+      <div className="pb-16 max-w-sm mx-auto space-y-6">
+        <p className="text-center text-gray-500 text-sm">Tip jar & venue footer</p>
+        <TipJar />
+        <TipJarProjector />
+        <VenueFooter />
+        <VenueFooter projector />
       </div>
     </div>
   )

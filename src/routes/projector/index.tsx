@@ -6,6 +6,7 @@ import AnimatedScore from '../../components/AnimatedScore'
 import Confetti from '../../components/Confetti'
 import { playRoundTransition } from '../../lib/sounds'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
+import { TipJarProjector, VenueFooter } from '../../components/TipJar'
 import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
 import { Bubbles, PintHero } from '../../components/Barware'
 import { findCurrentActiveRoom } from '../../lib/roomDiscovery'
@@ -888,6 +889,11 @@ export default function ProjectorView() {
             </div>
           ))}
         </div>
+        <div className="relative z-10 mt-10 space-y-4"
+          style={{ animation: 'slide-up-in 0.5s ease-out 1.4s both' }}>
+          <TipJarProjector />
+          <VenueFooter projector />
+        </div>
       </div>
     )
   }
@@ -997,6 +1003,7 @@ export default function ProjectorView() {
             </div>
           ))}
         </div>
+        <TipJarProjector style={{ animation: 'slide-up-in 0.5s ease-out 1s both' }} />
       </div>
     )
   }
