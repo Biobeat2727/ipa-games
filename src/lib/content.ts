@@ -79,17 +79,22 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
   // Validate BEFORE touching the database
   validate(content)
 
-  // If the content uses category descriptions, prove the column exists BEFORE
-  // the destructive clear below — otherwise the delete succeeds, the first
-  // insert fails on the missing column, and the room is left with no content.
+  // Probe the optional columns BEFORE the destructive clear below — otherwise
+  // the delete succeeds, the first insert fails on a missing column, and the
+  // room is left with no content.
+  const [{ error: descErr }, { error: posErr }] = await Promise.all([
+    supabase.from('categories').select('description').limit(1),
+    supabase.from('categories').select('position').limit(1),
+  ])
+  // Descriptions are content the host would lose silently, so a missing column
+  // is a hard stop. Position only affects ordering, so it degrades to
+  // alphabetical (what every board did before) rather than blocking the import.
   const hasDescriptions = content.rounds.some(r => r.categories.some(c => c.description?.trim()))
-  if (hasDescriptions) {
-    const { error: probeErr } = await supabase.from('categories').select('description').limit(1)
-    if (probeErr) throw new Error(
-      'This content has category descriptions, but the database is missing the description column. ' +
-      'Run supabase/add_category_descriptions.sql in the Supabase SQL editor, then import again. Nothing was imported.'
-    )
-  }
+  if (hasDescriptions && descErr) throw new Error(
+    'This content has category descriptions, but the database is missing the description column. ' +
+    'Run supabase/add_category_descriptions.sql in the Supabase SQL editor, then import again. Nothing was imported.'
+  )
+  const canOrder = !posErr
 
   // Clear existing content — CASCADE will delete questions too
   const { error: clearErr } = await supabase
@@ -104,9 +109,10 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
 
   for (const round of content.rounds) {
     const roundIds: Array<{ id: string; categoryId: string }> = []
-    for (const cat of round.categories) {
-      // description is only included when present, so content without it still
-      // imports even if the description column migration hasn't been applied
+    for (const [catIdx, cat] of round.categories.entries()) {
+      // Optional columns are only included when we have something to write AND
+      // the column exists, so content still imports on a database that is
+      // missing either migration
       const { data: category, error: catErr } = await supabase
         .from('categories')
         .insert({
@@ -114,6 +120,7 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
           name: cat.name,
           round: round.round,
           ...(cat.description?.trim() ? { description: cat.description.trim() } : {}),
+          ...(canOrder ? { position: catIdx } : {}),
         })
         .select()
         .single()

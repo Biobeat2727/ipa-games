@@ -8,6 +8,7 @@ import { playRoundTransition } from '../../lib/sounds'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { TipJarProjector, VenueFooter } from '../../components/TipJar'
 import { BeerGlass, TapHeader, tapHeaderRevealFor } from '../../components/TapCategoryColumn'
+import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { Bubbles, PintHero } from '../../components/Barware'
 import { findCurrentActiveRoom } from '../../lib/roomDiscovery'
 
@@ -93,13 +94,19 @@ export default function ProjectorView() {
   // These use roomRef so they never go stale inside effect closures.
 
   const loadCategories = useCallback(async (roomId: string, status: string) => {
-    const { data: cats } = await supabase
-      .from('categories').select('id, name, round')
-      .eq('room_id', roomId).order('round').order('name')
+    // Named columns (never `*`) so category descriptions stay off the big screen.
+    // `position` may not exist yet — naming a missing column errors the whole
+    // query, so fall back to the legacy list and let the sort go alphabetical.
+    let cats: Array<{ id: string; name: string; round: number; position?: number | null }> | null = (await supabase
+      .from('categories').select('id, name, round, position').eq('room_id', roomId)).data
+    if (!cats) {
+      cats = (await supabase
+        .from('categories').select('id, name, round').eq('room_id', roomId)).data
+    }
     if (!cats) return
 
     const targetRound = status === 'round_2' ? 2 : 1
-    const roundCats   = cats.filter(c => c.round === targetRound)
+    const roundCats   = cats.filter(c => c.round === targetRound).sort(compareCategoryOrder)
     if (roundCats.length === 0) { setCategories([]); return }
 
     const { data: questions } = await supabase

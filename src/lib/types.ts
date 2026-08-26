@@ -61,6 +61,10 @@ export type Category = {
   round: number // 1, 2, or 3 (3 = Final Jeopardy)
   /** Host-read flavor text shown during the round-start category reveal */
   description: string | null
+  /** Index within its round from the imported JSON — drives board left-to-right
+   *  order and the reveal sequence. Null on content imported before this existed
+   *  (falls back to alphabetical); see src/lib/categoryOrder.ts */
+  position: number | null
 }
 
 export type Question = {
@@ -151,7 +155,7 @@ export type Database = {
       }
       categories: {
         Row: Category
-        Insert: Omit<Category, 'id' | 'description'> & { id?: string; description?: string | null }
+        Insert: Omit<Category, 'id' | 'description' | 'position'> & { id?: string; description?: string | null; position?: number | null }
         Update: Partial<Omit<Category, 'id'>>
         Relationships: []
       }

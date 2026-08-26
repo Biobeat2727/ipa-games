@@ -14,6 +14,7 @@ import ScoreOverlay from '../../components/ScoreOverlay'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { TipJar, VenueFooter } from '../../components/TipJar'
 import { BeerGlass, TapHeader, tapHeaderRevealFor } from '../../components/TapCategoryColumn'
+import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { Bubbles, PintHero, CheersPints, SoloPint } from '../../components/Barware'
 import { QUIPS } from '../../lib/quips'
 import { findCurrentActiveRoom, getLocalDayStartIso } from '../../lib/roomDiscovery'
@@ -322,9 +323,17 @@ export default function PlayView() {
   }, [buzzResult])
 
   const loadBoard = useCallback(async (roomId: string, round: number) => {
-    const { data: cats } = await supabase
-      .from('categories').select('id, name').eq('room_id', roomId).eq('round', round).order('name')
+    // Named columns (never `*`) so category descriptions stay off player phones.
+    // `position` may not exist yet — naming a missing column errors the whole
+    // query, so fall back to the legacy list and let the sort go alphabetical.
+    let cats: Array<{ id: string; name: string; position?: number | null }> | null = (await supabase
+      .from('categories').select('id, name, position').eq('room_id', roomId).eq('round', round)).data
+    if (!cats) {
+      cats = (await supabase
+        .from('categories').select('id, name').eq('room_id', roomId).eq('round', round)).data
+    }
     if (!cats?.length) { setBoardCategories([]); return }
+    cats = [...cats].sort(compareCategoryOrder)
     const { data: questions } = await supabase
       .from('questions_public').select().in('category_id', cats.map(c => c.id))
     setBoardCategories(cats.map(cat => ({

@@ -4,6 +4,7 @@ import { ablyClient, serverNow } from '../../lib/ably'
 import { clearHostSession } from '../../lib/session'
 import type { Buzz, FinalPhase, Question, Room, ScoreSnapshot, Team, Wager } from '../../lib/types'
 import ScoreHistoryChart from '../../components/ScoreHistoryChart'
+import { compareCategoryOrder } from '../../lib/categoryOrder'
 
 const RESPONSE_SECONDS = 40
 
@@ -131,13 +132,15 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   useEffect(() => {
     async function load() {
-      // select('*') — naming description here would error the whole query (and
-      // blank the board) on a database where the migration isn't applied yet;
-      // with * the column is simply absent and the reveal feature stays off.
-      const { data: cats } = await supabase
+      // select('*') + client-side sort — naming description/position here (or
+      // ordering by them) would error the whole query and blank the board on a
+      // database missing either migration; with * the columns are simply absent
+      // and the features degrade instead of breaking.
+      const { data: catRows } = await supabase
         .from('categories').select('*')
-        .eq('room_id', roomId).order('round').order('name')
-      if (!cats) return
+        .eq('room_id', roomId)
+      if (!catRows) return
+      const cats = [...catRows].sort((a, b) => a.round - b.round || compareCategoryOrder(a, b))
 
       const ids = cats.map(c => c.id)
       const { data: questions } = await supabase
