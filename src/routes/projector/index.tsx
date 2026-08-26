@@ -840,8 +840,11 @@ export default function ProjectorView() {
       (a, b) => (scores.get(b.id) ?? b.score) - (scores.get(a.id) ?? a.score)
     )
     const winner = finalSorted[0]
+    // Nobody can scroll a projector: above 8 teams the standings go two-column
+    // with tighter rows and the banner slims down so everything fits h-screen.
+    const compact = finalSorted.length > 8
     return (
-      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-8 text-center relative overflow-hidden">
+      <div className={`h-screen bar-bg text-white flex flex-col items-center justify-center px-8 text-center relative overflow-hidden ${compact ? 'py-4' : 'py-8'}`}>
         <Bubbles count={14} />
         <Confetti
           active={confettiActive}
@@ -853,30 +856,34 @@ export default function ProjectorView() {
             }
           }}
         />
-        <p className="relative z-10 text-amber-200/70 uppercase tracking-widest mb-4" style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)', animation: 'slide-up-in 0.5s ease-out both' }}>
-          🏆 Winner 🏆
-        </p>
+        {/* Compact mode folds the Winner label into the name line — the label row
+            was the difference between fitting 15 teams and clipping both edges */}
+        {!compact && (
+          <p className="relative z-10 text-amber-200/70 uppercase tracking-widest mb-4" style={{ fontSize: 'clamp(1.25rem, 3vw, 2.5rem)', animation: 'slide-up-in 0.5s ease-out both' }}>
+            🏆 Winner 🏆
+          </p>
+        )}
         <p className="relative z-10 font-black text-yellow-400 leading-none mb-2"
-          style={{ fontSize: 'clamp(3.5rem, 14vw, 10rem)', animation: 'pop-in 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both' }}>
-          {winner?.name ?? '—'}
+          style={{ fontSize: compact ? 'clamp(2.5rem, 7vw, 5rem)' : 'clamp(3.5rem, 14vw, 10rem)', animation: 'pop-in 0.7s cubic-bezier(0.34, 1.56, 0.64, 1) 0.2s both' }}>
+          {compact ? `🏆 ${winner?.name ?? '—'}` : (winner?.name ?? '—')}
         </p>
         <AnimatedScore
           value={scores.get(winner?.id ?? '') ?? winner?.score ?? 0}
-          className="relative z-10 font-mono font-black text-yellow-300 mb-12 block"
-          style={{ fontSize: 'clamp(2rem, 6vw, 5rem)' }}
+          className={`relative z-10 font-mono font-black text-yellow-300 block ${compact ? 'mb-6' : 'mb-12'}`}
+          style={{ fontSize: compact ? 'clamp(1.5rem, 3.5vw, 3rem)' : 'clamp(2rem, 6vw, 5rem)' }}
         />
-        <p className="relative z-10 text-yellow-300 mb-12" style={{ fontSize: 'clamp(1rem, 2vw, 1.75rem)', marginTop: '-3rem' }}>pts</p>
-        <div className="relative z-10 space-y-3 w-full max-w-2xl">
+        <p className={`relative z-10 text-yellow-300 ${compact ? 'mb-4' : 'mb-12'}`} style={{ fontSize: 'clamp(1rem, 2vw, 1.75rem)', marginTop: compact ? '-1.5rem' : '-3rem' }}>pts</p>
+        <div className={`relative z-10 w-full ${compact ? 'grid grid-cols-2 gap-1.5 max-w-5xl' : 'space-y-3 max-w-2xl'}`}>
           {finalSorted.map((team, i) => (
-            <div key={team.id} className={`flex items-center gap-4 rounded-2xl px-8 py-5 ${
+            <div key={team.id} className={`flex items-center rounded-2xl ${compact ? 'gap-3 px-5 py-2' : 'gap-4 px-8 py-5'} ${
               i === 0 ? 'bg-yellow-400/10 border-2 border-yellow-400/60' : 'glass-card'
             }`}
-              style={{ animation: `slide-up-in 0.5s ease-out ${0.6 + i * 0.15}s both` }}>
-              <span className="w-12 shrink-0 text-right"
-                style={{ fontSize: 'clamp(1.25rem, 3vw, 2rem)' }}>
+              style={{ animation: `slide-up-in 0.5s ease-out ${0.6 + i * (compact ? 0.06 : 0.15)}s both` }}>
+              <span className={`shrink-0 text-right ${compact ? 'w-9' : 'w-12'}`}
+                style={{ fontSize: compact ? 'clamp(1rem, 1.8vw, 1.5rem)' : 'clamp(1.25rem, 3vw, 2rem)' }}>
                 {i < 3 ? ['🥇', '🥈', '🥉'][i] : <span className="text-gray-600 font-mono">{i + 1}</span>}
               </span>
-              <span className="font-bold flex-1 text-left" style={{ fontSize: 'clamp(1.25rem, 3vw, 2rem)' }}>
+              <span className="font-bold flex-1 text-left truncate" style={{ fontSize: compact ? 'clamp(1rem, 1.8vw, 1.5rem)' : 'clamp(1.25rem, 3vw, 2rem)' }}>
                 {team.name}
               </span>
               <AnimatedScore
@@ -884,15 +891,15 @@ export default function ProjectorView() {
                 className={`font-mono font-black tabular-nums ${
                   (scores.get(team.id) ?? team.score) < 0 ? 'text-red-400' : 'text-yellow-400'
                 }`}
-                style={{ fontSize: 'clamp(1.25rem, 3vw, 2rem)' }}
+                style={{ fontSize: compact ? 'clamp(1rem, 1.8vw, 1.5rem)' : 'clamp(1.25rem, 3vw, 2rem)' }}
               />
             </div>
           ))}
         </div>
-        <div className="relative z-10 mt-10 space-y-4"
+        <div className={`relative z-10 ${compact ? 'mt-4 space-y-1.5' : 'mt-10 space-y-4'}`}
           style={{ animation: 'slide-up-in 0.5s ease-out 1.4s both' }}>
           <TipJarProjector />
-          <VenueFooter projector />
+          <VenueFooter projector dense={compact} />
         </div>
       </div>
     )
@@ -984,8 +991,25 @@ export default function ProjectorView() {
             teamIds={teamIds}
           />
         </div>
-        <div className="shrink-0 flex justify-center gap-8 flex-wrap">
-          {sortedTeams.map((team, i) => (
+        {/* Above 6 teams the stacked name-over-score chips wrap into rows tall
+            enough to starve the aspect-locked chart — collapse to one-line pills
+            so 15 teams cost ~2 short rows instead of 3 tall ones. */}
+        <div className={`shrink-0 flex justify-center flex-wrap ${sortedTeams.length > 6 ? 'gap-x-7 gap-y-1.5' : 'gap-8'}`}>
+          {sortedTeams.map((team, i) => sortedTeams.length > 6 ? (
+            <p key={team.id} className="flex items-center gap-2 text-gray-300"
+              style={{ fontSize: 'clamp(0.85rem, 1.5vw, 1.25rem)', animation: `slide-up-in 0.4s ease-out ${0.5 + i * 0.05}s both` }}>
+              <span className="inline-block rounded-full shrink-0"
+                style={{ width: '0.7em', height: '0.7em', background: getTeamColor(team.id, sortedTeams.map(t => t.id)) }} />
+              <span>{i < 3 ? ['🥇', '🥈', '🥉'][i] : `#${i + 1}`}</span>
+              <span className="font-semibold text-gray-200">{team.name}</span>
+              <AnimatedScore
+                value={scores.get(team.id) ?? team.score}
+                className={`font-mono font-black tabular-nums ${
+                  (scores.get(team.id) ?? 0) < 0 ? 'text-red-400' : 'text-yellow-400'
+                }`}
+              />
+            </p>
+          ) : (
             <div key={team.id} className="text-center"
               style={{ animation: `slide-up-in 0.4s ease-out ${0.5 + i * 0.1}s both` }}>
               <p className="text-gray-400 flex items-center justify-center gap-2" style={{ fontSize: 'clamp(0.8rem, 1.5vw, 1.25rem)' }}>

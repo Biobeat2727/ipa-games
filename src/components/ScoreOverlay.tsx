@@ -14,12 +14,15 @@ export default function ScoreOverlay({ teams, myTeamId, onClose }: Props) {
   const sorted = [...teams].sort((a, b) => b.score - a.score)
 
   return (
+    // overflow-y-auto + m-auto (not justify-center): a long list scrolls from the
+    // top instead of clipping rank 1 off-screen, while short lists stay centered
     <div
-      className="fixed inset-0 z-[100] bg-gray-950/97 flex flex-col items-center justify-center p-6"
+      className="fixed inset-0 z-[100] bg-gray-950/97 flex flex-col overflow-y-auto p-6"
       onClick={onClose}
     >
+      <div className="m-auto w-full max-w-xs flex flex-col items-center">
       <p className="text-gray-500 text-xs uppercase tracking-widest mb-6">All Scores</p>
-      <div className="w-full max-w-xs space-y-2 mb-8">
+      <div className="w-full space-y-2 mb-8">
         {sorted.map((team, i) => (
           <div
             key={team.id}
@@ -38,6 +41,7 @@ export default function ScoreOverlay({ teams, myTeamId, onClose }: Props) {
         ))}
       </div>
       <p className="text-gray-700 text-xs">Tap anywhere to close</p>
+      </div>
     </div>
   )
 }

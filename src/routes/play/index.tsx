@@ -2653,7 +2653,9 @@ export default function PlayView() {
           </div>
         )}
 
-        <div className="pt-16 pb-3 px-4 text-center shrink-0">
+        {/* pt-24 clears the score chip (top-4 + ~5rem tall) — at pt-16 a long
+            "X is choosing…" line ran underneath it */}
+        <div className="pt-24 pb-3 px-4 text-center shrink-0">
           {isMyTurnNow ? (
             <p className="text-yellow-400 font-black text-xl animate-pulse">
               {selectionClaiming ? 'Locking your pick…' : room?.pending_question_id ? 'Pick locked!' : 'Your pick!'}

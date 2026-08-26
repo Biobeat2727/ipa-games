@@ -38,7 +38,7 @@ export function TipJarProjector({ style }: { style?: React.CSSProperties }) {
 
 /** Venue logo + website for the end-of-game screens. `projector` renders the link as
  *  plain text (nobody can tap the big screen) at room-readable sizes. */
-export function VenueFooter({ projector, style }: { projector?: boolean; style?: React.CSSProperties }) {
+export function VenueFooter({ projector, dense, style }: { projector?: boolean; dense?: boolean; style?: React.CSSProperties }) {
   if (!VENUE_LOGO && !VENUE_URL) return null
   // The badge has black text on a white ground, so it sits in a white chip
   // instead of floating on the dark bar background
@@ -48,7 +48,7 @@ export function VenueFooter({ projector, style }: { projector?: boolean; style?:
         src={VENUE_LOGO}
         alt={VENUE_NAME}
         className="mx-auto object-contain"
-        style={{ height: projector ? 'clamp(3.5rem, 10vh, 7rem)' : '4rem' }}
+        style={{ height: projector ? (dense ? 'clamp(2.5rem, 6vh, 4rem)' : 'clamp(3.5rem, 10vh, 7rem)') : '4rem' }}
       />
     </span>
   )
