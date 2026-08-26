@@ -140,7 +140,21 @@ export function BeerGlass({
   )
 }
 
-export function TapHeader({ categoryName }: { categoryName: string }) {
+/** Round-start category intro: 'hidden' shows a blank sign with a ?, 'revealing'
+ *  plays the pop-in animation once, 'shown' (default) is the normal header. */
+export type TapHeaderReveal = 'hidden' | 'revealing' | 'shown'
+
+/** Maps the broadcast reveal state (ids revealed so far, in reveal order) to one
+ *  header's TapHeaderReveal. Shared by player + projector so the two screens can
+ *  never disagree on which sign is hidden or animating. null = reveal inactive. */
+export function tapHeaderRevealFor(revealedIds: string[] | null, catId: string): TapHeaderReveal {
+  if (revealedIds == null) return 'shown'
+  if (!revealedIds.includes(catId)) return 'hidden'
+  return catId === revealedIds[revealedIds.length - 1] ? 'revealing' : 'shown'
+}
+
+export function TapHeader({ categoryName, reveal = 'shown' }: { categoryName: string; reveal?: TapHeaderReveal }) {
+  const hidden = reveal === 'hidden'
   return (
     <div className="flex flex-col items-center">
       {/* knob */}
@@ -155,20 +169,40 @@ export function TapHeader({ categoryName }: { categoryName: string }) {
       <div className="w-1.5 h-2 bg-gradient-to-b from-neutral-400 to-neutral-600 shrink-0" />
 
       <div
-        className="relative w-full text-center rounded-lg px-2 py-3 overflow-hidden"
+        className="relative w-full text-center rounded-lg px-2 py-3"
         style={{
           background: 'linear-gradient(180deg, #92400e 0%, #78350f 55%, #451a03 100%)',
           border: '1px solid rgba(0,0,0,0.4)',
           boxShadow: '0 2px 0 rgba(255,255,255,0.08) inset, 0 3px 6px rgba(0,0,0,0.4)',
+          // The revealing sign pops over its neighbors; overflow stays visible
+          // for the scaled-up frame, and z-index lifts it above the board.
+          overflow: reveal === 'revealing' ? 'visible' : 'hidden',
+          zIndex: reveal === 'revealing' ? 30 : undefined,
+          animation: reveal === 'revealing' ? 'cat-reveal-pop 1s cubic-bezier(0.34, 1.4, 0.5, 1) both' : undefined,
         }}
       >
         <div className="absolute inset-x-0 top-0 h-[3px] bg-white/10" />
+        {/* The real name always occupies the layout (invisible while hidden) so
+            the header row doesn't jump taller when a two-line name reveals */}
         <p
           className="relative font-black uppercase leading-tight text-amber-50"
-          style={{ fontSize: 'clamp(0.7rem, 1.7vw, 1.3rem)', letterSpacing: '0.02em', textShadow: '0 1px 1px rgba(0,0,0,0.5)' }}
+          style={{
+            fontSize: 'clamp(0.7rem, 1.7vw, 1.3rem)',
+            letterSpacing: '0.02em',
+            textShadow: '0 1px 1px rgba(0,0,0,0.5)',
+            opacity: hidden ? 0 : 1,
+          }}
         >
           {categoryName}
         </p>
+        {hidden && (
+          <span
+            className="absolute inset-0 flex items-center justify-center font-black"
+            style={{ fontSize: 'clamp(0.9rem, 2vw, 1.5rem)', color: 'rgba(253, 230, 138, 0.35)' }}
+          >
+            ?
+          </span>
+        )}
       </div>
     </div>
   )

@@ -9,6 +9,9 @@ interface ImportQuestion {
 }
 interface ImportCategory {
   name: string
+  /** Optional host-read flavor text for the round-start category reveal.
+   *  Requires the categories.description column (supabase/add_category_descriptions.sql). */
+  description?: string
   questions: ImportQuestion[]
 }
 interface ImportRound {
@@ -51,6 +54,8 @@ function validate(content: ContentJSON): void {
     for (const cat of round.categories) {
       if (!cat.name?.trim())
         throw new Error('All categories must have a name.')
+      if (cat.description !== undefined && typeof cat.description !== 'string')
+        throw new Error(`Category "${cat.name}": description must be a string.`)
       if (!Array.isArray(cat.questions) || cat.questions.length === 0)
         throw new Error(`Category "${cat.name}" must have at least one question.`)
       for (const q of cat.questions) {
@@ -74,6 +79,18 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
   // Validate BEFORE touching the database
   validate(content)
 
+  // If the content uses category descriptions, prove the column exists BEFORE
+  // the destructive clear below — otherwise the delete succeeds, the first
+  // insert fails on the missing column, and the room is left with no content.
+  const hasDescriptions = content.rounds.some(r => r.categories.some(c => c.description?.trim()))
+  if (hasDescriptions) {
+    const { error: probeErr } = await supabase.from('categories').select('description').limit(1)
+    if (probeErr) throw new Error(
+      'This content has category descriptions, but the database is missing the description column. ' +
+      'Run supabase/add_category_descriptions.sql in the Supabase SQL editor, then import again. Nothing was imported.'
+    )
+  }
+
   // Clear existing content — CASCADE will delete questions too
   const { error: clearErr } = await supabase
     .from('categories')
@@ -88,9 +105,16 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
   for (const round of content.rounds) {
     const roundIds: Array<{ id: string; categoryId: string }> = []
     for (const cat of round.categories) {
+      // description is only included when present, so content without it still
+      // imports even if the description column migration hasn't been applied
       const { data: category, error: catErr } = await supabase
         .from('categories')
-        .insert({ room_id: roomId, name: cat.name, round: round.round })
+        .insert({
+          room_id: roomId,
+          name: cat.name,
+          round: round.round,
+          ...(cat.description?.trim() ? { description: cat.description.trim() } : {}),
+        })
         .select()
         .single()
       if (!category || catErr) throw new Error(`Category "${cat.name}": ${catErr?.message}`)

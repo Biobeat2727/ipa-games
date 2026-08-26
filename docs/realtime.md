@@ -32,6 +32,7 @@ Additional scoped channels:
 | `player_left` | Player | `{ team_id }` | Host immediately refreshes lobby player counts |
 | `lobby_closed` | Host | `{}` | All clients kicked: players → `no_lobby`, projector → `waiting` |
 | `game_state_change` | Host | `{ status, fj_category?, active_team_ids? }` | All clients transition to new game state |
+| `category_reveal` | Host | `{ round, revealed_ids: string[], done?: boolean }` | Round-start category intros: players + projector hide headers not in `revealed_ids`, pop-animate the last id, and gate tile taps until `done`. Idempotent (full set every event); host re-broadcasts every 5s while the intro panel is open; clients also self-clear on `question_preview`/`question_activated`, round changes, and `lobby_closed` |
 
 ### Question Flow
 

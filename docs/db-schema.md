@@ -49,6 +49,7 @@
 | room_id | uuid → rooms | |
 | name | varchar | |
 | round | integer | 1, 2, or 3 (Final Jeopardy) |
+| description | text, nullable | Host-read intro text for the round-start category reveal (host-only display). Added by `supabase/add_category_descriptions.sql` |
 
 ## `questions`
 | Column | Type | Notes |

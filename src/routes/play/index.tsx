@@ -13,7 +13,7 @@ import Confetti from '../../components/Confetti'
 import ScoreOverlay from '../../components/ScoreOverlay'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { TipJar, VenueFooter } from '../../components/TipJar'
-import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
+import { BeerGlass, TapHeader, tapHeaderRevealFor } from '../../components/TapCategoryColumn'
 import { Bubbles, PintHero, CheersPints, SoloPint } from '../../components/Barware'
 import { QUIPS } from '../../lib/quips'
 import { findCurrentActiveRoom, getLocalDayStartIso } from '../../lib/roomDiscovery'
@@ -142,6 +142,11 @@ export default function PlayView() {
   const [allTeamScores, setAllTeamScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
   const [boardCategories, setBoardCategories] = useState<BoardCategory[]>([])
+  // Round-start category reveal (host-driven): ids revealed so far, in reveal
+  // order; null = inactive → whole board shown. Self-heals: cleared by the done
+  // broadcast, any round change, AND any question preview/activation — so a
+  // phone that missed `done` can never stay gated once play actually starts.
+  const [catRevealIds, setCatRevealIds] = useState<string[] | null>(null)
   const [teamNames, setTeamNames]             = useState<Map<string, string>>(new Map())
   const [previewInfo, setPreviewInfo]         = useState<PreviewInfo | null>(null)
   const [doubleTapTeamId, setDoubleTapTeamId] = useState<string | null>(null)
@@ -703,6 +708,9 @@ export default function PlayView() {
 
     ch.subscribe('question_preview', ({ data }) => {
       const p = data as PreviewInfo & { selectorTeamId?: string; doubleTapPending?: boolean; hostAssigned?: boolean }
+      // A question in play means the category intros are over — self-heal any
+      // phone that missed the reveal's `done` broadcast (backgrounded, rejoined)
+      setCatRevealIds(null)
 
       // First DT broadcast (tile tap, before wager) — observers show the reveal animation
       if (p.doubleTapPending && p.selectorTeamId) {
@@ -753,6 +761,7 @@ export default function PlayView() {
       const { question_id, question, double_tap_team_id, buzz_opened_at, debugTiming } = data as {
         question_id: string; question?: QuestionPublic; double_tap_team_id?: string; buzz_opened_at?: number; debugTiming?: boolean
       }
+      setCatRevealIds(null) // intros are over once a question is live
       // Remember whether this question is being timing-tracked, so even the
       // FALLBACK-DB path below (which never sees this payload) knows to self-report.
       debugTimingRef.current = !!debugTiming
@@ -943,6 +952,10 @@ export default function PlayView() {
       const { team_id } = data as { team_id: string | null }
       setCurrentTurnTeamId(team_id)
     })
+    ch.subscribe('category_reveal', ({ data }) => {
+      const { revealed_ids, done } = data as { round: number; revealed_ids: string[]; done?: boolean }
+      setCatRevealIds(done ? null : revealed_ids)
+    })
     ch.subscribe('round_intermission', ({ data }) => {
       const { snapshots } = data as { snapshots: ScoreSnapshot[] }
       setIntermissionSnapshots(snapshots)
@@ -971,6 +984,7 @@ export default function PlayView() {
         // New round — wipe all mid-game state
         setIntermissionSnapshots(null)
         sessionStorage.removeItem('intermission')
+        setCatRevealIds(null) // host re-inits the reveal for the new round if it has one
         setBuzzFailed(false)
         setPreviewInfo(null)
         setActiveQuestion(null)
@@ -2656,7 +2670,11 @@ export default function PlayView() {
         {/* pt-24 clears the score chip (top-4 + ~5rem tall) — at pt-16 a long
             "X is choosing…" line ran underneath it */}
         <div className="pt-24 pb-3 px-4 text-center shrink-0">
-          {isMyTurnNow ? (
+          {catRevealIds != null ? (
+            // During the intros nobody can pick — don't flash "Your pick!" over
+            // a board of disabled glasses
+            <p className="text-amber-300 font-black text-lg">🍺 Category reveal — eyes on the big screen!</p>
+          ) : isMyTurnNow ? (
             <p className="text-yellow-400 font-black text-xl animate-pulse">
               {selectionClaiming ? 'Locking your pick…' : room?.pending_question_id ? 'Pick locked!' : 'Your pick!'}
             </p>
@@ -2676,7 +2694,8 @@ export default function PlayView() {
               style={{ gridTemplateColumns: `repeat(${boardCategories.length}, minmax(0, 1fr))` }}
             >
               {boardCategories.map(cat => (
-                <TapHeader key={cat.id} categoryName={cat.name} />
+                <TapHeader key={cat.id} categoryName={cat.name}
+                  reveal={tapHeaderRevealFor(catRevealIds, cat.id)} />
               ))}
               {pointValues.flatMap(pv =>
                 boardCategories.map(cat => {
@@ -2723,9 +2742,9 @@ export default function PlayView() {
                       <BeerGlass
                         pointValue={pv}
                         state={answered ? 'empty' : 'full'}
-                        disabled={!isMyTurnNow || selectionClaiming || !!room?.pending_question_id}
-                        dimmed={!answered && (!isMyTurnNow || selectionClaiming || !!room?.pending_question_id)}
-                        onClick={(e) => isMyTurnNow && !answered && !selectionClaiming && !room?.pending_question_id && handleSelectQuestion(q.id, e.currentTarget)}
+                        disabled={!isMyTurnNow || selectionClaiming || !!room?.pending_question_id || catRevealIds != null}
+                        dimmed={!answered && (!isMyTurnNow || selectionClaiming || !!room?.pending_question_id || catRevealIds != null)}
+                        onClick={(e) => isMyTurnNow && !answered && !selectionClaiming && !room?.pending_question_id && catRevealIds == null && handleSelectQuestion(q.id, e.currentTarget)}
                       />
                     </div>
                   )

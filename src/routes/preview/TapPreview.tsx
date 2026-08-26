@@ -1,5 +1,5 @@
-import { useMemo, useState } from 'react'
-import TapCategoryColumn from '../../components/TapCategoryColumn'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import TapCategoryColumn, { TapHeader } from '../../components/TapCategoryColumn'
 import ScoreHistoryChart, { type ScoreSnapshot } from '../../components/ScoreHistoryChart'
 import { TipJar, TipJarProjector, VenueFooter } from '../../components/TipJar'
 
@@ -36,6 +36,20 @@ function makeFakeHistory(teamIds: string[], steps: number): ScoreSnapshot[] {
 
 export default function TapPreview() {
   const [teamCount, setTeamCount] = useState(10)
+  // Category-reveal sandbox: step 0 = all hidden, N = first N revealed
+  const [revealStep, setRevealStep] = useState<number | null>(null)
+  const revealTimer = useRef<ReturnType<typeof setInterval> | null>(null)
+  useEffect(() => () => { if (revealTimer.current) clearInterval(revealTimer.current) }, [])
+  const playReveal = () => {
+    if (revealTimer.current) clearInterval(revealTimer.current)
+    setRevealStep(0)
+    let step = 0
+    revealTimer.current = setInterval(() => {
+      step++
+      setRevealStep(step)
+      if (step >= CATEGORIES.length && revealTimer.current) clearInterval(revealTimer.current)
+    }, 1400)
+  }
   const teamIds   = useMemo(() => FAKE_TEAMS.slice(0, teamCount).map((_, i) => `team-${i}`), [teamCount])
   const teamNames = useMemo(() => new Map(teamIds.map((id, i) => [id, FAKE_TEAMS[i]])), [teamIds])
   const snapshots = useMemo(() => makeFakeHistory(teamIds, 14), [teamIds])
@@ -67,6 +81,24 @@ export default function TapPreview() {
             teamIds={teamIds}
             highlightTeamId="team-1"
           />
+        </div>
+      </div>
+
+      {/* ── Category reveal sandbox ── */}
+      <div className="pb-10 max-w-4xl mx-auto">
+        <div className="flex items-center justify-center gap-3 mb-4">
+          <p className="text-gray-500 text-sm">Category reveal</p>
+          <button onClick={playReveal}
+            className="px-3 py-1 rounded-lg text-sm font-bold bg-yellow-400 text-gray-950">
+            ▶ Play
+          </button>
+        </div>
+        <div className="grid gap-2" style={{ gridTemplateColumns: `repeat(${CATEGORIES.length}, minmax(0, 1fr))` }}>
+          {CATEGORIES.map((cat, i) => (
+            <TapHeader key={cat} categoryName={cat}
+              reveal={revealStep == null ? 'shown'
+                : i < revealStep ? (i === revealStep - 1 ? 'revealing' : 'shown') : 'hidden'} />
+          ))}
         </div>
       </div>
 

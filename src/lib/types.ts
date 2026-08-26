@@ -59,6 +59,8 @@ export type Category = {
   room_id: string
   name: string
   round: number // 1, 2, or 3 (3 = Final Jeopardy)
+  /** Host-read flavor text shown during the round-start category reveal */
+  description: string | null
 }
 
 export type Question = {
@@ -149,7 +151,7 @@ export type Database = {
       }
       categories: {
         Row: Category
-        Insert: Omit<Category, 'id'> & { id?: string }
+        Insert: Omit<Category, 'id' | 'description'> & { id?: string; description?: string | null }
         Update: Partial<Omit<Category, 'id'>>
         Relationships: []
       }

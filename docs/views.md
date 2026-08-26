@@ -50,8 +50,14 @@
 - **New Game** button: broadcasts `lobby_closed`, marks room finished, returns to `no_room`
 
 ### Game screen (persistent layout)
-- Left panel: scoreboard, question grid (by category)
+- Left panel: scoreboard, question grid (by category; each category shows its
+  `description` in small grey text under the name when content has one)
 - Right panel: active question area, buzz queue, judging controls
+- **Category intro panel** (right panel, auto-opens at round start when the
+  round's categories have descriptions): step-through list of categories with
+  their read-aloud descriptions; "Reveal ‘X’ →" pops that category onto every
+  board, "To the board →" / "Skip intros" finishes. The host question list is
+  disabled while it's open, and a live/pending question always outranks it.
 - Manual score adjust available per team
 - **New Game** button in scoreboard header: kicks all clients, marks all rooms finished, reloads
 - **⚡ FT** button (DEV only, `import.meta.env.DEV`): calls `startFinalJeopardy()` directly; hidden in production
@@ -76,7 +82,7 @@
 ### Connected screens (driven by `room.status`)
 1. **Lobby** — QR code linking to `window.location.origin`, join URL text, live team list as teams join
 2. **Question preview** — category name + point value + 10s countdown (large)
-3. **Category grid** — full Jeopardy board, tap/glass visual theme (see below), score bar, whose turn
+3. **Category grid** — full Jeopardy board, tap/glass visual theme (see below), score bar, whose turn. During round-start category intros, unrevealed headers render as dim "?" tap handles and each reveal pops in (`category_reveal` broadcast)
 4. **Active question** — clue text (large), buzz queue or responding team name + countdown timer
 5. **Correct feedback** — full-screen green flash with team name
 6. **Final Jeopardy: wager** — category name, team wager status (wagering / ready)
@@ -91,7 +97,7 @@
 The Jeopardy-style category grid (player board + projector board) is themed as a bar tap wall: each category is a tap handle, each point-value tile is a beer glass that's full (unanswered) or empty (answered).
 
 - Component: [`src/components/TapCategoryColumn.tsx`](../src/components/TapCategoryColumn.tsx)
-  - `TapHeader({ categoryName })` — wood/brass tap handle used as the category header, replaces the old flat blue header box
+  - `TapHeader({ categoryName, reveal? })` — wood/brass tap handle used as the category header, replaces the old flat blue header box. `reveal: 'hidden' | 'revealing' | 'shown'` (default `'shown'`) drives the round-start category intros: `hidden` shows a dim "?" (the real name is laid out invisibly so the row height doesn't jump), `revealing` plays the one-shot `cat-reveal-pop` zoom. `tapHeaderRevealFor(revealedIds, catId)` maps the `category_reveal` broadcast state to this prop — player and projector both use it so the screens can't disagree
   - `BeerGlass({ pointValue, state, onClick, disabled, dimmed })` — SVG glass tile
     - `state: 'full' | 'draining' | 'empty'` — `full` = unanswered (shows point value + wavy foam head + rising bubble animation), `empty` = answered (drained, no click). `draining` is only used by the standalone demo page, not real game state — in real usage the CSS transition (900ms ease-in on fill height) animates `full → empty` automatically when `is_answered` flips true, no intermediate state needed.
     - `disabled` — controls click-ability independent of fill state (e.g. not your turn)

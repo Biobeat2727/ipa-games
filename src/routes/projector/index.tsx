@@ -7,7 +7,7 @@ import Confetti from '../../components/Confetti'
 import { playRoundTransition } from '../../lib/sounds'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { TipJarProjector, VenueFooter } from '../../components/TipJar'
-import { BeerGlass, TapHeader } from '../../components/TapCategoryColumn'
+import { BeerGlass, TapHeader, tapHeaderRevealFor } from '../../components/TapCategoryColumn'
 import { Bubbles, PintHero } from '../../components/Barware'
 import { findCurrentActiveRoom } from '../../lib/roomDiscovery'
 
@@ -60,6 +60,11 @@ export default function ProjectorView() {
 
   // Round intermission
   const [intermissionSnapshots, setIntermissionSnapshots] = useState<ScoreSnapshot[] | null>(null)
+  // Round-start category reveal (host-driven): ids revealed so far, in reveal
+  // order; null = inactive → whole board shown. Cleared by the done broadcast,
+  // round changes, lobby close, and any question preview/activation so a missed
+  // event can never leave the big screen blank or stale across games.
+  const [catRevealIds, setCatRevealIds] = useState<string[] | null>(null)
 
   // Winner celebration confetti (fires a few bursts when the game ends)
   const [confettiActive, setConfettiActive] = useState(false)
@@ -286,6 +291,7 @@ export default function ProjectorView() {
     })
     ch.subscribe('question_activated', ({ data }) => {
       const { question_id } = data as { question_id: string }
+      setCatRevealIds(null) // intros are over once a question is live
       if (doubleTapPreviewTimerRef.current) clearTimeout(doubleTapPreviewTimerRef.current)
       setPreviewInfo(null)
       setDoubleTapSplash(false)
@@ -363,6 +369,10 @@ export default function ProjectorView() {
       const { team_id } = data as { team_id: string | null }
       setCurrentTurnTeamId(team_id)
     })
+    ch.subscribe('category_reveal', ({ data }) => {
+      const { revealed_ids, done } = data as { round: number; revealed_ids: string[]; done?: boolean }
+      setCatRevealIds(done ? null : revealed_ids)
+    })
     ch.subscribe('round_intermission', ({ data }) => {
       const { snapshots } = data as { snapshots: ScoreSnapshot[] }
       setIntermissionSnapshots(snapshots)
@@ -378,6 +388,11 @@ export default function ProjectorView() {
     ch.subscribe('game_state_change', ({ data }) => {
       const { status, fj_category } = data as { status?: string; fj_category?: string }
       if (fj_category) setFjCategoryName(fj_category)
+      if (status === 'round_1' || status === 'round_2') {
+        // Any round start wipes reveal state — a stale set from a previous game
+        // (New Game mid-reveal) would blank every header on the new board
+        setCatRevealIds(null)
+      }
       if (status === 'round_2') {
         setIntermissionSnapshots(null)
         sessionStorage.removeItem('intermission')
@@ -430,6 +445,7 @@ export default function ProjectorView() {
     ch.subscribe('lobby_closed', () => {
       setRoom(null)
       setTeams([]); setCategories([]); setBuzzes([])
+      setCatRevealIds(null)
       setPhase('waiting')
     })
     // On (re)connect, re-sync all state so nothing is missed
@@ -1132,7 +1148,8 @@ export default function ProjectorView() {
           <div className="grid gap-2 shrink-0"
             style={{ gridTemplateColumns: `repeat(${categories.length}, minmax(0, 1fr))` }}>
             {categories.map(cat => (
-              <TapHeader key={cat.id} categoryName={cat.name} />
+              <TapHeader key={cat.id} categoryName={cat.name}
+                reveal={tapHeaderRevealFor(catRevealIds, cat.id)} />
             ))}
           </div>
 

@@ -52,6 +52,14 @@ the app discovers today's current lobby.
 ---
 
 ## Round Phase (Rounds 1 & 2)
+- **Optional category intros first**: when the round's categories have `description`
+  text, the host's right panel auto-opens a step-through intro at round start —
+  each click broadcasts `category_reveal` and pops the next category name onto the
+  boards (phones + projector show hidden "?" tap handles until revealed; tile taps
+  and the host question list are gated meanwhile; Skip available). Descriptions are
+  host-only. Broadcast-only state: refreshed clients default to a fully revealed
+  board and re-sync from the host's 5s re-broadcast; a question preview/activation
+  always clears it.
 - Category grid visible on projector + all player screens
 - One team has the "pick" — selects a category + point value
 - The first valid teammate tap atomically claims `rooms.pending_question_id`; later taps adopt that clue

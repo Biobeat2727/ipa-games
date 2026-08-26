@@ -23,6 +23,7 @@ type CategoryRow = {
   id: string
   name: string
   round: number
+  description: string | null
   questions: Question[]
 }
 
@@ -67,6 +68,11 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   // Beta-test tool (DEV-only, gated by the 🔬 Timing button below): toggle broadcasts
   // `debugTiming` inline on question_activated so every connected player self-reports
   // its reveal numbers back via `buzz_debug_report` — no per-device manual reading needed.
+  // Round-start category reveal (Jeopardy-style). Only activates when the
+  // round's categories carry descriptions; null = inactive.
+  const [catRevealRound, setCatRevealRound] = useState<number | null>(null)
+  const [catRevealCount, setCatRevealCount] = useState(0)
+
   const [debugTimingMode, setDebugTimingMode] = useState(false)
   const [debugReports, setDebugReports] = useState<Array<{
     team: string; device: string; clkOffset: number; recvDelay: number | null; revealT: number; path: string
@@ -125,8 +131,11 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   useEffect(() => {
     async function load() {
+      // select('*') — naming description here would error the whole query (and
+      // blank the board) on a database where the migration isn't applied yet;
+      // with * the column is simply absent and the reveal feature stays off.
       const { data: cats } = await supabase
-        .from('categories').select('id, name, round')
+        .from('categories').select('*')
         .eq('room_id', roomId).order('round').order('name')
       if (!cats) return
 
@@ -1323,6 +1332,84 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     broadcastRef.current?.publish('round_intermission', { snapshots })
   }
 
+  // ── Round-start category reveal ───────────────────────────
+  // Opens automatically when a round begins IF that round's categories have
+  // descriptions and nothing has been played yet. sessionStorage remembers a
+  // finished/skipped intro (and mid-intro progress) so a same-tab refresh
+  // resumes instead of re-blanking boards; a question in flight always wins.
+  useEffect(() => {
+    const round = room.status === 'round_1' ? 1 : room.status === 'round_2' ? 2 : null
+    if (round === null) {
+      if (catRevealRound !== null) setCatRevealRound(null)
+      return
+    }
+    if (catRevealRound === round) return
+    const cats = categories.filter(c => c.round === round)
+    if (cats.length === 0 || !cats.some(c => c.description)) return
+    if (sessionStorage.getItem(`catRevealDone:${roomId}:${round}`)) return
+    if (cats.some(c => c.questions.some(q => q.is_answered))) return // mid-round refresh
+    // A question already previewed/active means the round has really started —
+    // never open the intro panel over live play (host rejoining on a new device)
+    if (room.current_question_id || room.pending_question_id) return
+    const resumed = Math.min(
+      parseInt(sessionStorage.getItem(`catRevealProg:${roomId}:${round}`) ?? '0', 10) || 0,
+      cats.length
+    )
+    setCatRevealRound(round)
+    setCatRevealCount(resumed)
+    broadcastRef.current?.publish('category_reveal', {
+      round,
+      revealed_ids: cats.slice(0, resumed).map(c => c.id),
+      done: false,
+    })
+  }, [room.status, categories]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const catRevealCats = catRevealRound != null
+    ? categories.filter(c => c.round === catRevealRound)
+    : []
+
+  // While the intro is open, re-broadcast the current revealed set every few
+  // seconds — a phone or projector that refreshed mid-intro (and so defaulted
+  // to a fully-revealed board) re-blanks and re-gates within one beat.
+  useEffect(() => {
+    if (catRevealRound == null) return
+    const timer = setInterval(() => {
+      broadcastRef.current?.publish('category_reveal', {
+        round: catRevealRound,
+        revealed_ids: catRevealCats.slice(0, catRevealCount).map(c => c.id),
+        done: false,
+      })
+    }, 5000)
+    return () => clearInterval(timer)
+  }, [catRevealRound, catRevealCount]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Every broadcast carries the FULL revealed set (idempotent) so a client that
+  // missed an earlier event heals on the next one.
+  function revealNextCategory() {
+    if (catRevealRound == null) return
+    const next = Math.min(catRevealCount + 1, catRevealCats.length)
+    setCatRevealCount(next)
+    sessionStorage.setItem(`catRevealProg:${roomId}:${catRevealRound}`, String(next))
+    broadcastRef.current?.publish('category_reveal', {
+      round: catRevealRound,
+      revealed_ids: catRevealCats.slice(0, next).map(c => c.id),
+      done: false,
+    })
+  }
+
+  function finishCategoryReveal() {
+    if (catRevealRound == null) return
+    sessionStorage.setItem(`catRevealDone:${roomId}:${catRevealRound}`, '1')
+    sessionStorage.removeItem(`catRevealProg:${roomId}:${catRevealRound}`)
+    broadcastRef.current?.publish('category_reveal', {
+      round: catRevealRound,
+      revealed_ids: catRevealCats.map(c => c.id),
+      done: true,
+    })
+    setCatRevealRound(null)
+    setCatRevealCount(0)
+  }
+
   async function beginRound2() {
     // Capture turn assignment before the async gap so it doesn't go stale
     const firstTeamId = currentTurnTeamId
@@ -1520,7 +1607,12 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 <p className="text-gray-500 text-xs uppercase tracking-widest mb-3 font-semibold">{r.label}</p>
                 {r.cats.map(cat => (
                   <div key={cat.id} className="mb-4">
-                    <p className="text-xs font-semibold text-gray-400 mb-1.5 uppercase tracking-wide">{cat.name}</p>
+                    <div className="mb-1.5">
+                      <p className="text-xs font-semibold text-gray-400 uppercase tracking-wide">{cat.name}</p>
+                      {cat.description && (
+                        <p className="text-[11px] text-gray-600 leading-snug mt-0.5">{cat.description}</p>
+                      )}
+                    </div>
                     <div className="space-y-1">
                       {cat.questions.map(q => {
                         const isActive   = q.id === room.current_question_id
@@ -1528,14 +1620,17 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                         return (
                           <button
                             key={q.id}
-                            onClick={() => !isAnswered && !isActive && hostPreviewQuestion(q)}
-                            disabled={isAnswered || isActive}
+                            onClick={() => !isAnswered && !isActive && catRevealRound == null && hostPreviewQuestion(q)}
+                            disabled={isAnswered || isActive || catRevealRound != null}
                             className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors ${
                               isAnswered
                                 ? 'bg-gray-900/50 text-gray-700 line-through cursor-default'
                                 : isActive
                                   ? 'bg-yellow-400 text-gray-950 font-bold cursor-default'
-                                  : 'bg-gray-800 hover:bg-gray-700 text-white'
+                                  : catRevealRound != null
+                                    // locked during the intros — look locked, not just act locked
+                                    ? 'bg-gray-800/40 text-gray-600 cursor-default'
+                                    : 'bg-gray-800 hover:bg-gray-700 text-white'
                             }`}
                           >
                             <span className="font-mono mr-2 opacity-60">{q.point_value}</span>
@@ -1554,7 +1649,63 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
       {/* ── Right: active question / judging / FJ ────────── */}
       <div className="w-7/12 p-5 flex flex-col gap-4 overflow-y-auto">
-        {intermissionSnapshots ? (
+        {catRevealRound != null && !activeQuestion && !judgingBuzz && !room.pending_question_id ? (
+          // ── Round-start category intros — read each aloud as it reveals ──
+          // (a question somehow in flight always outranks the intro panel, so
+          // judging can never be hidden behind it)
+          <div className="flex-1 flex flex-col gap-4 p-5 overflow-y-auto">
+            <div className="text-center">
+              <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">
+                Round {catRevealRound} — Category Intros
+              </p>
+              <p className="text-xl font-black text-white">Reveal, then read it out</p>
+              <p className="text-gray-500 text-xs mt-1">Each click pops the next category onto every screen</p>
+            </div>
+            <div className="space-y-2">
+              {catRevealCats.map((cat, i) => {
+                const revealed = i < catRevealCount
+                const isNext   = i === catRevealCount
+                return (
+                  <div key={cat.id} className={`rounded-xl px-4 py-3 border ${
+                    revealed ? 'bg-gray-900 border-gray-800'
+                      : isNext ? 'bg-yellow-400/10 border-yellow-400/40'
+                      : 'bg-gray-900/40 border-gray-800/50 opacity-50'
+                  }`}>
+                    <p className={`font-black ${revealed ? 'text-white' : isNext ? 'text-yellow-400' : 'text-gray-500'}`}>
+                      {revealed ? '✓ ' : isNext ? '▶ ' : ''}{cat.name}
+                    </p>
+                    {cat.description && (
+                      <p className="text-gray-400 text-sm mt-1 leading-snug">{cat.description}</p>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+            {catRevealCount < catRevealCats.length ? (
+              <button
+                onClick={revealNextCategory}
+                className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+              >
+                Reveal “{catRevealCats[catRevealCount]?.name}” →
+              </button>
+            ) : (
+              <button
+                onClick={finishCategoryReveal}
+                className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+              >
+                To the board →
+              </button>
+            )}
+            {catRevealCount < catRevealCats.length && (
+              <button
+                onClick={finishCategoryReveal}
+                className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+              >
+                Skip intros — show the whole board
+              </button>
+            )}
+          </div>
+        ) : intermissionSnapshots ? (
           // ── Score map — round intermission or end-of-game recap ──
           <div className="flex-1 flex flex-col gap-4 p-5">
             <div className="text-center">

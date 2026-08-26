@@ -207,6 +207,16 @@ button {
   50%      { transform: translateY(-6px); }
 }
 
+/* Round-start category reveal: the tap-handle sign pops up big over the board,
+   then settles into its slot (Jeopardy-style). Covered by the global
+   reduced-motion collapse below. */
+@keyframes cat-reveal-pop {
+  0%   { transform: scale(0);    opacity: 0; }
+  45%  { transform: scale(2.05); opacity: 1; }
+  70%  { transform: scale(0.94); }
+  100% { transform: scale(1);    opacity: 1; }
+}
+
 /* Accessibility: collapse all animation for users who ask for reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {
