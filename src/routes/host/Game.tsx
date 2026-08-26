@@ -12,6 +12,13 @@ const RESPONSE_SECONDS = 40
 // broadcast happens to arrive." Must comfortably exceed worst-case Ably delivery.
 const REVEAL_BUFFER_MS = 450
 
+/** Final Tap qualification: every team above 0 plays. If nobody is in the black
+ *  (rough night), fall back to the top 3 so the game still gets its finale. */
+function fjAdvancing<T extends { id: string }>(ranked: T[], scoreOf: (t: T) => number): T[] {
+  const positive = ranked.filter(t => scoreOf(t) > 0)
+  return positive.length > 0 ? positive : ranked.slice(0, 3)
+}
+
 type CategoryRow = {
   id: string
   name: string
@@ -979,10 +986,11 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     // Clear any wagers from a previous FJ round
     await supabase.from('wagers').delete().eq('room_id', roomId)
 
-    // Rank teams by current live score; top 3 advance
+    // Rank teams by current live score; everyone above 0 plays Final Tap
     const ranked = [...teams].sort((a, b) => (scores.get(b.id) ?? b.score) - (scores.get(a.id) ?? a.score))
-    const top3ids = new Set(ranked.slice(0, 3).map(t => t.id))
-    const eliminated = ranked.slice(3)
+    const advancing = fjAdvancing(ranked, t => scores.get(t.id) ?? t.score)
+    const advancingIds = new Set(advancing.map(t => t.id))
+    const eliminated = ranked.filter(t => !advancingIds.has(t.id))
 
     // Load FJ category + question before touching DB
     const { data: fjCat } = await supabase
@@ -1030,12 +1038,12 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
       final_response_deadline_at: null,
       final_review_team_id: null,
     }))
-    setFjActiveTeamIds(top3ids)
+    setFjActiveTeamIds(advancingIds)
     setFjCategoryName(catName)
     setFjQuestion(loadedQuestion)
     setFjPhase('starting')
     setIntermissionSnapshots(null)
-    broadcastRef.current?.publish('game_state_change', { status: 'final_jeopardy', fj_category: catName, active_team_ids: [...top3ids] })
+    broadcastRef.current?.publish('game_state_change', { status: 'final_jeopardy', fj_category: catName, active_team_ids: [...advancingIds] })
   }
 
   async function openFJWagering() {
@@ -2101,28 +2109,35 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
               <div className="text-center">
                 <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">Round 2 Complete</p>
                 <p className="text-2xl font-black text-white">Ready for Final Tap?</p>
-                <p className="text-gray-500 text-sm mt-2">Top 3 teams advance</p>
+                <p className="text-gray-500 text-sm mt-2">Every team above 0 advances</p>
               </div>
-              <div className="w-full space-y-2">
-                <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">Advancing</p>
-                {sortedTeams.slice(0, 3).map(team => (
-                  <div key={team.id} className="px-4 py-3 rounded-xl bg-yellow-400/10 border border-yellow-400/30 flex items-center justify-between">
-                    <span className="font-bold text-white">{team.name}</span>
-                    <span className="font-mono text-yellow-400 text-sm">{scores.get(team.id) ?? 0}</span>
-                  </div>
-                ))}
-                {sortedTeams.length > 3 && (
-                  <>
-                    <p className="text-xs text-gray-600 uppercase tracking-wider mt-3 mb-1">Eliminated</p>
-                    {sortedTeams.slice(3).map(team => (
-                      <div key={team.id} className="px-4 py-3 rounded-xl bg-gray-900 flex items-center justify-between opacity-50">
-                        <span className="text-gray-400">{team.name}</span>
-                        <span className="font-mono text-gray-600 text-sm">{scores.get(team.id) ?? 0}</span>
+              {(() => {
+                const advancing = fjAdvancing(sortedTeams, t => scores.get(t.id) ?? 0)
+                const advancingIds = new Set(advancing.map(t => t.id))
+                const eliminated = sortedTeams.filter(t => !advancingIds.has(t.id))
+                return (
+                  <div className="w-full space-y-2">
+                    <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">Advancing</p>
+                    {advancing.map(team => (
+                      <div key={team.id} className="px-4 py-3 rounded-xl bg-yellow-400/10 border border-yellow-400/30 flex items-center justify-between">
+                        <span className="font-bold text-white">{team.name}</span>
+                        <span className="font-mono text-yellow-400 text-sm">{scores.get(team.id) ?? 0}</span>
                       </div>
                     ))}
-                  </>
-                )}
-              </div>
+                    {eliminated.length > 0 && (
+                      <>
+                        <p className="text-xs text-gray-600 uppercase tracking-wider mt-3 mb-1">Eliminated</p>
+                        {eliminated.map(team => (
+                          <div key={team.id} className="px-4 py-3 rounded-xl bg-gray-900 flex items-center justify-between opacity-50">
+                            <span className="text-gray-400">{team.name}</span>
+                            <span className="font-mono text-gray-600 text-sm">{scores.get(team.id) ?? 0}</span>
+                          </div>
+                        ))}
+                      </>
+                    )}
+                  </div>
+                )
+              })()}
               <button
                 onClick={showRoundIntermission}
                 className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
