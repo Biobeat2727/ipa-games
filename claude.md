@@ -36,6 +36,8 @@ No test or lint script is configured — `npm test` and `npm run lint` do not ex
 - Buzz button: full-width, impossible to miss
 - Server-generated timestamps for all buzzes
 - 6-char room codes, exclude ambiguous chars (0, O, 1, I, l)
+- Category names: 14 chars max incl. spaces/punctuation (mobile tap-handle constraint)
+- Weekly round content pipeline: `.claude/skills/tapped-in-rounds/SKILL.md`
 - Board visual theme: bar tap wall — categories are tap handles, point-value tiles are beer glasses (full = unanswered, empty = answered). Component: `src/components/TapCategoryColumn.tsx` (`TapHeader`, `BeerGlass`). Details in `docs/views.md`.
 
 ## Known Issues
