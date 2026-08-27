@@ -40,6 +40,29 @@
 - Projector setup screen
 - Format changes / content editor
 
+### Graphics / animation performance pass (raised 2026-08-27, deliberately deferred)
+
+The game should feel smooth on every device, not just fast ones. Observed on a real
+run-through; none of it blocks play:
+
+- **Question reveal is choppy.** The full-screen clue that expands after a player taps a
+  tile stutters through its transition. Prime suspect: animating properties that force
+  layout/paint every frame instead of `transform`/`opacity` (which the compositor can run
+  on the GPU), plus the growing element carrying a large shadow/blur.
+- **Projector bubbles are framey at 60Hz.** `Bubbles` in `src/components/Barware.tsx`
+  animates many elements continuously behind the board — likely too many nodes, or
+  keyframes that are not compositor-only. Options: fewer bubbles on the projector, one
+  canvas/SVG layer instead of N elements, or `will-change: transform`.
+- **General:** audit the keyframes in `src/index.css` for non-compositable properties
+  (width/height/top/left/filter), look for animations still running on screens where they
+  are not visible, and profile the board at 5-6 categories x 15 teams — the heaviest real
+  render.
+
+Approach when picked up: profile first on the actual projector machine and a mid-range
+phone (DevTools performance panel + paint flashing) rather than optimizing blind — the two
+surfaces have very different bottlenecks. `prefers-reduced-motion` support already exists
+and should stay the escape hatch.
+
 ---
 
 ## 🔬 Buzzer Timing Beta-Test Tool (kept in permanently, DEV-only)

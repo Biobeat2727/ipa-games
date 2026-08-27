@@ -15,6 +15,7 @@ import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryCh
 import { TipJar, VenueFooter } from '../../components/TipJar'
 import { BeerGlass, TapHeader, tapHeaderRevealFor } from '../../components/TapCategoryColumn'
 import { compareCategoryOrder } from '../../lib/categoryOrder'
+import { useVisualViewportHeight } from '../../lib/useVisualViewportHeight'
 import { Bubbles, PintHero, CheersPints, SoloPint } from '../../components/Barware'
 import { QUIPS } from '../../lib/quips'
 import { findCurrentActiveRoom, getLocalDayStartIso } from '../../lib/roomDiscovery'
@@ -148,6 +149,9 @@ export default function PlayView() {
   // broadcast, any round change, AND any question preview/activation — so a
   // phone that missed `done` can never stay gated once play actually starts.
   const [catRevealIds, setCatRevealIds] = useState<string[] | null>(null)
+
+  // Answer screens size to this so the phone keyboard can't bury the submit button
+  const viewportHeight = useVisualViewportHeight()
   const [teamNames, setTeamNames]             = useState<Map<string, string>>(new Map())
   const [previewInfo, setPreviewInfo]         = useState<PreviewInfo | null>(null)
   const [doubleTapTeamId, setDoubleTapTeamId] = useState<string | null>(null)
@@ -1868,6 +1872,20 @@ export default function PlayView() {
 
   // ── Score chip ────────────────────────────────────────────
 
+  // Sizing an answer screen to the visible viewport (rather than 100vh) keeps the
+  // text box and submit button above an open keyboard; the clue card above them
+  // scrolls internally instead of pushing them off screen.
+  const answerScreenStyle = viewportHeight ? { height: `${viewportHeight}px`, minHeight: 0 } : undefined
+
+  // Enter drops the keyboard but deliberately does NOT submit: a stray Enter would
+  // otherwise lock in a half-typed answer, and submissions are one-shot. Closing the
+  // keyboard reveals the submit button, so the tap that follows is the confirmation.
+  const dismissKeyboardOnEnter = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key !== 'Enter' || e.shiftKey) return
+    e.preventDefault()
+    e.currentTarget.blur()
+  }
+
   const scoreChip = (
     <button
       onClick={() => setShowScoreOverlay(true)}
@@ -2247,7 +2265,7 @@ export default function PlayView() {
     const pct       = (remaining / dur) * 100
     const low       = remaining <= 15
     return (
-      <div className="min-h-screen final-bg text-white flex flex-col">
+      <div className="min-h-screen final-bg text-white flex flex-col overflow-hidden" style={answerScreenStyle}>
         {scoreOverlayEl}
         {/* Timer bar */}
         <div className="h-2 bg-black/40 w-full shrink-0">
@@ -2256,7 +2274,7 @@ export default function PlayView() {
             style={{ width: `${pct}%` }}
           />
         </div>
-        <div className="flex-1 flex flex-col p-5 max-w-sm mx-auto w-full">
+        <div className="flex-1 min-h-0 flex flex-col p-5 max-w-sm mx-auto w-full">
           <div className="flex items-center justify-between mb-4 pt-3">
             <p className="text-amber-400 text-xs uppercase tracking-widest">Final Tap</p>
             <span className={`inline-block font-mono text-3xl font-black tabular-nums ${low ? 'text-red-400' : 'text-white'}`}
@@ -2264,7 +2282,7 @@ export default function PlayView() {
               {remaining}
             </span>
           </div>
-          <div className="glass-card rounded-2xl p-5 mb-4">
+          <div className="glass-card rounded-2xl p-5 mb-4 min-h-0 overflow-y-auto">
             <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The Answer</p>
             <p className="text-xl font-bold leading-snug">{fjQuestion.answer}</p>
           </div>
@@ -2283,10 +2301,12 @@ export default function PlayView() {
                 placeholder="Type your response…"
                 value={fjResponse}
                 onChange={e => setFjResponse(e.target.value)}
+                onKeyDown={dismissKeyboardOnEnter}
+                enterKeyHint="done"
                 disabled={fjResponseSubmitting}
                 maxLength={500}
-                rows={3}
-                className="w-full bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
+                rows={2}
+                className="w-full shrink-0 bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
               />
               {fjResponseError && (
                 <p role="alert" className="text-red-400 text-sm text-center mb-3">{fjResponseError}</p>
@@ -2294,7 +2314,7 @@ export default function PlayView() {
               <button
                 onClick={handleSubmitFJResponse}
                 disabled={!fjResponse.trim() || fjResponseSubmitting}
-                className="btn-beer w-full py-4 rounded-2xl font-black text-lg"
+                className="btn-beer w-full shrink-0 py-4 rounded-2xl font-black text-lg"
               >
                 {fjResponseSubmitting ? 'Locking…' : 'Submit Response'}
               </button>
@@ -2856,10 +2876,11 @@ export default function PlayView() {
     const dtTimerPct = (dtTimer / 40) * 100
     const dtTimerLow = dtTimer <= 10
     return (
-      <div className="relative min-h-screen bar-bg text-white flex flex-col p-6">
+      <div className="relative min-h-screen bar-bg text-white flex flex-col p-6 overflow-hidden" style={answerScreenStyle}>
         {scoreOverlayEl}
-        {scoreChip}
-        <div className="max-w-sm mx-auto w-full flex flex-col flex-1 pt-8">
+        {/* No score chip while answering: it sat on top of the countdown, and the
+            clock matters more than "all scores" during a 15-second typing window */}
+        <div className="max-w-sm mx-auto w-full flex flex-col flex-1 min-h-0 pt-2">
           <div className="flex items-center justify-between mb-2">
             <p className="text-yellow-400 font-black text-xl">Your turn!</p>
             <span className={`inline-block font-mono text-4xl font-black tabular-nums ${dtTimerLow ? 'text-red-400' : 'text-white'}`}
@@ -2875,7 +2896,7 @@ export default function PlayView() {
             />
           </div>
 
-          <div className="glass-card rounded-2xl p-4 mb-4">
+          <div className="glass-card rounded-2xl p-4 mb-4 min-h-0 overflow-y-auto">
             <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The answer</p>
             <p className="text-lg font-bold leading-snug">{activeQuestion.answer}</p>
           </div>
@@ -2892,13 +2913,15 @@ export default function PlayView() {
                 placeholder="Type your response…"
                 value={responseText}
                 onChange={e => setResponseText(e.target.value)}
-                rows={3}
-                className="w-full bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
+                onKeyDown={dismissKeyboardOnEnter}
+                enterKeyHint="done"
+                rows={2}
+                className="w-full shrink-0 bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
               />
               <button
                 onClick={handleSubmitResponse}
                 disabled={!responseText.trim()}
-                className="btn-beer w-full py-4 rounded-2xl font-black text-lg"
+                className="btn-beer w-full shrink-0 py-4 rounded-2xl font-black text-lg"
               >
                 Submit Response
               </button>
@@ -2915,10 +2938,11 @@ export default function PlayView() {
     const ansTimerPct = (ansTimer / 15) * 100
     const ansTimerLow = ansTimer <= 3
     return (
-      <div className="relative min-h-screen bar-bg text-white flex flex-col p-6">
+      <div className="relative min-h-screen bar-bg text-white flex flex-col p-6 overflow-hidden" style={answerScreenStyle}>
         {scoreOverlayEl}
-        {scoreChip}
-        <div className="max-w-sm mx-auto w-full flex flex-col flex-1 pt-8">
+        {/* No score chip while answering: it sat on top of the countdown, and the
+            clock matters more than "all scores" during a 15-second typing window */}
+        <div className="max-w-sm mx-auto w-full flex flex-col flex-1 min-h-0 pt-2">
           <div className="flex items-center justify-between mb-2">
             <p className="text-yellow-400 font-black text-xl">{buzzWasMine ? "You're in! Type fast!" : 'Teammate buzzed! Type fast!'}</p>
             <span className={`inline-block font-mono text-4xl font-black tabular-nums ${ansTimerLow ? 'text-red-400' : 'text-white'}`}
@@ -2934,7 +2958,7 @@ export default function PlayView() {
             />
           </div>
 
-          <div className="glass-card rounded-2xl p-4 mb-4">
+          <div className="glass-card rounded-2xl p-4 mb-4 min-h-0 overflow-y-auto">
             <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The answer</p>
             <p className="text-lg font-bold leading-snug">{activeQuestion.answer}</p>
           </div>
@@ -2951,13 +2975,15 @@ export default function PlayView() {
                 placeholder="Type your response…"
                 value={responseText}
                 onChange={e => setResponseText(e.target.value)}
-                rows={3}
-                className="w-full bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
+                onKeyDown={dismissKeyboardOnEnter}
+                enterKeyHint="done"
+                rows={2}
+                className="w-full shrink-0 bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
               />
               <button
                 onClick={handleSubmitResponse}
                 disabled={!responseText.trim()}
-                className="btn-beer w-full py-4 rounded-2xl font-black text-lg"
+                className="btn-beer w-full shrink-0 py-4 rounded-2xl font-black text-lg"
               >
                 Submit Response
               </button>

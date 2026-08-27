@@ -53,6 +53,8 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   const [judgeStartTime, setJudgeStartTime]   = useState<number | null>(null)
   const [timerSeconds, setTimerSeconds]       = useState(RESPONSE_SECONDS)
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(initialRoom.current_turn_team_id ?? null)
+  // Read inside async judgment handlers, where the render closure can be stale
+  const currentTurnTeamIdRef = useRef<string | null>(initialRoom.current_turn_team_id ?? null)
   const [previewInfo, setPreviewInfo] = useState<{
     questionId: string; categoryName: string; pointValue: number | null; startTs: number; doubleTapWager?: number
   } | null>(null)
@@ -353,6 +355,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   // Keep fjActiveTeamIdsRef in sync so the timer expiry effect always has fresh values
   useEffect(() => { fjActiveTeamIdsRef.current = fjActiveTeamIds }, [fjActiveTeamIds])
+  useEffect(() => { currentTurnTeamIdRef.current = currentTurnTeamId }, [currentTurnTeamId])
 
   // FJ 90-second answer timer
   useEffect(() => {
@@ -978,7 +981,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
       assignTurn(buzz.team_id)
       deactivateQuestion()
     } else if (result.question_done) {
-      assignTurn(null)
+      // Nobody got it: the pick stays with the team that chose the clue instead of
+      // dropping to nobody and making the host hand it out again.
+      assignTurn(currentTurnTeamIdRef.current)
       setPendingDeactivation(true)
     }
   }
