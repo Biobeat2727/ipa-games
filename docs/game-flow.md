@@ -83,7 +83,8 @@ the app discovers today's current lobby.
 
 ## Round 2 → Final Jeopardy Transition
 - Host broadcasts `game_state_change { status: 'final_jeopardy', active_team_ids: [...] }`
-- Top 3 teams by score: `is_active = true`; others: `is_active = false`
+- Every team with a score above 0: `is_active = true`; teams at 0 or below: `is_active = false`
+  (fallback: if no team is positive, the top 3 advance so the game still gets a finale)
 - Eliminated teams see "thanks for playing" + leaderboard
 - Projector + active players see FJ category name
 
@@ -113,7 +114,9 @@ the app discovers today's current lobby.
 ### Flow
 1. Host calls `startFinalJeopardy()`:
    - Deletes all existing wagers for the room (clean slate)
-   - Ranks teams by score; top 3 remain `is_active = true`, rest set `is_active = false`
+   - Ranks teams by score; every team above 0 remains `is_active = true`, the rest set
+     `is_active = false` (see `fjAdvancing()` in `src/routes/host/Game.tsx` — falls back to
+     the top 3 only when nobody is positive)
    - Loads FJ category (round 3) + question from DB
    - Sets `rooms.status = 'final_jeopardy'`
    - Broadcasts `game_state_change { status: 'final_jeopardy', fj_category, active_team_ids }`

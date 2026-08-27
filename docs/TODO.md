@@ -120,7 +120,7 @@ Original design sketch kept below for reference:
 
 ## Final Tap — Known Behavior
 
-- Eliminated players (non-top-3) land in `fjSubPhase = 'done'` when wagering opens.
+- Eliminated players (score 0 or below after Round 2) land in `fjSubPhase = 'done'` when wagering opens.
 
 ---
 

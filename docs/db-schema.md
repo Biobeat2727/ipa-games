@@ -30,7 +30,7 @@
 | room_id | uuid → rooms | |
 | name | varchar | Display name |
 | score | integer | Default 0; can go negative |
-| is_active | boolean | False only for non-top-3 teams after Round 2 → Final Jeopardy transition |
+| is_active | boolean | False for teams eliminated at the Round 2 → Final Jeopardy transition (score 0 or below) |
 | created_at | timestamp | |
 
 ## `players`
@@ -50,6 +50,7 @@
 | name | varchar | |
 | round | integer | 1, 2, or 3 (Final Jeopardy) |
 | description | text, nullable | Host-read intro text for the round-start category reveal (host-only display). Added by `supabase/add_category_descriptions.sql` |
+| position | integer, nullable | Index within the round from the imported JSON — drives board left-to-right order and the reveal sequence. Null sorts alphabetically (pre-existing content). Added by `supabase/add_category_position.sql` |
 
 ## `questions`
 | Column | Type | Notes |

@@ -26,7 +26,7 @@
 12. **Final Tap: wager locked** — "Wager locked, waiting for others…"
 13. **Final Tap: question** — clue + 90s timer + response input
 14. **Final Tap: reviewing** — "Response submitted, awaiting results…"
-15. **Eliminated** — "Thanks for playing!" + leaderboard (non-top-3); set to `done` sub-phase
+15. **Eliminated** — "Thanks for playing!" + leaderboard (teams finishing Round 2 at 0 or below); set to `done` sub-phase
 16. **Game over** — final leaderboard + winner (`fjSubPhase === 'done'`)
 
 ---
@@ -81,7 +81,7 @@
 
 ### Connected screens (driven by `room.status`)
 1. **Lobby** — QR code linking to `window.location.origin`, join URL text, live team list as teams join
-2. **Question preview** — category name + point value + 10s countdown (large)
+2. **Question preview** — category — $value header plus the clue text, so the room reads along while the host reads it aloud, then "Listening…". Same header/type sizing as the active-question screen so opening the buzzer does not reflow the clue
 3. **Category grid** — full Jeopardy board, tap/glass visual theme (see below), score bar, whose turn. During round-start category intros, unrevealed headers render as dim "?" tap handles and each reveal pops in (`category_reveal` broadcast)
 4. **Active question** — clue text (large), buzz queue or responding team name + countdown timer
 5. **Correct feedback** — full-screen green flash with team name

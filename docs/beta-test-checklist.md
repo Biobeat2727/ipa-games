@@ -263,10 +263,11 @@ Use at least two phones on the team whose turn it is.
 
 Prepare at least four teams so elimination behavior can be tested.
 
-- [ ] **FNL-01 — Top three qualify:** On entering Final Tap, exactly the top three teams are
-  active. Other teams see the eliminated/thanks screen and leaderboard.
-- [ ] **FNL-02 — Tie at cutoff:** Create a tie around third place. Record which team qualifies
-  and confirm the result follows the intended rule consistently.
+- [ ] **FNL-01 — Everyone above 0 qualifies:** On entering Final Tap, every team with a
+  score above 0 is active. Teams at 0 or below see the eliminated/thanks screen and
+  leaderboard. The host panel's Advancing/Eliminated split matches.
+- [ ] **FNL-02 — Nobody positive:** Drive every team to 0 or below, then start Final Tap.
+  The top 3 should advance anyway (fallback) rather than the game stranding with no finalists.
 - [ ] **FNL-03 — Category reveal:** Active players and projector see the correct Final Tap
   category before wagering; the clue and answer are not revealed early.
 - [ ] **FNL-04 — Open wagering:** Only active teams receive the wager form. Host status changes
