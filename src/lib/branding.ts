@@ -15,7 +15,14 @@ export const VENUE_URL = 'https://www.idahopourauthority.com/'
 /** Venue logo file served from /public, e.g. '/ipa-logo.png' */
 export const VENUE_LOGO = '/ipa-logo.jpg'
 
+/** Full venue Instagram profile URL, including https:// */
+export const VENUE_INSTAGRAM = 'https://www.instagram.com/idahopourauthority/'
+
 export const venmoUrl = () => `https://venmo.com/u/${VENMO_HANDLE}`
+
+/** "@idahopourauthority" from the profile URL */
+export const instagramHandle = () =>
+  '@' + VENUE_INSTAGRAM.replace(/^https?:\/\/(www\.)?instagram\.com\//, '').replace(/\/$/, '')
 
 /** Strip the protocol for display ("idahopourauthority.com", not the full URL) */
 export const venueUrlLabel = () => VENUE_URL.replace(/^https?:\/\//, '').replace(/\/$/, '')

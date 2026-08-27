@@ -54,6 +54,18 @@ export type Player = {
   created_at: string
 }
 
+/** Post-game player feedback. Insert-only for anon; the host reads it in the
+ *  Supabase dashboard. See supabase/add_feedback.sql */
+export type Feedback = {
+  id: string
+  room_id: string | null
+  team_id: string | null
+  team_name: string | null
+  kind: 'thoughts' | 'bug'
+  message: string
+  created_at: string
+}
+
 export type Category = {
   id: string
   room_id: string
@@ -175,6 +187,12 @@ export type Database = {
         Row: Wager
         Insert: Omit<Wager, 'id' | 'response' | 'submitted_at'> & { id?: string; response?: string | null; submitted_at?: string | null }
         Update: Partial<Omit<Wager, 'id'>>
+        Relationships: []
+      }
+      feedback: {
+        Row: Feedback
+        Insert: Omit<Feedback, 'id' | 'created_at' | 'kind'> & { id?: string; created_at?: string; kind?: 'thoughts' | 'bug' }
+        Update: Partial<Omit<Feedback, 'id'>>
         Relationships: []
       }
     }

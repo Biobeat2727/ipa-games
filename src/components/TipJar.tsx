@@ -1,4 +1,4 @@
-import { VENMO_HANDLE, VENUE_LOGO, VENUE_NAME, VENUE_URL, venmoUrl, venueUrlLabel } from '../lib/branding'
+import { VENMO_HANDLE, VENUE_INSTAGRAM, VENUE_LOGO, VENUE_NAME, VENUE_URL, instagramHandle, venmoUrl, venueUrlLabel } from '../lib/branding'
 
 // Venmo's brand blue — readable on the dark bar background
 const VENMO_BLUE = '#3D95CE'
@@ -39,7 +39,7 @@ export function TipJarProjector({ style }: { style?: React.CSSProperties }) {
 /** Venue logo + website for the end-of-game screens. `projector` renders the link as
  *  plain text (nobody can tap the big screen) at room-readable sizes. */
 export function VenueFooter({ projector, dense, style }: { projector?: boolean; dense?: boolean; style?: React.CSSProperties }) {
-  if (!VENUE_LOGO && !VENUE_URL) return null
+  if (!VENUE_LOGO && !VENUE_URL && !VENUE_INSTAGRAM) return null
   // The badge has black text on a white ground, so it sits in a white chip
   // instead of floating on the dark bar background
   const logo = VENUE_LOGO && (
@@ -53,24 +53,46 @@ export function VenueFooter({ projector, dense, style }: { projector?: boolean; 
     </span>
   )
   const label = venueUrlLabel()
+  // Each row is wrapped in its own div: the links are inline-level, so without a
+  // block wrapper the logo and website flow onto the SAME line and stop centering.
   return (
     <div className="text-center space-y-2" style={style}>
-      {logo}
+      {logo && <div>{logo}</div>}
       {VENUE_URL && (
-        projector ? (
-          <p className="text-gray-400 font-semibold" style={{ fontSize: 'clamp(0.9rem, 1.8vw, 1.5rem)' }}>
-            {label}
-          </p>
-        ) : (
-          <a
-            href={VENUE_URL}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="inline-block text-sm font-semibold text-amber-300 underline underline-offset-4 decoration-amber-300/40"
-          >
-            {label}
-          </a>
-        )
+        <div>
+          {projector ? (
+            <p className="text-gray-400 font-semibold" style={{ fontSize: 'clamp(0.9rem, 1.8vw, 1.5rem)' }}>
+              {label}
+            </p>
+          ) : (
+            <a
+              href={VENUE_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-block text-sm font-semibold text-amber-300 underline underline-offset-4 decoration-amber-300/40"
+            >
+              {label}
+            </a>
+          )}
+        </div>
+      )}
+      {VENUE_INSTAGRAM && (
+        <div>
+          {projector ? (
+            <p className="text-gray-400 font-semibold" style={{ fontSize: 'clamp(0.9rem, 1.8vw, 1.5rem)' }}>
+              📸 {instagramHandle()}
+            </p>
+          ) : (
+            <a
+              href={VENUE_INSTAGRAM}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex items-center gap-1.5 text-sm font-semibold text-amber-300 underline underline-offset-4 decoration-amber-300/40"
+            >
+              📸 {instagramHandle()}
+            </a>
+          )}
+        </div>
       )}
     </div>
   )

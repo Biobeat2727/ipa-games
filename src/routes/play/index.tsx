@@ -13,6 +13,7 @@ import Confetti from '../../components/Confetti'
 import ScoreOverlay from '../../components/ScoreOverlay'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { TipJar, VenueFooter } from '../../components/TipJar'
+import FeedbackForm from '../../components/FeedbackForm'
 import { BeerGlass, TapHeader, tapHeaderRevealFor } from '../../components/TapCategoryColumn'
 import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { useVisualViewportHeight } from '../../lib/useVisualViewportHeight'
@@ -2420,6 +2421,9 @@ export default function PlayView() {
           <p className="text-gray-400 text-sm">Your final score: <span className="text-white font-black">{myEntry.score.toLocaleString()}</span></p>
         )}
         <TipJar style={{ marginTop: '1.5rem', width: '100%', maxWidth: '20rem', animation: 'slide-up-in 0.4s ease-out 0.8s both' }} />
+        <div className="w-full flex justify-center" style={{ marginTop: '1rem', animation: 'slide-up-in 0.4s ease-out 0.85s both' }}>
+          <FeedbackForm roomId={room?.id} teamId={myTeam?.id} teamName={myTeam?.name} />
+        </div>
         <VenueFooter style={{ marginTop: '1.5rem', animation: 'slide-up-in 0.4s ease-out 0.9s both' }} />
         <button onClick={handleLeave} disabled={loading} className="mt-6 px-5 py-2 text-sm font-medium text-yellow-400 border border-yellow-500 rounded-lg hover:bg-yellow-500 hover:text-black transition-colors disabled:opacity-50 disabled:cursor-not-allowed">
           {loading ? 'Leaving…' : 'Leave'}
