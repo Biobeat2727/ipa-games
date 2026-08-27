@@ -150,6 +150,9 @@ export default function PlayView() {
   // broadcast, any round change, AND any question preview/activation — so a
   // phone that missed `done` can never stay gated once play actually starts.
   const [catRevealIds, setCatRevealIds] = useState<string[] | null>(null)
+  // Podium standings start collapsed to the podium places so the tip jar,
+  // feedback box and venue links are reachable without scrolling past 15 rows
+  const [showAllStandings, setShowAllStandings] = useState(false)
 
   // Answer screens size to this so the phone keyboard can't bury the submit button
   const viewportHeight = useVisualViewportHeight()
@@ -2402,21 +2405,55 @@ export default function PlayView() {
             )}
           </>
         )}
-        {finalStandings.length > 0 && (
-          <div className="w-full max-w-xs space-y-2 mb-8">
-            {finalStandings.map((t, i) => (
-              <div key={t.id}
-                className={`flex items-center gap-3 rounded-xl px-4 py-3 ${t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'glass-card'}`}
-                style={{ animation: `slide-up-in 0.4s ease-out ${0.5 + i * 0.1}s both` }}>
-                <span className="w-6 text-center shrink-0">
-                  {i < 3 ? medals[i] : <span className="text-gray-600 font-mono text-sm">{i + 1}</span>}
-                </span>
-                <span className="flex-1 font-semibold text-left truncate">{t.name}</span>
-                <span className={`font-mono font-black text-sm ${t.score < 0 ? 'text-red-400' : 'text-yellow-400'}`}>{t.score.toLocaleString()}</span>
-              </div>
-            ))}
-          </div>
-        )}
+        {finalStandings.length > 0 && (() => {
+          // Collapsed: the three podium places, plus your own row if you missed
+          // them — so you never have to expand just to find your own result.
+          const podium  = finalStandings.slice(0, 3)
+          const myPinned = !showAllStandings && myFinIdx >= 3 ? finalStandings[myFinIdx] : null
+          const shown   = showAllStandings ? finalStandings : podium
+          const hiddenCount = finalStandings.length - podium.length - (myPinned ? 1 : 0)
+
+          const row = (t: typeof finalStandings[number], rank: number, delay: number) => (
+            <div key={t.id}
+              className={`flex items-center gap-3 rounded-xl px-4 py-3 ${t.id === myTeam?.id ? 'bg-yellow-400/10 border border-yellow-400/30' : 'glass-card'}`}
+              style={{ animation: `slide-up-in 0.4s ease-out ${delay}s both` }}>
+              <span className="w-6 text-center shrink-0">
+                {rank < 3 ? medals[rank] : <span className="text-gray-600 font-mono text-sm">{rank + 1}</span>}
+              </span>
+              <span className="flex-1 font-semibold text-left truncate">{t.name}</span>
+              <span className={`font-mono font-black text-sm ${t.score < 0 ? 'text-red-400' : 'text-yellow-400'}`}>{t.score.toLocaleString()}</span>
+            </div>
+          )
+
+          return (
+            <div className="w-full max-w-xs space-y-2 mb-6">
+              {shown.map((t, i) => row(t, i, 0.5 + i * 0.1))}
+              {myPinned && (
+                <>
+                  <p className="text-gray-700 text-center text-xs leading-none">···</p>
+                  {row(myPinned, myFinIdx, 0.8)}
+                </>
+              )}
+              {!showAllStandings && hiddenCount > 0 && (
+                <button
+                  onClick={() => setShowAllStandings(true)}
+                  className="w-full py-2.5 rounded-xl text-xs font-bold text-amber-300/80 hover:text-amber-300 border border-amber-400/20 hover:border-amber-400/40 transition-colors"
+                  style={{ animation: 'slide-up-in 0.4s ease-out 0.85s both' }}
+                >
+                  Show all {finalStandings.length} teams ▾
+                </button>
+              )}
+              {showAllStandings && (
+                <button
+                  onClick={() => setShowAllStandings(false)}
+                  className="w-full py-2.5 rounded-xl text-xs font-bold text-gray-500 hover:text-gray-300 transition-colors"
+                >
+                  Show less ▴
+                </button>
+              )}
+            </div>
+          )
+        })()}
         {myEntry && !iWon && (
           <p className="text-gray-400 text-sm">Your final score: <span className="text-white font-black">{myEntry.score.toLocaleString()}</span></p>
         )}
