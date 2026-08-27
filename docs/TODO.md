@@ -40,6 +40,31 @@
 - Projector setup screen
 - Format changes / content editor
 
+### Refresh after game over loses the results screen (found 2026-08-27, deferred)
+
+Reloading a phone AFTER the host finishes the game drops the player to
+"Waiting for host to open a lobby" instead of the final standings.
+
+Cause: `findCurrentActiveRoom()` filters `.neq('status', 'finished')`
+(`src/lib/roomDiscovery.ts:14`), so once the room is finished a fresh page load
+finds nothing to join. Players who simply leave the screen open are unaffected —
+this only bites on reload/reopen.
+
+It matters more than it used to: the post-game feedback box and the Venmo /
+website / Instagram links live only on that screen, so a reload means losing the
+one prompt to send feedback.
+
+Possible fix: let discovery fall back to today's most recent *finished* room when
+the device's stored team belongs to it, and land such a player straight on the
+results screen (read-only). Care needed — that function is shared by host,
+player, and projector discovery, and loosening it naively would let stale rooms
+reopen, which the current rule deliberately prevents. Worth a focused test with
+`chaos-test.mjs` afterwards.
+
+Found by the resilience audit; every other disruption tested (refresh mid-buzz,
+refresh mid-typing, app backgrounded, browser closed and reopened, network drops,
+projector refresh, intermission refresh) recovered correctly.
+
 ### Graphics / animation performance pass (raised 2026-08-27, deliberately deferred)
 
 The game should feel smooth on every device, not just fast ones. Observed on a real
