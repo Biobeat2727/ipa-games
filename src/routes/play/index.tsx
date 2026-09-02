@@ -419,13 +419,20 @@ export default function PlayView() {
         .from('rooms')
         .select()
         .eq('id', teamData.room_id)
-        .neq('status', 'finished')
         .gte('created_at', getLocalDayStartIso())
         .maybeSingle()
 
       if (roomRes.error) return retryResume(teamId, attempt)
       const roomData = roomRes.data
       if (!roomData) { clearPlayerSession(); return autoResolve() }
+      if (roomData.status === 'finished') {
+        // Post-game refresh: a phone reloaded on the results screen should get
+        // the results back, not the waiting screen. Keep the finished room only
+        // while no newer game has opened; a newer lobby always wins.
+        let newer: Room | null = null
+        try { newer = await findCurrentActiveRoom() } catch { return retryResume(teamId, attempt) }
+        if (newer && newer.id !== roomData.id) { clearPlayerSession(); return autoResolve() }
+      }
       setRoom(roomData)
       setMyTeam(teamData)
       setMyScore(teamData.score)
@@ -634,7 +641,28 @@ export default function PlayView() {
       setFjSubPhase('done')
     })()
     return () => { cancelled = true }
-  }, [room?.status]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [room?.status, phase]) // eslint-disable-line react-hooks/exhaustive-deps
+  // ^ `phase` matters: on a post-game resume the room is already 'finished' when
+  //   the phase flips to 'game', and without it this never ran (board, not results)
+
+  // Sitting on a finished room's results (post-game refresh path): the host may
+  // open the next lobby without any broadcast reaching this room's channel, so
+  // poll for a newer game and move on when one appears.
+  useEffect(() => {
+    if (phase !== 'game' || room?.status !== 'finished') return
+    const finishedId = room.id
+    const id = setInterval(async () => {
+      try {
+        const newer = await findCurrentActiveRoom()
+        if (!newer || newer.id === finishedId) return
+        clearPlayerSession()
+        setRoom(null); setMyTeam(null); setTeams([])
+        setFjSubPhase(null)
+        setPhase('no_lobby')
+      } catch { /* transient — try again next tick */ }
+    }, 3000)
+    return () => clearInterval(id)
+  }, [phase, room?.status, room?.id])
 
   // Kick via broadcast: host sends lobby_closed on the room channel
   useEffect(() => {
@@ -689,6 +717,10 @@ export default function PlayView() {
           supabase.from('buzzes').select().eq('question_id', qId).eq('team_id', myTeam!.id).maybeSingle(),
         ])
         if (cancelled || revealClaimRef.current === qId) return
+        // A late room snapshot can name a clue that has since been judged. Showing
+        // it would put a live buzz button on an answered question (and a tap would
+        // land on the wrong clue) — treat it as no active question.
+        if (question?.is_answered) return
         if (debugTimingRef.current) {
           broadcastRef.current?.publish('buzz_debug_report', {
             team: myTeamRef.current?.name ?? '?',
@@ -754,6 +786,9 @@ export default function PlayView() {
         const confirmTimer = setTimeout(async () => {
           const { data } = await supabase.from('rooms').select('current_question_id').eq('id', room.id).single()
           if (cancelled) return
+          // Something else already moved this phone on (a question_deactivated
+          // broadcast, or the next question's reveal) — never clear THAT state.
+          if (revealClaimRef.current !== claimedId || activeQuestionRef.current?.id !== claimedId) return
           if (data?.current_question_id === claimedId) {
             // Stale snapshot — the question is still live. Restore the field so
             // later snapshots compare against the truth.

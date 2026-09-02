@@ -11,6 +11,7 @@ import {
   doubleTapMaxWager,
   clampDoubleTapWager,
   isLastRegularRound,
+  isRegularRoundStatus,
   nextPhaseLabel,
   nextStatusAfter,
   roundLabel,
@@ -221,7 +222,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     // Auto-assign first turn. The lobby already uses this same channel, so it
     // may be attached before Game mounts and never emit another attached event.
     const ensureInitialTurn = () => {
-      if (!autoAssigned && teams.length > 0) {
+      // Only a regular round has a "pick". A host reload during Final Tap used to
+      // hand the first team a phantom turn and light up "picking" on the scoreboard.
+      if (!autoAssigned && teams.length > 0 && isRegularRoundStatus(initialRoom.status)) {
         autoAssigned = true
         const persistedTeamId = initialRoom.current_turn_team_id
         const firstTeamId = persistedTeamId && teams.some(t => t.id === persistedTeamId)
@@ -460,9 +463,21 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
         setFjQuestion(q ?? null)
       }
 
-      const { data: activeTeams } = await supabase
-        .from('teams').select('id').eq('room_id', roomId).eq('is_active', true)
-      const activeIds = new Set((activeTeams ?? []).map((t: { id: string }) => t.id))
+      // Roster straight from the database. The `teams` prop is a snapshot from
+      // the moment Game mounted, and on a host reload it can still be EMPTY at
+      // that instant (the lobby's two boot fetches race and the first result is
+      // discarded) — building the review order from it left the panel on
+      // "Loading review…" and even tried to finish the game.
+      const { data: teamRows } = await supabase.from('teams').select().eq('room_id', roomId)
+      const roster: Team[] = teamRows && teamRows.length > 0 ? teamRows : teams
+      const scoreOf = (t: Team) => scores.get(t.id) ?? t.score
+      let activeIds = new Set(roster.filter(t => t.is_active).map(t => t.id))
+      if (activeIds.size === 0 && roster.length > 0) {
+        // Impossible in a real Final (at least the top 3 advance) — rebuild with
+        // the same rule startFinalJeopardy applied rather than strand the host.
+        const ranked = [...roster].sort((a, b) => scoreOf(b) - scoreOf(a))
+        activeIds = new Set(fjAdvancing(ranked, scoreOf).map(t => t.id))
+      }
       setFjActiveTeamIds(activeIds)
 
       const { data: wagerData } = await supabase.from('wagers').select().eq('room_id', roomId)
@@ -495,11 +510,19 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
         return
       }
       // Review phase — reconstruct reveal order (lowest score first, same as timer expiry)
-      const order = teams
+      const order = roster
         .filter(t => activeIds.has(t.id))
-        .sort((a, b) => (scores.get(a.id) ?? a.score) - (scores.get(b.id) ?? b.score))
+        .sort((a, b) => scoreOf(a) - scoreOf(b))
         .map(t => t.id)
       setFjRevealOrder(order)
+      if (order.length === 0) {
+        // No roster at all (database unreachable): show the panel with Retry
+        // instead of guessing — and never call finish_game on an empty order.
+        setFjReviewIdx(0)
+        setFjPhase('review')
+        setFjTransitionError("Couldn't load the teams for review. Check the connection and tap Retry.")
+        return
+      }
       const firstPending = order.findIndex(tid => {
         const w = wagers.find(w => w.team_id === tid)
         return !w || w.status === 'pending'
@@ -523,7 +546,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
       }
       if (firstPending < 0) await finishGame()
     })()
-  }, [room.status]) // eslint-disable-line react-hooks/exhaustive-deps
+    // fjPhase is a dependency so the review panel's Retry (setFjPhase(null)) can
+    // re-run this recovery; every non-null phase returns at the guard above.
+  }, [room.status, fjPhase]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Double Tap only: auto-start judging when the selecting team's buzz arrives.
   // Regular questions use the manual Judge button so the host can read all responses first.
@@ -1085,6 +1110,8 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     setFjQuestion(loadedQuestion)
     setFjPhase('starting')
     setIntermissionSnapshots(null)
+    // The DB turn was just cleared above; mirror it so no team stays "picking"
+    setCurrentTurnTeamId(null)
     broadcastRef.current?.publish('game_state_change', { status: 'final_jeopardy', fj_category: catName, active_team_ids: [...advancingIds] })
   }
 
@@ -2035,8 +2062,16 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
             const reviewTeamId = fjRevealOrder[fjReviewIdx]
             const reviewWager  = fjWagers.find(w => w.team_id === reviewTeamId)
             if (!reviewTeamId) return (
-              <div className="flex-1 flex items-center justify-center">
+              <div className="flex-1 flex flex-col items-center justify-center gap-4">
                 <p className="text-gray-600">Loading review…</p>
+                {fjTransitionError && <p className="text-red-400 text-sm text-center max-w-sm">{fjTransitionError}</p>}
+                <button
+                  onClick={() => { setFjTransitionError(''); setFjRevealOrder([]); setFjReviewIdx(0); setFjPhase(null) }}
+                  className="px-4 py-2 rounded-xl text-sm font-bold bg-gray-800 text-yellow-400 hover:bg-gray-700 transition-colors"
+                  title="Rebuild the review from the saved Final Tap state"
+                >
+                  Retry loading review
+                </button>
               </div>
             )
             if (!reviewWager) return (

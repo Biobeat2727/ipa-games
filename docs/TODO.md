@@ -40,7 +40,16 @@
 - Projector setup screen
 - Format changes / content editor
 
-### Refresh after game over loses the results screen (found 2026-08-27, deferred)
+### Refresh after game over loses the results screen (found 2026-08-27, FIXED 2026-09-02)
+
+**Fixed.** The player's resume now accepts today's finished room when the phone's saved team
+belongs to it and no newer lobby exists, and lands on the results (`src/routes/play/index.tsx`).
+The projector falls back to today's most recent finished room
+(`findMostRecentFinishedRoomToday` in `src/lib/roomDiscovery.ts`). Both poll for the next lobby
+every 3s while showing a finished game, so New Game still moves everyone on — the general
+`findCurrentActiveRoom()` rule was left untouched. Covered by the post-game refresh checks in
+`tmp/three-round-smoke.mjs` and `tmp/chaos-test.mjs`. Original notes kept below.
+
 
 Reloading a phone AFTER the host finishes the game drops the player to
 "Waiting for host to open a lobby" instead of the final standings.

@@ -277,13 +277,15 @@ try {
     return [...scope.querySelectorAll('button')]
       .filter(b => !b.disabled && b.querySelector('span.font-mono') && !b.innerText.includes('\u{1F37A}'))
   })()`
-  async function pickQuestion() {
-    return host.evaluate(src => {
+  // Highest value by default; lowest for steal questions so the whiffing leader
+  // stays above zero (and therefore still plays Final Tap).
+  async function pickQuestion(lowest = false) {
+    return host.evaluate(({ src, lowest }) => {
       const btns = eval(src)
         .map(b => ({ v: parseInt(b.querySelector('span.font-mono').innerText), t: b.innerText.slice(0, 40) }))
-        .sort((a, b) => b.v - a.v)
+        .sort((a, b) => lowest ? a.v - b.v : b.v - a.v)
       return btns[0] ?? null
-    }, currentRoundButtonsSrc)
+    }, { src: currentRoundButtonsSrc, lowest })
   }
   async function clickQuestion(value) {
     await host.evaluate(({ v, src }) => {
@@ -315,9 +317,11 @@ try {
   }
 
   async function tapBuzz(p) {
+    // A live buzz button for THIS clue: the window must be open (a stale screen from
+    // the previous clue can still show the button with "Buzz window closed").
     await waitFor(p, () => {
       const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!')
-      return !!b
+      return !!b && !document.body.innerText.includes('Buzz window closed')
     }, null, 25000, 'buzz button')
     await p.evaluate(() => {
       const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!')
@@ -345,16 +349,20 @@ try {
   for (let i = 0; i < 15; i++) {
     if (i === 5) await advanceRound(1)
     if (i === 10) await advanceRound(2)
-    const q = await pickQuestion()
+    // Two steals per round (the last two questions of each): the round's first
+    // answerer — who holds that round's top value — buzzes first on a low-value
+    // clue and whiffs, then the rightful team takes it. Wrong-answer handoff,
+    // score deductions and the queue all get exercised at every value tier.
+    const stealQuestion = [3, 4, 8, 9, 13, 14].includes(i)
+    const q = await pickQuestion(stealQuestion)
     if (!q) { log('⚠ ran out of questions at', i); break }
     const t0 = Date.now()
     await clickQuestion(q.v)
     await clickButton(host, 'Open Buzzer')
 
-    // A steal on questions 9-11: a leader buzzes first and whiffs
     let wrongIdx = null
-    if (i >= 9 && i <= 11) {
-      const cand = [0, 1, 2][i - 9]
+    if (stealQuestion) {
+      const cand = i - (i % 5)
       if (scores[cand] - q.v > 0) wrongIdx = cand
     }
 

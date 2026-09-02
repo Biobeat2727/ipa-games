@@ -35,11 +35,19 @@ export default function HostView() {
   const [importing, setImporting]     = useState(false)
   const [importError, setImportError] = useState('')
 
-  const fetchTeams = useCallback(async (roomId: string) => {
+  const fetchTeams = useCallback(async (roomId: string, attempt = 0): Promise<void> => {
     const refreshSequence = ++lobbyRefreshSequenceRef.current
     const { data: teamData, error: teamsError } = await supabase
       .from('teams').select().eq('room_id', roomId).order('created_at', { ascending: true })
-    if (teamsError) return
+    if (teamsError) {
+      // In the lobby the 3s poll heals a miss. At boot (a host refresh mid-game)
+      // there is no poll and Game would mount with an empty scoreboard — retry.
+      if (attempt < 3) {
+        await new Promise(r => setTimeout(r, 400 * (attempt + 1)))
+        return fetchTeams(roomId, attempt + 1)
+      }
+      return
+    }
 
     const counts = new Map<string, number>()
     if (teamData?.length) {

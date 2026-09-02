@@ -139,7 +139,7 @@ async function hostClickClue(host, roundLabel, { doubleTap = false } = {}) {
   }, { label: roundLabel, dt: doubleTap })
 }
 async function tapBuzz(p) {
-  await waitFor(p, () => [...document.querySelectorAll('button')].some(x => x.innerText.trim() === 'TAP IN!'), null, 25000, 'buzz button')
+  await waitFor(p, () => [...document.querySelectorAll('button')].some(x => x.innerText.trim() === 'TAP IN!') && !document.body.innerText.includes('Buzz window closed'), null, 25000, 'buzz button')
   await p.evaluate(() => {
     const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!')
     b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 190, clientY: 600 }))
@@ -431,13 +431,12 @@ try {
     await sleep(900)
   }
   record('Game over: phones reach the results screen', await softWait(A, 'game over', 30000), await snap(A))
-  // Known gap (pre-existing, unrelated to Round 3): room discovery excludes finished
-  // rooms, so a phone/projector refreshed AFTER game over cannot find its room and
-  // falls back to the waiting screen. Recorded, not gated.
+  // Post-game refresh recovery: a phone/projector reloaded on the results must get
+  // the results back (fixed 2026-09-02; was the bd1fb5f known gap).
   await reload(B)
-  recordKnown('Game over: phone refresh keeps the results (finished-game recovery — known gap)', await softWait(B, 'game over', 20000), await snap(B))
+  record('Game over: phone refresh keeps the results (finished-game recovery)', await softWait(B, 'game over', 20000), await snap(B))
   await reload(projector)
-  recordKnown('Game over: projector refresh keeps the winner screen (known gap)', await softWait(projector, 'wins', 20000) || await softWait(projector, 'game over', 5000), await snap(projector))
+  record('Game over: projector refresh keeps the winner screen', await softWait(projector, 'winner', 20000), await snap(projector))
   {
     const { body } = await rest(`rooms?select=status,final_phase&order=created_at.desc&limit=1`)
     record('Game over: rooms.status = finished, final_phase = done', body?.[0]?.status === 'finished' && body?.[0]?.final_phase === 'done', JSON.stringify(body))

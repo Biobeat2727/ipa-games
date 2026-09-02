@@ -10,7 +10,7 @@ import { TipJarProjector, VenueFooter } from '../../components/TipJar'
 import { BeerGlass, TapHeader, tapHeaderRevealFor } from '../../components/TapCategoryColumn'
 import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { Bubbles, PintHero } from '../../components/Barware'
-import { findCurrentActiveRoom } from '../../lib/roomDiscovery'
+import { findCurrentActiveRoom, findMostRecentFinishedRoomToday } from '../../lib/roomDiscovery'
 import {
   FINAL_TAP_LABEL,
   FIRST_ROUND,
@@ -203,55 +203,72 @@ export default function ProjectorView() {
 
   // ── Auto-resolve + polling ────────────────────────────────
 
+  // One entry point for "show this room": teams + scores, the board when a
+  // regular round is in play. Used by first load, the waiting poll, and the
+  // finished-room poll below.
+  const connectToRoom = useCallback(async (found: Room) => {
+    roomRef.current = found
+    setRoom(found)
+    setIntermissionSnapshots(null)
+    setCatRevealIds(null)
+    setFjReveal(null)
+    const { data } = await supabase
+      .from('teams').select().eq('room_id', found.id).order('score', { ascending: false })
+    const list = data ?? []
+    setTeams(list)
+    setScores(new Map(list.map(t => [t.id, t.score])))
+    if (isRegularRoundStatus(found.status)) {
+      await loadCategories(found.id, found.status)
+    } else {
+      setCategories([])
+    }
+    setPhase('connected')
+  }, [loadCategories])
+
+  // Active room first; otherwise today's finished room so a projector refreshed
+  // on the winner screen shows the winner again instead of "waiting for host".
+  const discoverRoom = useCallback(async (): Promise<Room | null> => {
+    return (await findCurrentActiveRoom()) ?? (await findMostRecentFinishedRoomToday())
+  }, [])
+
   useEffect(() => {
     async function init() {
       try {
-        const found = await findCurrentActiveRoom()
-        if (found) {
-          roomRef.current = found
-          setRoom(found)
-          const { data } = await supabase
-            .from('teams').select().eq('room_id', found.id).order('score', { ascending: false })
-          const list = data ?? []
-          setTeams(list)
-          setScores(new Map(list.map(t => [t.id, t.score])))
-          if (isRegularRoundStatus(found.status)) {
-            await loadCategories(found.id, found.status)
-          }
-          setPhase('connected')
-        } else {
-          setPhase('waiting')
-        }
+        const found = await discoverRoom()
+        if (found) await connectToRoom(found)
+        else setPhase('waiting')
       } catch {
         setPhase('waiting')
       }
     }
     init()
-  }, [loadCategories])
+  }, [connectToRoom, discoverRoom])
 
   // Poll every 3s while waiting for a room to appear
   useEffect(() => {
     if (phase !== 'waiting') return
     const id = setInterval(async () => {
       try {
-        const found = await findCurrentActiveRoom()
-        if (found) {
-          roomRef.current = found
-          setRoom(found)
-          const { data } = await supabase
-            .from('teams').select().eq('room_id', found.id).order('score', { ascending: false })
-          const list = data ?? []
-          setTeams(list)
-          setScores(new Map(list.map(t => [t.id, t.score])))
-          if (isRegularRoundStatus(found.status)) {
-            await loadCategories(found.id, found.status)
-          }
-          setPhase('connected')
-        }
+        const found = await discoverRoom()
+        if (found) await connectToRoom(found)
       } catch { /* keep polling through transient connection errors */ }
     }, 3000)
     return () => clearInterval(id)
-  }, [phase, loadCategories])
+  }, [phase, connectToRoom, discoverRoom])
+
+  // While showing a finished game, watch for the next lobby: the host can create
+  // it without any broadcast reaching this room's channel.
+  useEffect(() => {
+    if (phase !== 'connected' || room?.status !== 'finished') return
+    const finishedId = room.id
+    const id = setInterval(async () => {
+      try {
+        const newer = await findCurrentActiveRoom()
+        if (newer && newer.id !== finishedId) await connectToRoom(newer)
+      } catch { /* transient */ }
+    }, 3000)
+    return () => clearInterval(id)
+  }, [phase, room?.status, room?.id, connectToRoom])
 
   // ── DB Subscriptions ─────────────────────────────────────
 

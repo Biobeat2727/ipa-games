@@ -393,7 +393,7 @@ try {
 
   await players[12].reload({ waitUntil: 'domcontentloaded' })
   await sleep(4500)
-  recordKnown('Game over: refresh on the results screen keeps the results (known gap)',
+  record('Game over: refresh on the results screen keeps the results',
     await softWait(players[12], 'game over', 20000), await snap(players[12]))
   await players[12].screenshot({ path: path.join(SHOTS, 'podium-after-refresh.png') })
 
