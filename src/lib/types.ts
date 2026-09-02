@@ -3,8 +3,8 @@
 // ============================================================
 
 // `round_3` requires the matching enum value in the database —
-// supabase/add_round_three_1_enum.sql, then add_round_three_2_game_logic.sql, must be
-// applied (as two separate SQL-editor runs) before this frontend is deployed.
+// supabase/add_round_three_1_enum.sql, _2_game_logic.sql and _3_category_round_check.sql
+// must be applied (as three separate SQL-editor runs) before this frontend is deployed.
 // Round helpers (labels, next-status, Double Tap floors) live in src/lib/rounds.ts.
 export type RoomStatus = 'lobby' | 'round_1' | 'round_2' | 'round_3' | 'final_jeopardy' | 'finished'
 export type FinalPhase = 'starting' | 'wager' | 'question' | 'review' | 'done'

@@ -149,6 +149,30 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
   )
   const canOrder = !posErr
 
+  // Probe the Final Tap storage round the same way, BEFORE the clear. The live
+  // database has a check constraint on categories.round (created in the
+  // dashboard, not in this repo) that allowed only 1–3 before Round 3 existed;
+  // a fresh install may have one too. Discovering that only when the Final Tap
+  // row is inserted — after the delete below — left a room with no content at
+  // all. Insert a throwaway row and remove it; any failure aborts untouched.
+  if (finalBlock(content)) {
+    const { data: probe, error: probeErr } = await supabase
+      .from('categories')
+      .insert({ room_id: roomId, name: '__import_probe__', round: FINAL_TAP_STORAGE_ROUND })
+      .select('id')
+      .single()
+    if (probeErr || !probe) {
+      const constraint = probeErr?.code === '23514' || /check constraint/i.test(probeErr?.message ?? '')
+      throw new Error(constraint
+        ? `The database does not yet allow the Final Tap storage round (${FINAL_TAP_STORAGE_ROUND}). ` +
+          'Run supabase/add_round_three_3_category_round_check.sql in the Supabase SQL editor, then import again. ' +
+          'Nothing was imported.'
+        : `Could not verify the database before importing: ${probeErr?.message ?? 'unknown error'}. Nothing was imported.`)
+    }
+    // Best effort — the clear below removes it anyway if this delete fails
+    await supabase.from('categories').delete().eq('id', probe.id)
+  }
+
   // Clear existing content — CASCADE will delete questions too
   const { error: clearErr } = await supabase
     .from('categories')

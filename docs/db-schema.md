@@ -48,7 +48,7 @@
 | id | uuid, pk | |
 | room_id | uuid → rooms | |
 | name | varchar | |
-| round | integer | 1, 2, 3 = regular boards. Final Tap is stored as **4** by current imports; rooms imported before Round 3 existed stored it as 3. Identify Final Tap by its null-value question (`src/lib/finalTap.ts`), never by round alone |
+| round | integer | 1, 2, 3 = regular boards. Final Tap is stored as **4** by current imports; rooms imported before Round 3 existed stored it as 3. Identify Final Tap by its null-value question (`src/lib/finalTap.ts`), never by round alone. A dashboard-created check constraint `categories_round_check` limits the value; `supabase/add_round_three_3_category_round_check.sql` widens it from 1–3 to 1–4 |
 | description | text, nullable | Host-read intro text for the round-start category reveal (host-only display). Added by `supabase/add_category_descriptions.sql` |
 | position | integer, nullable | Index within the round from the imported JSON — drives board left-to-right order and the reveal sequence. Null sorts alphabetically (pre-existing content). Added by `supabase/add_category_position.sql` |
 
@@ -89,7 +89,7 @@ Double Tap wagers are bounded by `greatest(score, public.double_tap_floor(round)
 (and, for fresh installs, `supabase/atomic_question_selection.sql`) and mirror
 `src/lib/rounds.ts`.
 
-## Round 3 migration (two files, two separate runs)
+## Round 3 migration (three files, three separate runs)
 
 Apply **before** deploying a frontend that emits `round_3`; apply and roll back only
 between games. PostgreSQL will not let a transaction use an enum value it just added
@@ -105,9 +105,13 @@ its own, in order. Both are idempotent.
    `confirm_question_selection` / `judge_buzz`, the team-insert policy extended to `round_3`
    (still not `final_jeopardy`), and `reveal_final_question` verifying the Final clue by room
    ownership + null `point_value`.
+3. `supabase/add_round_three_3_category_round_check.sql` — widens the dashboard-created
+   `categories_round_check` constraint from `round between 1 and 3` to `1 and 4` so the Final
+   Tap category can be stored as round 4. Without it the importer stops before deleting
+   anything and names this file.
 
 Verification queries are listed at the bottom of each file. Fresh installs: run the canonical
-files as before, then both Round 3 files in order (step 2 re-creates every round-aware
+files as before, then the three Round 3 files in order (step 2 re-creates every round-aware
 definition).
 The `buzz_response_deadline_guard` trigger creates the response deadline, replaces phone-supplied
 submission timestamps with database time, and rejects blank, duplicate, or late responses.

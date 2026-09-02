@@ -62,7 +62,8 @@ The final question block key is `final_tap`; the legacy key `final_jeopardy` is 
 
 **Storage:** the Final Tap block is inserted as a category with `round = 4`
 (`FINAL_TAP_STORAGE_ROUND` in `src/lib/rounds.ts`) holding one question whose
-`point_value` is null. Rooms imported before Round 3 existed stored it as `round = 3`.
+`point_value` is null (requires `supabase/add_round_three_3_category_round_check.sql`; the
+importer checks this before deleting anything). Rooms imported before Round 3 existed stored it as `round = 3`.
 All code finds Final Tap through `src/lib/finalTap.ts`, which keys on the null
 `point_value` and prefers round 4 — never on the round number alone.
 

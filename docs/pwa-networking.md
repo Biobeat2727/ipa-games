@@ -45,7 +45,7 @@ Some frontend releases depend on a database change (the Round 3 release is one:
 
 1. **Database first.** Run the migration in the Supabase SQL editor as two separate
    submissions — `supabase/add_round_three_1_enum.sql` first (alone), then
-   `supabase/add_round_three_2_game_logic.sql` — and check the verification queries. The old frontend keeps working against
+   `_2_game_logic.sql`, then `_3_category_round_check.sql` — and check the verification queries. The old frontend keeps working against
    the migrated database because it never emits the new value.
 2. **Frontend second.** Deploy the build that emits the new status.
 3. **Between games only.** Never apply or roll back mid-event: a room in `round_3` (or a

@@ -34,7 +34,7 @@ No test or lint script is configured — `npm test` and `npm run lint` do not ex
   500 / 2000 / 3000 for rounds 1 / 2 / 3, defined once in `src/lib/rounds.ts`
   and mirrored by `public.double_tap_floor()` in `supabase/add_round_three_2_game_logic.sql`.
   The Round 3 value (3000) is an assumption pending a product decision.
-- Database first, frontend second: `supabase/add_round_three_1_enum.sql` then `supabase/add_round_three_2_game_logic.sql` (two separate SQL-editor runs) must be applied
+- Database first, frontend second: `supabase/add_round_three_1_enum.sql`, `_2_game_logic.sql`, then `_3_category_round_check.sql` (three separate SQL-editor runs) must be applied
   before deploying a build that emits `round_3`; apply and roll back only between games.
 
 ## Detailed Docs (read when working on these areas)

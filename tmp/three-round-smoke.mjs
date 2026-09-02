@@ -6,8 +6,8 @@
 // src/lib/rounds.ts. Results print as PASS/FAIL lines; exit code 1 on any FAIL.
 //
 // PREREQUISITES
-//   * supabase/add_round_three_1_enum.sql AND add_round_three_2_game_logic.sql have
-//     been applied (two separate runs) to the database this frontend points at (.env). Without it the Round 2 → Round 3 transition
+//   * supabase/add_round_three_1_enum.sql, _2_game_logic.sql AND _3_category_round_check.sql
+//     have been applied (three separate runs) to the database this frontend points at (.env). Without it the Round 2 → Round 3 transition
 //     fails with "invalid input value for enum room_status".
 //   * Dev server on http://localhost:4173  (npm run dev -- --port 4173)
 //   * puppeteer-core resolvable from this folder (same setup as tmp/load-test.mjs)
