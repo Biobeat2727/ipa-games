@@ -232,6 +232,7 @@ export default function PlayView() {
   const pendingSwReloadRef     = useRef(false)
   const timerBuzzIdRef         = useRef<string | null>(null) // buzz_id from timerPayload for teammate matching
   const revealClaimRef         = useRef<string | null>(null) // question id whose reveal is owned by the Ably broadcast path
+  const activeQuestionRef      = useRef<QuestionPublic | null>(null) // lets the DB fallback see whether the claimed reveal is still on screen
   const revealTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null) // pending scheduled reveal
   const selectionClaimingRef   = useRef(false)
   const selectionNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -243,6 +244,7 @@ export default function PlayView() {
   useEffect(() => { responseSubmittedRef.current = responseSubmitted }, [responseSubmitted])
   useEffect(() => { responseTextRef.current = responseText }, [responseText])
   useEffect(() => { myBuzzIdRef.current = myBuzzId }, [myBuzzId])
+  useEffect(() => { activeQuestionRef.current = activeQuestion }, [activeQuestion])
   useEffect(() => { timerBuzzIdRef.current = timerPayload?.buzz_id ?? null }, [timerPayload])
   useEffect(() => { myTeamRef.current = myTeam }, [myTeam])
   useEffect(() => { roomRef.current = room }, [room])
@@ -646,6 +648,14 @@ export default function PlayView() {
     return () => { ch.unsubscribe() }
   }, [room?.id, phase])
 
+  // Lobby → game promotion, independent of the question/status effect below.
+  // That effect only re-runs when the room's status changes, so a phone that
+  // joined a team while the room was ALREADY in a round (late arrival) used to
+  // sit on "Waiting for the host to start" until the next round began.
+  useEffect(() => {
+    if (phase === 'lobby' && myTeam && room && room.status !== 'lobby') setPhase('game')
+  }, [phase, room?.status, myTeam?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
   // React to room changes → game state transitions
   useEffect(() => {
     if (!room || !myTeam) return
@@ -657,8 +667,11 @@ export default function PlayView() {
       const qId = room.current_question_id
       // The Ably `question_activated` handler owns the reveal for live activations
       // (it schedules the buzzer for a shared instant). This DB path is only a fallback
-      // for refreshes and missed broadcasts, so it stands down if Ably has claimed qId.
-      if (revealClaimRef.current === qId) return
+      // for refreshes and missed broadcasts, so it stands down if Ably has claimed qId —
+      // but only while that reveal is actually still on screen. If a stale room
+      // snapshot tore the question down after the claim, the fallback must run
+      // again or the phone stays parked on the board for the rest of the question.
+      if (revealClaimRef.current === qId && (activeQuestionRef.current?.id === qId || revealTimerRef.current !== null)) return
 
       let cancelled = false
       async function loadQuestion() {
@@ -712,20 +725,47 @@ export default function PlayView() {
       }
       // Give the broadcast a moment to win the race before falling back to a DB fetch.
       const graceTimer = setTimeout(() => {
-        if (revealClaimRef.current === qId) return
+        if (revealClaimRef.current === qId && (activeQuestionRef.current?.id === qId || revealTimerRef.current !== null)) return
         loadQuestion()
       }, REVEAL_FALLBACK_GRACE_MS)
       return () => { cancelled = true; clearTimeout(graceTimer) }
     } else {
       // Question cleared — reset question state; keep buzzResult so feedback stays visible
-      setActiveQuestion(null)
-      setHasBuzzed(false)
-      setMyBuzzId(null)
-      setBuzzPosition(null)
-      setTimerPayload(null)
-      setTimeRemaining(null)
-      setResponseText('')
-      setResponseSubmitted(false)
+      const clearQuestionState = () => {
+        setActiveQuestion(null)
+        setHasBuzzed(false)
+        setMyBuzzId(null)
+        setBuzzPosition(null)
+        setTimerPayload(null)
+        setTimeRemaining(null)
+        setResponseText('')
+        setResponseSubmitted(false)
+      }
+      // Ably revealed a question and has not deactivated it (question_deactivated
+      // resets revealClaimRef first), yet this room snapshot says nothing is active.
+      // Room rows arrive from several paths — postgres_changes, the 3s poll, local
+      // patches — and one can land out of order: a realtime event for the Double
+      // Tap wager write showed up AFTER the activation broadcast and (with
+      // current_question_id still null in its snapshot) blanked every phone.
+      // Confirm against the database before tearing the question down.
+      if (revealClaimRef.current && activeQuestionRef.current) {
+        const claimedId = revealClaimRef.current
+        let cancelled = false
+        const confirmTimer = setTimeout(async () => {
+          const { data } = await supabase.from('rooms').select('current_question_id').eq('id', room.id).single()
+          if (cancelled) return
+          if (data?.current_question_id === claimedId) {
+            // Stale snapshot — the question is still live. Restore the field so
+            // later snapshots compare against the truth.
+            setRoom(prev => prev ? { ...prev, current_question_id: claimedId } : prev)
+            return
+          }
+          revealClaimRef.current = null
+          clearQuestionState()
+        }, 1200)
+        return () => { cancelled = true; clearTimeout(confirmTimer) }
+      }
+      clearQuestionState()
     }
   }, [room?.current_question_id, room?.status]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -832,6 +872,7 @@ export default function PlayView() {
       // bounded by clock accuracy rather than per-device network latency. DT has no buzz
       // window (buzz_opened_at is null) so it reveals immediately.
       const reveal = () => {
+        revealTimerRef.current = null // no longer pending — the guards above key on this
         setPreviewInfo(null)
         setDoubleTapTeamId(double_tap_team_id ?? null)
         setBuzzWindowTs(buzz_opened_at ?? null)
@@ -1567,7 +1608,9 @@ export default function PlayView() {
     if (room?.id) await refreshAllScores(room.id)
 
     lobbyChannelRef.current?.publish('team_joined', {})
-    setPhase('lobby')
+    // A late arrival joins a game already in progress (any regular round) — go
+    // straight to the board. Only a lobby-status room waits for the host.
+    setPhase(room && room.status !== 'lobby' ? 'game' : 'lobby')
   }
 
   async function handleCreateTeam() {
