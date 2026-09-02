@@ -45,13 +45,26 @@ the app discovers today's current lobby.
 ## Lobby Phase
 - Teams join and choose names in real-time
 - Host sees team list + player counts; can delete teams
-- Host imports content (JSON)
-- Start Game requires ≥ 2 teams and content loaded
+- Host imports content (JSON) — rounds 1, 2, and 3 must all be present and non-empty
+  (`docs/content-format.md`); a bad file is rejected before existing content is touched
+- Start Game requires ≥ 2 teams and content with every regular round populated
+  (button reads `Content is missing Round N` otherwise). A missing Final Tap does not block.
 - Host sends `game_state_change { status: 'round_1' }` broadcast on start
 
 ---
 
-## Round Phase (Rounds 1 & 2)
+## Game shape
+
+```
+lobby → round_1 → (intermission) → round_2 → (intermission) → round_3 → (intermission) → final_jeopardy → finished
+```
+
+All round knowledge — statuses, labels, splash text, intermission copy, next-phase
+calculation, Double Tap floors — comes from `src/lib/rounds.ts` (`REGULAR_ROUNDS`,
+`statusToRound`, `nextStatusAfter`, `doubleTapMaxWager`, …). The database mirrors it in
+`supabase/add_round_three_2_game_logic.sql`.
+
+## Round Phase (Rounds 1, 2 & 3)
 - **Optional category intros first**: when the round's categories have `description`
   text, the host's right panel auto-opens a step-through intro at round start —
   each click broadcasts `category_reveal` and pops the next category name onto the
@@ -77,11 +90,38 @@ the app discovers today's current lobby.
   - **Correct:** score added, question marked `is_answered`, turn passes to winning team
   - **Wrong:** buzz marked wrong, next in queue gets fresh timer
 - All buzzes exhausted or timer expires → no points, question marked answered, turn passes
-- Round ends when all questions answered or host manually advances
+- Double Tap wagers: 5 … max(team score, round floor); floors 500 / 2000 / 3000 for
+  rounds 1 / 2 / 3, enforced identically on phones, host, and in the database
+- Round ends when all questions answered, or the host clicks
+  **End Round N early → …** on the empty right panel (two-step: it only opens the
+  same "Round N Ended Early" panel the natural finish would; nothing changes until
+  the host confirms with **Show Scores & Start …**)
+- Late arrivals can still create a team during any regular round (including Round 3)
 
 ---
 
-## Round 2 → Final Jeopardy Transition
+## Round N → Round N+1 Transition (1 → 2, 2 → 3)
+1. Round complete (or ended early) → host panel "Ready for Round N+1?" with a first-pick
+   team list → **Show Scores & Start Round N+1** broadcasts `round_intermission` (score map
+   on every screen; phones say "Round N+1 is coming …")
+2. **Begin Round N+1** (`beginNextRound` in `src/routes/host/Game.tsx`, one implementation
+   for both transitions):
+   - `UPDATE rooms SET status = <next> … WHERE id = … AND status = <current>` — the status
+     precondition plus an in-flight guard means a double-tapped button can never move the
+     room two rounds
+   - Nothing local changes and nothing is broadcast until the update succeeds; a DB error
+     is shown under the button and the intermission stays up
+   - On success: intermission cleared, `game_state_change { status: 'round_N+1' }`
+     broadcast, first-pick `turn_change`
+3. Phones and projector show the `ROUND N+1` splash, wipe question / Double Tap /
+   category-reveal / intermission state, and load that round's board
+4. `is_active` is untouched — nobody is eliminated between regular rounds
+
+---
+
+## Round 3 → Final Jeopardy Transition
+- Only after the **last** regular round (`isLastRegularRound` in `src/lib/rounds.ts`).
+  The host panel reads "Ready for Final Tap?" and lists Advancing / Eliminated
 - Host broadcasts `game_state_change { status: 'final_jeopardy', active_team_ids: [...] }`
 - Every team with a score above 0: `is_active = true`; teams at 0 or below: `is_active = false`
   (fallback: if no team is positive, the top 3 advance so the game still gets a finale)
@@ -117,7 +157,10 @@ the app discovers today's current lobby.
    - Ranks teams by score; every team above 0 remains `is_active = true`, the rest set
      `is_active = false` (see `fjAdvancing()` in `src/routes/host/Game.tsx` — falls back to
      the top 3 only when nobody is positive)
-   - Loads FJ category (round 3) + question from DB
+   - Loads the Final Tap category + clue via `findFinalTapCategory(roomId, 'host')`
+     (`src/lib/finalTap.ts`): the category owning the room's null-`point_value` question,
+     preferring storage round 4 (current imports) over round 3 (historical rooms). It is
+     never "the round 3 category" — round 3 is now a playable board
    - Sets `rooms.status = 'final_jeopardy'`
    - Broadcasts `game_state_change { status: 'final_jeopardy', fj_category, active_team_ids }`
    - Host enters `starting` phase
@@ -149,7 +192,11 @@ the app discovers today's current lobby.
 
 ### Refresh recovery
 - Host, player, and projector rebuild Final Tap from the four persisted room fields.
-- The question is never queried by public clients before `final_phase = 'question'`.
+- Public clients recover the Final Tap category *name* with
+  `findFinalTapCategory(roomId, 'public')`, which reads only ids/point values through
+  `questions_public`; the clue text is never queried before `final_phase = 'question'`.
+- `reveal_final_question` accepts only a question that belongs to the room and has a null
+  `point_value`, so a Round 3 clue can never be revealed as the Final.
 - Every timer compares the immutable database deadline with `serverNow()`; refreshes cannot
   restart or extend the response window.
 - `submit_final_response` compares arrival time with the database deadline, so a slow or altered

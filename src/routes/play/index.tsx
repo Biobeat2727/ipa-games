@@ -21,6 +21,18 @@ import { Bubbles, PintHero, CheersPints, SoloPint } from '../../components/Barwa
 import { QUIPS } from '../../lib/quips'
 import { findCurrentActiveRoom, getLocalDayStartIso } from '../../lib/roomDiscovery'
 import {
+  FINAL_TAP_LABEL,
+  FIRST_ROUND,
+  DOUBLE_TAP_MIN_WAGER,
+  clampDoubleTapWager,
+  doubleTapMaxWager,
+  isRegularRoundStatus,
+  roundDefinition,
+  statusToRound,
+  type RegularRound,
+} from '../../lib/rounds'
+import { findFinalTapCategory } from '../../lib/finalTap'
+import {
   playBuzz,
   playCorrect,
   playWrong,
@@ -139,8 +151,8 @@ export default function PlayView() {
   // Buzz insert failed (flaky wifi) — surface it loudly so the player retries
   // instead of silently believing they're in the queue.
   const [buzzFailed, setBuzzFailed]           = useState(false)
-  // Brief full-screen splash on the phone when Round 2 opens
-  const [playerRoundSplash, setPlayerRoundSplash] = useState(false)
+  // Brief full-screen splash on the phone when Round 2 / Round 3 opens
+  const [playerRoundSplash, setPlayerRoundSplash] = useState<RegularRound | null>(null)
   const [myScore, setMyScore]                 = useState(0)
   const [allTeamScores, setAllTeamScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
@@ -897,7 +909,7 @@ export default function PlayView() {
       setDoubleTapTeamId(null)
       // Reload board so answered questions are greyed out immediately
       const r = roomRef.current
-      if (r) loadBoard(r.id, r.status === 'round_2' ? 2 : 1)
+      if (r) loadBoard(r.id, statusToRound(r.status) ?? FIRST_ROUND)
     })
     ch.subscribe('question_selection_cleared', () => {
       if (selectionNoticeTimerRef.current) clearTimeout(selectionNoticeTimerRef.current)
@@ -991,14 +1003,17 @@ export default function PlayView() {
       const r = roomRef.current
       if (!r) return
       setRoom({ ...r, status: status as Room['status'] })
-      if (status === 'round_1' || status === 'round_2') {
-        // Round 2 opener — quick splash on every phone so the room flips together
-        if (status === 'round_2') {
-          setPlayerRoundSplash(true)
+      if (isRegularRoundStatus(status)) {
+        const round = statusToRound(status) ?? FIRST_ROUND
+        // Round 2 / Round 3 opener — quick splash on every phone so the room
+        // flips together (Round 1 starts from the lobby, no splash needed)
+        if (round > FIRST_ROUND) {
+          setPlayerRoundSplash(round)
           navigator.vibrate?.([80, 40, 80])
-          setTimeout(() => setPlayerRoundSplash(false), 2600)
+          setTimeout(() => setPlayerRoundSplash(null), 2600)
         }
-        // New round — wipe all mid-game state
+        // New round — wipe all mid-game state (question, Double Tap, category
+        // reveal, intermission) so nothing from the last board lingers
         setIntermissionSnapshots(null)
         sessionStorage.removeItem('intermission')
         setCatRevealIds(null) // host re-inits the reveal for the new round if it has one
@@ -1017,16 +1032,22 @@ export default function PlayView() {
         setDtTeammateWaiting(false)
         setPreBuzzTaps(0)
         setBuzzLockedOut(false)
+        setDoubleTapStep(null)
+        setDoubleTapPendingQ(null)
+        setDoubleTapWagerInput('')
+        setResponseText('')
+        setResponseSubmitted(false)
         revealClaimRef.current = null
         if (revealTimerRef.current) { clearTimeout(revealTimerRef.current); revealTimerRef.current = null }
         sessionStorage.removeItem('dtWager')
-        loadBoard(r.id, status === 'round_2' ? 2 : 1)
+        sessionStorage.removeItem('buzzWindow')
+        loadBoard(r.id, round)
         return
       }
       if (status === 'final_jeopardy') {
         setIntermissionSnapshots(null)
         sessionStorage.removeItem('intermission')
-        setFjCategoryName(fj_category ?? 'Final Tap')
+        setFjCategoryName(fj_category ?? FINAL_TAP_LABEL)
         setFjWagerInput(''); setFjWagerId(null); setFjLockedWagerAmount(null); setFjQuestion(null)
         setFjResponse(''); setFjResponseSubmitted(false); setFjResponseSubmitting(false); setFjResponseError('')
         setFjResponseDeadline(null); setFjTimeRemaining(null); setFjFinalScores([])
@@ -1130,7 +1151,9 @@ export default function PlayView() {
   // Load board + team names when entering game phase
   useEffect(() => {
     if (phase !== 'game' || !room?.id) return
-    const round = room.status === 'round_2' ? 2 : 1
+    // Rounds 1–3 each load their own board; Final Tap / finished keep the last
+    // board in memory (it is never shown in those phases)
+    const round = statusToRound(room.status) ?? FIRST_ROUND
     loadBoard(room.id, round)
     supabase.from('teams').select('id, name, score').eq('room_id', room.id).then(({ data }) => {
       if (data) {
@@ -1149,16 +1172,18 @@ export default function PlayView() {
     let cancelled = false
 
     ;(async () => {
-      const [{ data: team }, { data: category }, { data: wager }] = await Promise.all([
+      // Category NAME only — the clue is fetched by id further down, and only once
+      // the persisted final_phase says the host has revealed it.
+      const [{ data: team }, category, { data: wager }] = await Promise.all([
         supabase.from('teams').select().eq('id', myId).single(),
-        supabase.from('categories').select('id, name').eq('room_id', room.id).eq('round', 3).single(),
+        findFinalTapCategory(room.id, 'public'),
         supabase.from('wagers').select().eq('room_id', room.id).eq('team_id', myId).maybeSingle(),
       ])
       if (cancelled || !team) return
 
       setMyTeam(team)
       setMyScore(team.score)
-      setFjCategoryName(category?.name ?? 'Final Tap')
+      setFjCategoryName(category?.name ?? FINAL_TAP_LABEL)
       if (wager) {
         setFjWagerId(wager.id)
         setFjLockedWagerAmount(wager.amount)
@@ -1803,10 +1828,8 @@ export default function PlayView() {
 
   async function handleConfirmDoubleTapWager() {
     if (!doubleTapPendingQ || !room || !myTeam) return
-    const roundFloor = room?.status === 'round_2' ? 2000 : 500
-    const max    = Math.max(myScore, roundFloor)
-    const parsed = parseInt(doubleTapWagerInput)
-    const wager  = Math.max(5, Math.min(max, isNaN(parsed) ? 5 : parsed))
+    // Same floor table as the host screen and confirm_question_selection in the DB
+    const wager = clampDoubleTapWager(parseInt(doubleTapWagerInput), myScore, room.status)
     const { questionId, rect } = doubleTapPendingQ
     const { data: confirmed } = await supabase.rpc('confirm_question_selection', {
       p_room_id: room.id,
@@ -2485,21 +2508,20 @@ export default function PlayView() {
     const myEntry   = myIdx >= 0 ? standings[myIdx] : null
     const gap       = myEntry && leader ? leader.score - myEntry.score : 0
     const medals    = ['🥇', '🥈', '🥉']
-    const mapPhase: 'r1' | 'r2' | 'final' =
-      fjSubPhase === 'done' || room?.status === 'finished' ? 'final'
-        : room?.status === 'round_2' ? 'r2' : 'r1'
+    // End-of-game recap vs. the intermission after a regular round. The round's
+    // own copy (title, "what's next" line) comes from the central round model.
+    const isFinalMap = fjSubPhase === 'done' || room?.status === 'finished'
+    const mapRound   = isFinalMap ? null : roundDefinition(statusToRound(room?.status) ?? FIRST_ROUND)
     return (
       <div className="min-h-screen bar-bg text-white flex flex-col p-5 overflow-y-auto">
         <div className="text-center mb-3 shrink-0">
           <p className="text-xs text-gray-500 uppercase tracking-widest mb-1"
             style={{ animation: 'slide-up-in 0.4s ease-out both' }}>
-            {mapPhase === 'final' ? 'The whole game, every swing'
-              : mapPhase === 'r2' ? 'Round 2 in the books'
-              : 'Round 1 in the books'}
+            {mapRound ? mapRound.intermission.eyebrow : 'The whole game, every swing'}
           </p>
           <p className="text-3xl font-black text-yellow-400"
             style={{ animation: 'pop-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) 0.1s both' }}>
-            {mapPhase === 'final' ? '🍻 The Final Pour' : mapPhase === 'r2' ? '🍻 Last Call' : '🍻 Halftime'}
+            {mapRound ? mapRound.intermission.title : '🍻 The Final Pour'}
           </p>
         </div>
 
@@ -2562,9 +2584,7 @@ export default function PlayView() {
 
         <p className="text-center text-gray-500 text-sm mt-4 pb-4 shrink-0"
           style={{ animation: `slide-up-in 0.4s ease-out ${0.6 + standings.length * 0.08}s both` }}>
-          {mapPhase === 'final' ? "That's the whole story. Cheers! 🍻"
-            : mapPhase === 'r2' ? 'Final Tap is next — one question, wager what you dare 🍺'
-            : 'Round 2 is coming — bigger points on the board. Refill while you can 🍺'}
+          {mapRound ? mapRound.intermission.playerNext : "That's the whole story. Cheers! 🍻"}
         </p>
       </div>
     )
@@ -2651,11 +2671,11 @@ export default function PlayView() {
   }
 
   if (doubleTapStep === 'wager' && doubleTapPendingQ) {
-    const roundFloor = room?.status === 'round_2' ? 2000 : 500
-    const maxWager = Math.max(myScore, roundFloor)
+    // max(score, round floor) — identical rule on host, phone, and in the database
+    const maxWager = doubleTapMaxWager(myScore, room?.status)
     const parsed   = parseInt(doubleTapWagerInput)
-    const wagerVal = isNaN(parsed) ? 5 : Math.max(5, Math.min(maxWager, parsed))
-    const valid    = doubleTapWagerInput !== '' && !isNaN(parsed) && parsed >= 5 && parsed <= maxWager
+    const wagerVal = clampDoubleTapWager(parsed, myScore, room?.status)
+    const valid    = doubleTapWagerInput !== '' && !isNaN(parsed) && parsed >= DOUBLE_TAP_MIN_WAGER && parsed <= maxWager
     return (
       <div className="min-h-screen dt-bg text-white flex flex-col items-center justify-center p-6 text-center">
         {scoreOverlayEl}
@@ -2663,7 +2683,7 @@ export default function PlayView() {
         <p className="text-5xl mb-4">🍺</p>
         <p className="text-3xl font-black text-amber-400 mb-1">DOUBLE TAP!</p>
         {dtPendingLabel && <p className="text-white font-black text-2xl mb-1">{dtPendingLabel}</p>}
-        <p className="text-gray-400 text-sm mb-8">Min: $5 — Max: ${maxWager.toLocaleString()}</p>
+        <p className="text-gray-400 text-sm mb-8">Min: ${DOUBLE_TAP_MIN_WAGER} — Max: ${maxWager.toLocaleString()}</p>
         <div className="w-full max-w-xs space-y-4">
           <input
             type="number"
@@ -2723,16 +2743,16 @@ export default function PlayView() {
           </div>
         )}
 
-        {/* Round 2 opener splash — fires in sync with the projector */}
-        {playerRoundSplash && (
+        {/* Round 2 / Round 3 opener splash — fires in sync with the projector */}
+        {playerRoundSplash !== null && (
           <div className="fixed inset-0 z-[90] bg-gray-950/95 flex flex-col items-center justify-center pointer-events-none text-center p-6">
             <p className="text-6xl font-black text-yellow-400 mb-3"
               style={{ animation: 'round-splash-in 0.5s cubic-bezier(0.34, 1.56, 0.64, 1) both' }}>
-              ROUND 2
+              {roundDefinition(playerRoundSplash).splash}
             </p>
             <p className="text-gray-300 font-semibold"
               style={{ animation: 'slide-up-in 0.4s ease-out 0.3s both' }}>
-              Bigger points on the board 🍺
+              {roundDefinition(playerRoundSplash).splashTagline}
             </p>
           </div>
         )}

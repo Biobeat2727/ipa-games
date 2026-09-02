@@ -1,0 +1,66 @@
+{
+  "rounds": [
+    {
+      "round": 1,
+      "categories": [
+        {
+          "name": "Smoke R1 A",
+          "questions": [
+            { "point_value": 100, "answer": "SMOKE R1 A100 — this clue belongs to Round 1.", "correct_question": "What is R1 A100?" },
+            { "point_value": 200, "answer": "SMOKE R1 A200 — this clue belongs to Round 1.", "correct_question": "What is R1 A200?" }
+          ]
+        },
+        {
+          "name": "Smoke R1 B",
+          "questions": [
+            { "point_value": 100, "answer": "SMOKE R1 B100 — this clue belongs to Round 1.", "correct_question": "What is R1 B100?" },
+            { "point_value": 200, "answer": "SMOKE R1 B200 — this clue belongs to Round 1.", "correct_question": "What is R1 B200?" }
+          ]
+        }
+      ]
+    },
+    {
+      "round": 2,
+      "categories": [
+        {
+          "name": "Smoke R2 A",
+          "questions": [
+            { "point_value": 200, "answer": "SMOKE R2 A200 — this clue belongs to Round 2.", "correct_question": "What is R2 A200?" },
+            { "point_value": 400, "answer": "SMOKE R2 A400 — this clue belongs to Round 2.", "correct_question": "What is R2 A400?" }
+          ]
+        },
+        {
+          "name": "Smoke R2 B",
+          "questions": [
+            { "point_value": 200, "answer": "SMOKE R2 B200 — this clue belongs to Round 2.", "correct_question": "What is R2 B200?" },
+            { "point_value": 400, "answer": "SMOKE R2 B400 — this clue belongs to Round 2.", "correct_question": "What is R2 B400?" }
+          ]
+        }
+      ]
+    },
+    {
+      "round": 3,
+      "categories": [
+        {
+          "name": "Smoke R3 A",
+          "questions": [
+            { "point_value": 300, "answer": "SMOKE R3 A300 — this clue belongs to Round 3.", "correct_question": "What is R3 A300?" },
+            { "point_value": 600, "answer": "SMOKE R3 A600 — this clue belongs to Round 3.", "correct_question": "What is R3 A600?" }
+          ]
+        },
+        {
+          "name": "Smoke R3 B",
+          "questions": [
+            { "point_value": 300, "answer": "SMOKE R3 B300 — this clue belongs to Round 3.", "correct_question": "What is R3 B300?" },
+            { "point_value": 600, "answer": "SMOKE R3 B600 — this clue belongs to Round 3.", "correct_question": "What is R3 B600?" }
+          ]
+        }
+      ]
+    }
+  ],
+  "final_tap": {
+    "category": "Smoke Final",
+    "answer": "SMOKE FINAL TAP CLUE — this is the null-value Final clue, not a Round 3 clue.",
+    "correct_question": "What is the Final Tap?"
+  }
+}

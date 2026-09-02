@@ -31,7 +31,9 @@ Additional scoped channels:
 | `team_joined` | Player | `{}` | Host + other players on select_team refresh team list |
 | `player_left` | Player | `{ team_id }` | Host immediately refreshes lobby player counts |
 | `lobby_closed` | Host | `{}` | All clients kicked: players → `no_lobby`, projector → `waiting` |
-| `game_state_change` | Host | `{ status, fj_category?, active_team_ids? }` | All clients transition to new game state |
+| `game_state_change` | Host | `{ status, fj_category?, active_team_ids? }` | All clients transition to new game state. `status` is `round_1` / `round_2` / `round_3` (checked with `isRegularRoundStatus` from `src/lib/rounds.ts` — clients load that round's board, wipe question / Double Tap / category-reveal / intermission state, and show the `ROUND N` splash for rounds after the first) or `final_jeopardy` |
+| `round_intermission` | Host | `{ snapshots: ScoreSnapshot[] }` | Score-history map between rounds (after Round 1, 2 and 3) and as the end-of-game recap; clients persist it in `sessionStorage` keyed by room + status so a refresh restores it |
+| `intermission_closed` | Host | `{}` | Dismisses the score map |
 | `category_reveal` | Host | `{ round, revealed_ids: string[], done?: boolean }` | Round-start category intros: players + projector hide headers not in `revealed_ids`, pop-animate the last id, and gate tile taps until `done`. Idempotent (full set every event); host re-broadcasts every 5s while the intro panel is open; clients also self-clear on `question_preview`/`question_activated`, round changes, and `lobby_closed` |
 
 ### Question Flow
@@ -81,6 +83,14 @@ enforced by `submit_final_response`, which also makes the first teammate respons
 **postgres_changes requires the table to be added to the Supabase realtime publication** (Dashboard → Database → Replication). Currently required for: `rooms`, `teams`, `players`, `questions`, `buzzes`, `wagers`.
 
 **Broadcasts are the primary real-time path** for game events. postgres_changes is a secondary/fallback for data integrity.
+
+**Round transitions are DB-first.** The host writes `rooms.status` (with a
+`WHERE status = <current>` precondition) and only then broadcasts `game_state_change`.
+Clients that miss the broadcast still converge through the `rooms` postgres_changes
+subscription / 3-second poll, because every client derives the board from
+`statusToRound(room.status)` — `round_3` is handled the same way as `round_1`/`round_2`
+in the player's room subscription, the projector's `resyncAll`, initial discovery, and
+reconnect recovery.
 
 **Lobby count reliability:** The host refreshes counts after every `players` database change and
 after `team_joined` / `player_left` broadcasts. A three-second poll heals missed events. Refreshes

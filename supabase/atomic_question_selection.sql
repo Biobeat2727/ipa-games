@@ -1,7 +1,48 @@
 -- Atomic first-tap-wins question selection.
 -- Run after add_columns.sql and host_auth_security.sql.
+-- Requires the 'round_3' value in public.room_status (supabase/add_round_three_1_enum.sql,
+-- run on its own first) — the function bodies below reference it and would fail at call time
+-- on a database without it.
 
 begin;
+
+-- ── Shared round configuration (also defined in add_round_three_2_game_logic.sql) ───────
+-- "Which board does this status play" and "what is the Double Tap floor for
+-- this round" live here so every function agrees. Mirrors src/lib/rounds.ts.
+
+create or replace function public.regular_round_number(p_status public.room_status)
+returns integer
+language plpgsql
+immutable
+set search_path = ''
+as $$
+begin
+  return case p_status
+    when 'round_1' then 1
+    when 'round_2' then 2
+    when 'round_3' then 3
+    else null
+  end;
+end;
+$$;
+
+create or replace function public.double_tap_floor(p_round integer)
+returns integer
+language sql
+immutable
+set search_path = ''
+as $$
+  select case p_round
+    when 3 then 3000
+    when 2 then 2000
+    else 500
+  end;
+$$;
+
+revoke all on function public.regular_round_number(public.room_status) from public;
+revoke all on function public.double_tap_floor(integer) from public;
+grant execute on function public.regular_round_number(public.room_status) to anon, authenticated;
+grant execute on function public.double_tap_floor(integer) to anon, authenticated;
 
 alter table public.rooms
   add column if not exists pending_question_id uuid references public.questions(id) on delete set null,
@@ -38,7 +79,7 @@ begin
       pending_selection_claimed_at = clock_timestamp(),
       pending_selection_wager = null
   where r.id = p_room_id
-    and r.status in ('round_1', 'round_2')
+    and r.status in ('round_1', 'round_2', 'round_3')
     and r.current_question_id is null
     and r.pending_question_id is null
     and r.current_turn_team_id = p_team_id
@@ -54,7 +95,11 @@ begin
       join public.categories as c on c.id = q.category_id
       where q.id = p_question_id
         and c.room_id = p_room_id
-        and c.round = case r.status when 'round_1' then 1 else 2 end
+        -- The board for this status only. point_value is never null on a
+        -- regular clue, so the Final Tap clue can never be claimed here even
+        -- in a historical room that stored it as round 3.
+        and c.round = public.regular_round_number(r.status)
+        and q.point_value is not null
         and q.is_answered = false
     )
   returning r.* into v_claimed;
@@ -129,7 +174,7 @@ begin
         and q.is_double_tap = true
         and p_wager between 5 and greatest(
           t.score,
-          case r.status when 'round_2' then 2000 else 500 end
+          public.double_tap_floor(public.regular_round_number(r.status))
         )
     );
 

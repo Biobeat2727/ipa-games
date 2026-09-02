@@ -12,7 +12,13 @@
 | `game` | All in-game states below |
 
 ### In-game player states
-1. **Board** — category grid (view only unless your turn); tap/glass visual theme (see below)
+0. **Round splash** — full-screen `ROUND 2` / `ROUND 3` + tagline for ~2.6s when a
+   later round opens (text from `roundDefinition(n).splash` in `src/lib/rounds.ts`)
+0b. **Round intermission** — score-history map after each of Rounds 1, 2, 3 (eyebrow
+   "Round N in the books", title, personal rank, standings, footer announcing Round 2 /
+   Round 3 / Final Tap respectively) and the end-of-game recap; survives refresh via
+   `sessionStorage`
+1. **Board** — category grid (view only unless your turn); tap/glass visual theme (see below); the board shown is the one for `statusToRound(room.status)` — rounds 1, 2 and 3 each have their own
 2. **Your pick** — category grid is interactive; select a question
 3. **Question preview** — category name + point value + 10s countdown
 4. **Question active** — clue visible + red **Buzz** button (full-width)
@@ -26,7 +32,7 @@
 12. **Final Tap: wager locked** — "Wager locked, waiting for others…"
 13. **Final Tap: question** — clue + 90s timer + response input
 14. **Final Tap: reviewing** — "Response submitted, awaiting results…"
-15. **Eliminated** — "Thanks for playing!" + leaderboard (teams finishing Round 2 at 0 or below); set to `done` sub-phase
+15. **Eliminated** — "Thanks for playing!" + leaderboard (teams finishing Round 3 at 0 or below); set to `done` sub-phase
 16. **Game over** — final leaderboard + winner (`fjSubPhase === 'done'`)
 
 ---
@@ -50,8 +56,16 @@
 - **New Game** button: broadcasts `lobby_closed`, marks room finished, returns to `no_room`
 
 ### Game screen (persistent layout)
-- Left panel: scoreboard, question grid (by category; each category shows its
-  `description` in small grey text under the name when content has one)
+- Left panel: scoreboard, question grid grouped **Round 1 / Round 2 / Round 3** (the
+  round in play is highlighted "— now playing"; the Final Tap category never appears
+  here); each category shows its `description` in small grey text under the name when
+  content has one
+- Right panel when idle: "No active question" plus an **End Round N early → <next>**
+  link (manual advance). Round complete (naturally or early) → "Ready for Round N+1?"
+  with first-pick list and **Show Scores & Start Round N+1**, or after Round 3
+  "Ready for Final Tap?" with Advancing / Eliminated and **Show Scores & Start Final Tap**
+- Intermission (score map) panel: heading "Round N Complete"; **Begin Round N+1 →**
+  (disabled while saving, DB error shown inline) or **Start Final Tap →** after Round 3
 - Right panel: active question area, buzz queue, judging controls
 - **Category intro panel** (right panel, auto-opens at round start when the
   round's categories have descriptions): step-through list of categories with
@@ -82,7 +96,9 @@
 ### Connected screens (driven by `room.status`)
 1. **Lobby** — QR code linking to `window.location.origin`, join URL text, live team list as teams join
 2. **Question preview** — category — $value header plus the clue text, so the room reads along while the host reads it aloud, then "Listening…". Same header/type sizing as the active-question screen so opening the buzzer does not reflow the clue
-3. **Category grid** — full Jeopardy board, tap/glass visual theme (see below), score bar, whose turn. During round-start category intros, unrevealed headers render as dim "?" tap handles and each reveal pops in (`category_reveal` broadcast)
+3. **Category grid** — full Jeopardy board for the current round (label "Round 1" / "Round 2" / "Round 3" in the score bar), tap/glass visual theme (see below), score bar, whose turn. During round-start category intros, unrevealed headers render as dim "?" tap handles and each reveal pops in (`category_reveal` broadcast)
+3b. **Round splash** — `ROUND 2` / `ROUND 3` full-screen for 2.5s with the transition sound
+3c. **Round intermission** — score-history map with "Round N in the books" and the next phase ("Round 2 up next…", "Round 3 up next…", "Final Tap up next…")
 4. **Active question** — clue text (large), buzz queue or responding team name + countdown timer
 5. **Correct feedback** — full-screen green flash with team name
 6. **Final Jeopardy: wager** — category name, team wager status (wagering / ready)
@@ -112,5 +128,5 @@ The Jeopardy-style category grid (player board + projector board) is themed as a
 - Correct / Wrong judgment buttons per buzz
 - Manual score adjust (edit field per team)
 - Give turn to specific team
-- Skip to next round / advance to Final Jeopardy
+- Advance rounds: Round 1 → 2 → 3 (**Begin Round N**), Round 3 → Final Tap (**Start Final Tap**); "End Round N early" for a manual advance with clues left
 - New Game (resets everything, kicks all clients)

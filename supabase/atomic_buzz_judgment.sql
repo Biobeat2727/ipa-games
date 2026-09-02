@@ -1,5 +1,6 @@
 -- Atomic, idempotent host judgment for regular and Double Tap buzzes.
--- Run after host_auth_security.sql and deduplicate_team_actions.sql.
+-- Run after host_auth_security.sql, deduplicate_team_actions.sql, and
+-- atomic_question_selection.sql (shared regular_round_number / double_tap_floor).
 
 begin;
 
@@ -107,7 +108,7 @@ begin
     select 1 from public.rooms as r
     where r.id = p_room_id
       and r.current_question_id = v_buzz.question_id
-      and r.status in ('round_1', 'round_2')
+      and r.status in ('round_1', 'round_2', 'round_3')
   ) then
     raise exception using
       errcode = '55000',
@@ -121,10 +122,7 @@ begin
   end if;
 
   if coalesce(v_question.is_double_tap, false) then
-    v_max_wager := greatest(
-      v_team.score,
-      case when v_round = 2 then 2000 else 500 end
-    );
+    v_max_wager := greatest(v_team.score, public.double_tap_floor(v_round));
     if p_points not between 5 and v_max_wager then
       raise exception using
         errcode = '22023',

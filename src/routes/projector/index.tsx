@@ -11,6 +11,15 @@ import { BeerGlass, TapHeader, tapHeaderRevealFor } from '../../components/TapCa
 import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { Bubbles, PintHero } from '../../components/Barware'
 import { findCurrentActiveRoom } from '../../lib/roomDiscovery'
+import {
+  FINAL_TAP_LABEL,
+  FIRST_ROUND,
+  isRegularRoundStatus,
+  roundDefinition,
+  roundLabel,
+  statusToRound,
+} from '../../lib/rounds'
+import { findFinalTapCategory } from '../../lib/finalTap'
 
 interface TimerPayload {
   start_timestamp: number
@@ -105,7 +114,7 @@ export default function ProjectorView() {
     }
     if (!cats) return
 
-    const targetRound = status === 'round_2' ? 2 : 1
+    const targetRound = statusToRound(status) ?? FIRST_ROUND
     const roundCats   = cats.filter(c => c.round === targetRound).sort(compareCategoryOrder)
     if (roundCats.length === 0) { setCategories([]); return }
 
@@ -141,14 +150,16 @@ export default function ProjectorView() {
     const list = data ?? []
     setTeams(list)
     setScores(new Map(list.map(t => [t.id, t.score])))
-    if (['round_1', 'round_2'].includes(freshRoom.status)) {
+    if (isRegularRoundStatus(freshRoom.status)) {
       await loadCategories(roomId, freshRoom.status)
     } else if (freshRoom.status === 'final_jeopardy') {
-      const [{ data: category }, { data: wagers }] = await Promise.all([
-        supabase.from('categories').select('name').eq('room_id', roomId).eq('round', 3).single(),
+      // Category name only (public lookup) — the clue is read by id below, and
+      // only once final_phase === 'question'
+      const [category, { data: wagers }] = await Promise.all([
+        findFinalTapCategory(roomId, 'public'),
         supabase.from('wagers').select().eq('room_id', roomId),
       ])
-      setFjCategoryName(category?.name ?? 'Final Tap')
+      setFjCategoryName(category?.name ?? FINAL_TAP_LABEL)
       setFjWagerStatus(new Set((wagers ?? []).map(w => w.team_id)))
 
       if (freshRoom.final_phase === 'question'
@@ -204,7 +215,7 @@ export default function ProjectorView() {
           const list = data ?? []
           setTeams(list)
           setScores(new Map(list.map(t => [t.id, t.score])))
-          if (['round_1', 'round_2'].includes(found.status)) {
+          if (isRegularRoundStatus(found.status)) {
             await loadCategories(found.id, found.status)
           }
           setPhase('connected')
@@ -232,7 +243,7 @@ export default function ProjectorView() {
           const list = data ?? []
           setTeams(list)
           setScores(new Map(list.map(t => [t.id, t.score])))
-          if (['round_1', 'round_2'].includes(found.status)) {
+          if (isRegularRoundStatus(found.status)) {
             await loadCategories(found.id, found.status)
           }
           setPhase('connected')
@@ -255,7 +266,7 @@ export default function ProjectorView() {
           const updated = payload.new as Room
           roomRef.current = updated
           setRoom(updated)
-          if (['round_1', 'round_2'].includes(updated.status)) {
+          if (isRegularRoundStatus(updated.status)) {
             await loadCategories(roomId, updated.status)
           } else if (updated.status === 'final_jeopardy') {
             await resyncAll()
@@ -395,17 +406,24 @@ export default function ProjectorView() {
     ch.subscribe('game_state_change', ({ data }) => {
       const { status, fj_category } = data as { status?: string; fj_category?: string }
       if (fj_category) setFjCategoryName(fj_category)
-      if (status === 'round_1' || status === 'round_2') {
+      if (isRegularRoundStatus(status)) {
+        const round = statusToRound(status) ?? FIRST_ROUND
         // Any round start wipes reveal state — a stale set from a previous game
-        // (New Game mid-reveal) would blank every header on the new board
+        // (New Game mid-reveal) would blank every header on the new board.
+        // Also drop any lingering preview / Double Tap splash from the last board.
         setCatRevealIds(null)
-      }
-      if (status === 'round_2') {
-        setIntermissionSnapshots(null)
-        sessionStorage.removeItem('intermission')
-        setRoundSplash('ROUND 2')
-        playRoundTransition()
-        setTimeout(() => setRoundSplash(null), 2500)
+        if (doubleTapPreviewTimerRef.current) clearTimeout(doubleTapPreviewTimerRef.current)
+        setPreviewInfo(null)
+        setDoubleTapSplash(false)
+        setTimerPayload(null)
+        if (round > FIRST_ROUND) {
+          // Round 2 / Round 3 opener — same splash text as the phones
+          setIntermissionSnapshots(null)
+          sessionStorage.removeItem('intermission')
+          setRoundSplash(roundDefinition(round).splash)
+          playRoundTransition()
+          setTimeout(() => setRoundSplash(null), 2500)
+        }
       }
       if (status === 'final_jeopardy') {
         setIntermissionSnapshots(null)
@@ -1011,26 +1029,25 @@ export default function ProjectorView() {
   if (intermissionSnapshots) {
     const teamIds  = sortedTeams.map(t => t.id)
     const teamNameMap = new Map(teams.map(t => [t.id, t.name]))
-    const mapPhase: 'r1' | 'r2' | 'final' =
-      room.status === 'finished' ? 'final' : room.status === 'round_2' ? 'r2' : 'r1'
+    // End-of-game recap vs. a regular-round intermission; copy comes from the
+    // central round model so it always matches the phones
+    const mapRound = room.status === 'finished'
+      ? null
+      : roundDefinition(statusToRound(room.status) ?? FIRST_ROUND)
     return (
       <div className="h-screen bar-bg text-white flex flex-col p-8 gap-6">
         <div className="text-center shrink-0">
           <p className="text-gray-500 uppercase tracking-[0.4em] mb-2"
             style={{ fontSize: 'clamp(1rem, 2vw, 1.5rem)', animation: 'slide-up-in 0.4s ease-out both' }}>
-            {mapPhase === 'final' ? 'The whole game, every swing'
-              : mapPhase === 'r2' ? 'Round 2 in the books'
-              : 'Round 1 in the books'}
+            {mapRound ? mapRound.intermission.eyebrow : 'The whole game, every swing'}
           </p>
           <p className="font-black text-yellow-400"
             style={{ fontSize: 'clamp(3rem, 8vw, 6rem)', animation: 'pop-in 0.6s cubic-bezier(0.34, 1.56, 0.64, 1) 0.15s both' }}>
-            {mapPhase === 'final' ? '🍻 The Final Pour' : mapPhase === 'r2' ? '🍻 Last Call' : '🍻 Halftime'}
+            {mapRound ? mapRound.intermission.title : '🍻 The Final Pour'}
           </p>
           <p className="text-gray-400 font-semibold"
             style={{ fontSize: 'clamp(0.9rem, 1.8vw, 1.4rem)', animation: 'slide-up-in 0.4s ease-out 0.4s both' }}>
-            {mapPhase === 'final' ? 'Cheers to every team 🍻'
-              : mapPhase === 'r2' ? 'Final Tap up next — one wager decides it all'
-              : 'Round 2 up next — bigger points on the board'}
+            {mapRound ? mapRound.intermission.projectorNext : 'Cheers to every team 🍻'}
           </p>
         </div>
         <div className="flex-1 min-h-0">
@@ -1097,7 +1114,7 @@ export default function ProjectorView() {
 
   // Category grid (no active question)
   if (!activeQuestion && categories.length > 0) {
-    const roundLabel = room.status === 'round_2' ? 'Round 2' : 'Round 1'
+    const boardRoundLabel = roundLabel(statusToRound(room.status) ?? FIRST_ROUND)
     // The strip must stay ONE fixed-height row: the board grid below is vh-budgeted,
     // so wrapping to a second line would push glasses out of frame. At 15-20 teams
     // show the leaders plus whoever is picking, and count the remainder.
@@ -1119,7 +1136,7 @@ export default function ProjectorView() {
           <div>
             <p className="text-yellow-400 font-mono font-bold uppercase tracking-widest"
               style={{ fontSize: 'clamp(0.9rem, 2vw, 1.25rem)' }}>
-              {roundLabel}
+              {boardRoundLabel}
             </p>
             {currentTurnTeamId && (
               // Capped + truncating: an unbounded team name here would widen the

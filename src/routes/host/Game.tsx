@@ -5,6 +5,18 @@ import { clearHostSession } from '../../lib/session'
 import type { Buzz, FinalPhase, Question, Room, ScoreSnapshot, Team, Wager } from '../../lib/types'
 import ScoreHistoryChart from '../../components/ScoreHistoryChart'
 import { compareCategoryOrder } from '../../lib/categoryOrder'
+import {
+  FINAL_TAP_LABEL,
+  REGULAR_ROUNDS,
+  doubleTapMaxWager,
+  clampDoubleTapWager,
+  isLastRegularRound,
+  nextPhaseLabel,
+  nextStatusAfter,
+  roundLabel,
+  statusToRound,
+} from '../../lib/rounds'
+import { findFinalTapCategory, regularCategories } from '../../lib/finalTap'
 
 const RESPONSE_SECONDS = 40
 
@@ -65,6 +77,14 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   const [hostWagerInput, setHostWagerInput] = useState('')
   const [pendingDeactivation, setPendingDeactivation] = useState(false)
   const [newGameConfirm, setNewGameConfirm] = useState(false)
+  // Round → next round transition. The in-flight ref + status precondition in
+  // beginNextRound stop a double-tapped "Begin Round N" from skipping a round.
+  const [roundTransitionSaving, setRoundTransitionSaving] = useState(false)
+  const [roundTransitionError, setRoundTransitionError]   = useState('')
+  const roundTransitionInFlightRef = useRef(false)
+  // Host chose to end the current round with clues still on the board — opens
+  // the same "Round N complete" panel the natural finish would.
+  const [manualRoundEnd, setManualRoundEnd] = useState(false)
   const [buzzOpenedAt, setBuzzOpenedAt]     = useState<number | null>(null)
   const [buzzWindowRemaining, setBuzzWindowRemaining] = useState<number | null>(null)
 
@@ -433,11 +453,10 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   useEffect(() => {
     if (room.status !== 'final_jeopardy' || fjPhase !== null) return
     ;(async () => {
-      const { data: fjCat } = await supabase
-        .from('categories').select().eq('room_id', roomId).eq('round', 3).single()
-      setFjCategoryName(fjCat?.name ?? 'Final Tap')
+      const fjCat = await findFinalTapCategory(roomId, 'host')
+      setFjCategoryName(fjCat?.name ?? FINAL_TAP_LABEL)
       if (fjCat) {
-        const { data: q } = await supabase.from('questions').select().eq('category_id', fjCat.id).single()
+        const { data: q } = await supabase.from('questions').select().eq('id', fjCat.questionId).single()
         setFjQuestion(q ?? null)
       }
 
@@ -558,6 +577,12 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     if (fjPhase === 'question') fjExpiryInProgress.current = false
   }, [fjPhase])
 
+  // An early-end decision belongs to one round only
+  useEffect(() => {
+    setManualRoundEnd(false)
+    setRoundTransitionError('')
+  }, [room.status])
+
   // Auto-end FJ timer once every active team has submitted a response
   useEffect(() => {
     if (fjPhase !== 'question' || fjActiveTeamIds.size === 0 || fjExpiryInProgress.current) return
@@ -663,11 +688,10 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     if (!teamId || !questionId) return
     const q = categories.flatMap(c => c.questions).find(x => x.id === questionId)
     const category = categories.find(c => c.id === q?.category_id)
-    const roundFloor = room.status === 'round_2' ? 2000 : 500
-    const max = Math.max(scores.get(teamId) ?? 0, roundFloor)
     const parsed = parseInt(hostWagerInput)
     if (isNaN(parsed)) return
-    const wager = Math.max(5, Math.min(max, parsed))
+    // Same floor table as the phones and confirm_question_selection in the DB
+    const wager = clampDoubleTapWager(parsed, scores.get(teamId) ?? 0, room.status)
     const { error } = await supabase.from('rooms')
       .update({ pending_selection_wager: wager })
       .eq('id', roomId)
@@ -1009,13 +1033,14 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     const advancingIds = new Set(advancing.map(t => t.id))
     const eliminated = ranked.filter(t => !advancingIds.has(t.id))
 
-    // Load FJ category + question before touching DB
-    const { data: fjCat } = await supabase
-      .from('categories').select().eq('room_id', roomId).eq('round', 3).single()
-    const catName = fjCat?.name ?? 'Final Tap'
+    // Load the Final Tap category + clue before touching the DB. The lookup keys
+    // on the null point_value (never "round === 3", which is now a real board)
+    // and works for both the current and the legacy storage round.
+    const fjCat = await findFinalTapCategory(roomId, 'host')
+    const catName = fjCat?.name ?? FINAL_TAP_LABEL
     let loadedQuestion: Question | null = null
     if (fjCat) {
-      const { data: q } = await supabase.from('questions').select().eq('category_id', fjCat.id).single()
+      const { data: q } = await supabase.from('questions').select().eq('id', fjCat.questionId).single()
       loadedQuestion = q ?? null
     }
 
@@ -1281,8 +1306,9 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     // recorded (shouldn't happen in a played round), snapshot the current scores.
     let snapshots = scoreHistoryRef.current
     if (snapshots.length === 0) {
+      const round = statusToRound(room.status)
       snapshots = [{
-        label: room.status === 'round_2' ? 'Round 2' : 'Round 1',
+        label: round === null ? 'Round' : roundLabel(round),
         scores: teams.map(t => ({ team_id: t.id, score: scores.get(t.id) ?? t.score })),
       }]
       scoreHistoryRef.current = snapshots
@@ -1346,7 +1372,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   // finished/skipped intro (and mid-intro progress) so a same-tab refresh
   // resumes instead of re-blanking boards; a question in flight always wins.
   useEffect(() => {
-    const round = room.status === 'round_1' ? 1 : room.status === 'round_2' ? 2 : null
+    const round = statusToRound(room.status)
     if (round === null) {
       if (catRevealRound !== null) setCatRevealRound(null)
       return
@@ -1418,17 +1444,80 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     setCatRevealCount(0)
   }
 
-  async function beginRound2() {
+  // Advance from the current regular round to the next one (Round 1 → 2, 2 → 3).
+  // Round 3 → Final Tap goes through startFinalJeopardy, which also handles
+  // elimination. One implementation for every transition:
+  //  - the in-flight ref + disabled button absorb a double tap;
+  //  - the UPDATE carries a status precondition, so even if a second call slipped
+  //    through with stale local state it could not move the room two rounds;
+  //  - nothing local changes and nothing is broadcast until the DB confirms.
+  async function beginNextRound() {
+    const fromStatus = room.status
+    const next = nextStatusAfter(fromStatus)
+    if (!next || next === 'final_jeopardy' || roundTransitionInFlightRef.current) return
+    roundTransitionInFlightRef.current = true
+    setRoundTransitionSaving(true)
+    setRoundTransitionError('')
     // Capture turn assignment before the async gap so it doesn't go stale
     const firstTeamId = currentTurnTeamId
-    const { error } = await supabase
-      .from('rooms').update({ status: 'round_2' }).eq('id', roomId)
-    if (!error) {
-      setIntermissionSnapshots(null)
-      setRoom(prev => ({ ...prev, status: 'round_2' }))
-      broadcastRef.current?.publish('game_state_change', { status: 'round_2' })
-      assignTurn(firstTeamId)
+
+    const { data, error } = await supabase
+      .from('rooms')
+      .update({
+        status: next,
+        current_question_id: null,
+        buzz_opened_at: null,
+        pending_question_id: null,
+        pending_selection_team_id: null,
+        pending_selection_session_id: null,
+        pending_selection_claimed_at: null,
+        pending_selection_wager: null,
+      })
+      .eq('id', roomId)
+      .eq('status', fromStatus)
+      .select('status')
+
+    roundTransitionInFlightRef.current = false
+    setRoundTransitionSaving(false)
+
+    if (error) {
+      setRoundTransitionError(`Couldn't start ${roundLabel(statusToRound(next)!)}: ${error.message}. Nothing changed — try again.`)
+      return
     }
+    if (!data || data.length === 0) {
+      // Precondition failed: the room is no longer in the round we thought. Never
+      // broadcast a status the database did not just write — resync instead.
+      const { data: fresh } = await supabase.from('rooms').select().eq('id', roomId).single()
+      if (fresh) setRoom(fresh)
+      setRoundTransitionError('The room had already moved on, so nothing was changed. The screen has been refreshed.')
+      return
+    }
+
+    setIntermissionSnapshots(null)
+    setManualRoundEnd(false)
+    setPreviewInfo(null)
+    setDtPendingTeamId(null)
+    setDoubleTapWager(null)
+    setRoom(prev => ({
+      ...prev,
+      status: next,
+      current_question_id: null,
+      buzz_opened_at: null,
+      pending_question_id: null,
+      pending_selection_team_id: null,
+      pending_selection_session_id: null,
+      pending_selection_claimed_at: null,
+      pending_selection_wager: null,
+    }))
+    broadcastRef.current?.publish('game_state_change', { status: next })
+    assignTurn(firstTeamId)
+  }
+
+  // Host decision to end the round early (clues still on the board). Two taps
+  // on purpose: this link, then the normal "Show Scores & Start …" button.
+  function endRoundEarly() {
+    if (activeQuestion || room.pending_question_id) return
+    setManualRoundEnd(true)
   }
 
   // ── Derived ───────────────────────────────────────────────
@@ -1447,14 +1536,22 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   }
 
   const sortedTeams    = [...teams].sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0))
-  const round1Cats     = categories.filter(c => c.round === 1)
-  const round2Cats     = categories.filter(c => c.round === 2)
-  const round1Complete = room.status === 'round_1' &&
-    round1Cats.length > 0 &&
-    round1Cats.every(cat => cat.questions.every(q => q.is_answered))
-  const round2Complete = room.status === 'round_2' &&
-    round2Cats.length > 0 &&
-    round2Cats.every(cat => cat.questions.every(q => q.is_answered))
+  // Playable boards only — the Final Tap category (round 4 today, round 3 in
+  // rooms imported before Round 3 existed) never appears in the question list.
+  const boardCategories = regularCategories(categories)
+  const roundLists = REGULAR_ROUNDS
+    .map(def => ({ def, cats: boardCategories.filter(c => c.round === def.round) }))
+    .filter(r => r.cats.length > 0)
+  const activeRound = statusToRound(room.status)
+  const activeRoundCats = activeRound === null ? [] : boardCategories.filter(c => c.round === activeRound)
+  // Natural finish (every glass empty) OR the host ended the round early
+  const activeRoundComplete = activeRound !== null && (
+    manualRoundEnd ||
+    (activeRoundCats.length > 0 && activeRoundCats.every(cat => cat.questions.every(q => q.is_answered)))
+  )
+  // What follows this round: "Round 2" / "Round 3" / "Final Tap"
+  const activeRoundIsLast = activeRound !== null && isLastRegularRound(activeRound)
+  const nextLabel = activeRound === null ? FINAL_TAP_LABEL : nextPhaseLabel(activeRound)
 
   const timerLow = timerSeconds <= 10
 
@@ -1608,11 +1705,12 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
         {/* Question list */}
         <div className="flex-1 overflow-y-auto p-4">
-          {[{ label: 'Round 1', cats: round1Cats }, { label: 'Round 2', cats: round2Cats }]
-            .filter(r => r.cats.length > 0)
-            .map(r => (
-              <div key={r.label} className="mb-6">
-                <p className="text-gray-500 text-xs uppercase tracking-widest mb-3 font-semibold">{r.label}</p>
+          {roundLists.map(r => (
+              <div key={r.def.status} className="mb-6">
+                <p className={`text-xs uppercase tracking-widest mb-3 font-semibold ${
+                  r.def.round === activeRound ? 'text-yellow-400' : 'text-gray-500'}`}>
+                  {r.def.label}{r.def.round === activeRound ? ' — now playing' : ''}
+                </p>
                 {r.cats.map(cat => (
                   <div key={cat.id} className="mb-4">
                     <div className="mb-1.5">
@@ -1719,8 +1817,8 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
             <div className="text-center">
               <p className="text-xs text-gray-500 uppercase tracking-widest mb-1">
                 {room.status === 'finished' ? 'Final Standings'
-                  : room.status === 'round_2' ? 'Round 2 Complete'
-                  : 'Round 1 Complete'}
+                  : activeRound !== null ? `${roundLabel(activeRound)} Complete`
+                  : 'Round Complete'}
               </p>
               <p className="text-xl font-black text-white">Score History</p>
               <p className="text-gray-500 text-xs mt-1">Players are seeing this on their phones</p>
@@ -1732,14 +1830,14 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 teamIds={teams.map(t => t.id)}
               />
             </div>
-            {room.status === 'round_2' ? (
+            {activeRoundIsLast ? (
               <div className="space-y-2">
                 {fjTransitionError && <p className="text-red-400 text-sm text-center">{fjTransitionError}</p>}
                 <button
                   onClick={startFinalJeopardy}
                   className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
                 >
-                  Start Final Tap →
+                  Start {FINAL_TAP_LABEL} →
                 </button>
               </div>
             ) : room.status === 'finished' ? (
@@ -1752,7 +1850,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
             ) : (
               <div className="space-y-2">
                 <div className="w-full space-y-1">
-                  <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">First pick for Round 2</p>
+                  <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">First pick for {nextLabel}</p>
                   {sortedTeams.map(team => (
                     <button
                       key={team.id}
@@ -1770,11 +1868,15 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                     </button>
                   ))}
                 </div>
+                {roundTransitionError && (
+                  <p role="alert" className="text-red-400 text-sm text-center">{roundTransitionError}</p>
+                )}
                 <button
-                  onClick={beginRound2}
-                  className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
+                  onClick={beginNextRound}
+                  disabled={roundTransitionSaving}
+                  className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 disabled:opacity-50 disabled:cursor-wait transition-colors"
                 >
-                  Begin Round 2 →
+                  {roundTransitionSaving ? 'Starting…' : `Begin ${nextLabel} →`}
                 </button>
               </div>
             )}
@@ -2167,7 +2269,7 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 })()}
                 <p className="text-gray-500 text-sm mt-2">
                   Their phones have the wager screen. You can also set it from here — max{' '}
-                  {Math.max(scores.get(dtPendingTeamId) ?? 0, room.status === 'round_2' ? 2000 : 500)} pts.
+                  {doubleTapMaxWager(scores.get(dtPendingTeamId) ?? 0, room.status)} pts.
                 </p>
               </div>
               <div className="w-full max-w-xs flex items-center gap-2">
@@ -2262,13 +2364,23 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 </button>
               </div>
             </div>
-          ) : round2Complete ? (
-            // ── Start Final Jeopardy ──────────────────────
+          ) : activeRoundComplete && activeRound !== null && activeRoundIsLast ? (
+            // ── Last regular round done → Final Tap ───────
             <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8">
               <div className="text-center">
-                <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">Round 2 Complete</p>
-                <p className="text-2xl font-black text-white">Ready for Final Tap?</p>
+                <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">
+                  {roundLabel(activeRound)} {manualRoundEnd ? 'Ended Early' : 'Complete'}
+                </p>
+                <p className="text-2xl font-black text-white">Ready for {FINAL_TAP_LABEL}?</p>
                 <p className="text-gray-500 text-sm mt-2">Every team above 0 advances</p>
+                {manualRoundEnd && (
+                  <button
+                    onClick={() => setManualRoundEnd(false)}
+                    className="mt-2 text-xs text-gray-500 hover:text-yellow-400 transition-colors"
+                  >
+                    ← Back to the board
+                  </button>
+                )}
               </div>
               {(() => {
                 const advancing = fjAdvancing(sortedTeams, t => scores.get(t.id) ?? 0)
@@ -2301,16 +2413,26 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 onClick={showRoundIntermission}
                 className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
               >
-                Show Scores &amp; Start Final Tap →
+                Show Scores &amp; Start {FINAL_TAP_LABEL} →
               </button>
             </div>
-          ) : round1Complete ? (
-            // ── Start Round 2 ────────────────────────────
+          ) : activeRoundComplete && activeRound !== null ? (
+            // ── Round done → next regular round ───────────
             <div className="flex-1 flex flex-col items-center justify-center gap-6 p-8">
               <div className="text-center">
-                <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">Round 1 Complete</p>
-                <p className="text-2xl font-black text-white">Ready for Round 2?</p>
+                <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">
+                  {roundLabel(activeRound)} {manualRoundEnd ? 'Ended Early' : 'Complete'}
+                </p>
+                <p className="text-2xl font-black text-white">Ready for {nextLabel}?</p>
                 <p className="text-gray-500 text-sm mt-2">Assign first pick, then start when you're ready</p>
+                {manualRoundEnd && (
+                  <button
+                    onClick={() => setManualRoundEnd(false)}
+                    className="mt-2 text-xs text-gray-500 hover:text-yellow-400 transition-colors"
+                  >
+                    ← Back to the board
+                  </button>
+                )}
               </div>
 
               <div className="w-full space-y-2">
@@ -2339,13 +2461,25 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 onClick={showRoundIntermission}
                 className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
               >
-                Show Scores &amp; Start Round 2 →
+                Show Scores &amp; Start {nextLabel} →
               </button>
             </div>
           ) : (
             <div className="flex-1 flex flex-col items-center justify-center gap-2">
               <p className="text-gray-700 text-sm">No active question</p>
               <p className="text-gray-800 text-xs">Select one from the list on the left</p>
+              {activeRound !== null && catRevealRound == null && (
+                // Manual early advance (RND-02): host's call when the clock says so.
+                // Only shows the transition panel — nothing changes until the host
+                // confirms with "Show Scores & Start …".
+                <button
+                  onClick={endRoundEarly}
+                  className="mt-6 text-xs text-gray-600 hover:text-yellow-400 transition-colors"
+                  title={`Skip the remaining ${roundLabel(activeRound)} clues and move on to ${nextLabel}`}
+                >
+                  End {roundLabel(activeRound)} early → {nextLabel}
+                </button>
+              )}
             </div>
           )
         ) : (

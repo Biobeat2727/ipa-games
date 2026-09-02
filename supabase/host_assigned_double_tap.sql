@@ -5,7 +5,8 @@
 -- must win atomically and stamp its session as the selection's owner.
 -- Supersedes confirm_question_selection from atomic_question_selection.sql
 -- (that file has been updated to match for fresh installs).
--- Run in the Supabase SQL editor.
+-- Run in the Supabase SQL editor, after atomic_question_selection.sql (which
+-- defines the shared regular_round_number / double_tap_floor helpers).
 
 begin;
 
@@ -53,7 +54,8 @@ begin
         and q.is_double_tap = true
         and p_wager between 5 and greatest(
           t.score,
-          case r.status when 'round_2' then 2000 else 500 end
+          -- Rounds 1 / 2 / 3 → 500 / 2000 / 3000, same table as the phones
+          public.double_tap_floor(public.regular_round_number(r.status))
         )
     );
 

@@ -76,13 +76,16 @@ begin
     raise exception using errcode = '55000', message = 'Final question is not ready to reveal';
   end if;
 
+  -- The Final clue is the room's wager-scored question (null point_value). This
+  -- holds for new imports (category round 4) and historical rooms (round 3)
+  -- alike, and can never match a Round 3 board clue.
   if not exists (
     select 1
     from public.questions as q
     join public.categories as c on c.id = q.category_id
     where q.id = p_question_id
       and c.room_id = p_room_id
-      and c.round = 3
+      and q.point_value is null
   ) then
     raise exception using errcode = '22023', message = 'Question is not the Final question for this room';
   end if;

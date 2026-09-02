@@ -42,7 +42,9 @@ These are the minimum checks required before letting players join.
 - [ ] **PRE-04 — Projector discovers lobby:** Open `/projector`. It shows the same lobby and
   join information as the host.
 - [ ] **PRE-05 — Content loads:** Import tonight's trivia file. The host shows the expected
-  Round 1, Round 2, and Final Tap content with no import errors.
+  Round 1, Round 2, Round 3, and Final Tap content (`R1: … · R2: … · R3: … · Final Tap ✓`)
+  with no import errors. A file missing any round must be refused with a clear message and
+  must leave the previously loaded content in place.
 - [ ] **PRE-06 — Two-team requirement:** Join or create at least two temporary teams. The
   Start Game button becomes available only after content and two teams are present.
 - [ ] **PRE-07 — One complete clue:** Start the game, pick one normal clue, wait for the
@@ -254,8 +256,30 @@ Use at least two phones on the team whose turn it is.
   reassignment works before the first clue.
 - [ ] **RND-09 — Refresh during intermission:** Refresh one player and the projector. Each
   recovers the intermission or current round without replaying the wrong phase.
-- [ ] **RND-10 — Fast host progression:** Advance through transition controls quickly. The app
-  must not skip a round, show two overlays, or strand a player on an old screen.
+- [ ] **RND-10 — Fast host progression:** Advance through transition controls quickly
+  (tap **Begin Round 2** / **Begin Round 3** several times in a row). The app must not skip a
+  round, show two overlays, or strand a player on an old screen. The room must land on the
+  next round exactly once, never on Final Tap.
+- [ ] **RND-11 — Round 2 intermission announces Round 3:** After Round 2, phones and the
+  projector say Round 3 is next (not Final Tap). Refresh one phone and the projector on this
+  screen; both recover the score map, not the Round 2 board.
+- [ ] **RND-12 — Round 3 splash and board:** Beginning Round 3 shows the `ROUND 3` splash on
+  every phone and the projector once, then the Round 3 board with the "Round 3" label. No
+  Round 2 clue, preview, Double Tap screen, or category-reveal state remains anywhere.
+- [ ] **RND-13 — Round 3 clue:** Pick, buzz, answer, and judge a normal Round 3 clue. Score,
+  board, player, host, and projector agree, and the clue's configured value is applied.
+- [ ] **RND-14 — Round 3 Double Tap limits:** Open a Round 3 Double Tap. The phone's max, the
+  host panel's max, and the accepted wager all equal max(team score, 3000). An over-max
+  wager cannot be locked on the phone and is refused by the database.
+- [ ] **RND-15 — Late join during Round 3:** A brand-new phone creates a team during Round 3
+  and lands on the Round 3 board. (Creating a team during Final Tap must still be refused.)
+- [ ] **RND-16 — Refresh during Round 3:** Refresh host, one phone, and the projector. Each
+  returns to the Round 3 board (or the live clue) — never to Round 2 or Final Tap.
+- [ ] **RND-17 — No elimination before Final Tap:** During Rounds 1–3 every team stays active,
+  including teams at or below 0. Elimination happens only when Round 3 hands off to Final Tap.
+- [ ] **RND-18 — Manual early advance 2 → 3:** With Round 2 clues still unanswered, use
+  **End Round 2 early → Round 3**, then **Show Scores & Start Round 3**. The host sees
+  "Ready for Round 3?", not "Ready for Final Tap?", and every screen follows.
 
 ---
 
@@ -263,8 +287,11 @@ Use at least two phones on the team whose turn it is.
 
 Prepare at least four teams so elimination behavior can be tested.
 
-- [ ] **FNL-01 — Everyone above 0 qualifies:** On entering Final Tap, every team with a
-  score above 0 is active. Teams at 0 or below see the eliminated/thanks screen and
+- [ ] **FNL-00 — Final Tap follows Round 3:** Final Tap is offered only after Round 3 (the
+  host panel reads "Ready for Final Tap?"). The category and clue shown are the file's
+  `final_tap` block — not a Round 3 category or clue.
+- [ ] **FNL-01 — Everyone above 0 qualifies:** On entering Final Tap (after Round 3), every
+  team with a score above 0 is active. Teams at 0 or below see the eliminated/thanks screen and
   leaderboard. The host panel's Advancing/Eliminated split matches.
 - [ ] **FNL-02 — Nobody positive:** Drive every team to 0 or below, then start Final Tap.
   The top 3 should advance anyway (fallback) rather than the game stranding with no finalists.

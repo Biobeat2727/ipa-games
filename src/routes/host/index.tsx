@@ -4,8 +4,9 @@ import { supabase } from '../../lib/supabase'
 import { ablyClient } from '../../lib/ably'
 import { generateRoomCode } from '../../lib/roomCode'
 import { findCurrentActiveRoom } from '../../lib/roomDiscovery'
-import { getContentSummary, importContent } from '../../lib/content'
+import { getContentSummary, importContent, missingRounds, summaryRoundCounts } from '../../lib/content'
 import type { ContentJSON, ContentSummary } from '../../lib/content'
+import { FINAL_TAP_LABEL, FIRST_ROUND, roundDefinition, roundLabel, roundToStatus } from '../../lib/rounds'
 import type { Room, Team } from '../../lib/types'
 import Game from './Game'
 
@@ -251,9 +252,10 @@ export default function HostView() {
 
   async function handleStartGame() {
     if (!room) return
+    const firstStatus = roundToStatus(FIRST_ROUND)
     const { error: err } = await supabase
       .from('rooms').update({
-        status: 'round_1',
+        status: firstStatus,
         current_question_id: null,
         current_turn_team_id: null,
         pending_question_id: null,
@@ -263,10 +265,10 @@ export default function HostView() {
         pending_selection_wager: null,
       }).eq('id', room.id)
     if (!err) {
-      lobbyBroadcastRef.current?.publish('game_state_change', { status: 'round_1' })
+      lobbyBroadcastRef.current?.publish('game_state_change', { status: firstStatus })
       setRoom(prev => prev ? {
         ...prev,
-        status: 'round_1',
+        status: firstStatus,
         current_question_id: null,
         current_turn_team_id: null,
         pending_question_id: null,
@@ -395,7 +397,12 @@ export default function HostView() {
   }
 
   // ── Lobby ─────────────────────────────────────────────────
-  const canStart = teams.length >= 2 && !!summary
+  // Every regular round must have at least one category before the game can
+  // start — a board with an empty round would strand the host at that
+  // transition. Final Tap stays optional (the Final screens carry an
+  // "End Game with Current Scores" escape hatch for content without one).
+  const roundsMissing = missingRounds(summary)
+  const canStart = teams.length >= 2 && !!summary && roundsMissing.length === 0
 
   return (
     <div className="min-h-screen bg-gray-950 text-white p-6">
@@ -417,7 +424,11 @@ export default function HostView() {
           <div className="flex items-center justify-between">
             <p className="text-sm font-semibold text-gray-300">
               {summary
-                ? `R1: ${summary.round1} cats · R2: ${summary.round2} cats${summary.hasFinalJeopardy ? ' · Final Tap ✓' : ' · ⚠ NO Final Tap question'}`
+                ? [
+                    ...summaryRoundCounts(summary).map(({ round, count }) =>
+                      `${roundDefinition(round).shortLabel}: ${count === 0 ? '⚠ 0' : count} cats`),
+                    summary.hasFinalJeopardy ? `${FINAL_TAP_LABEL} ✓` : `⚠ NO ${FINAL_TAP_LABEL} question`,
+                  ].join(' · ')
                 : 'No content loaded'}
             </p>
             <button
@@ -489,7 +500,10 @@ export default function HostView() {
           disabled={!canStart}
           className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 disabled:opacity-25 disabled:cursor-not-allowed transition-opacity"
         >
-          {!summary ? 'Import content to start' : teams.length < 2 ? 'Need 2+ teams' : 'Start Game'}
+          {!summary ? 'Import content to start'
+            : roundsMissing.length > 0 ? `Content is missing ${roundsMissing.map(r => roundLabel(r)).join(' & ')}`
+            : teams.length < 2 ? 'Need 2+ teams'
+            : 'Start Game'}
         </button>
 
         <button

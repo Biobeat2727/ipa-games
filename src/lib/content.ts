@@ -1,6 +1,14 @@
 import { supabase } from './supabase'
+import {
+  FINAL_TAP_STORAGE_ROUND,
+  REGULAR_ROUND_NUMBERS,
+  isRegularRound,
+  roundLabel,
+  type RegularRound,
+} from './rounds'
+import { findFinalTapCategory } from './finalTap'
 
-// ── JSON format (matches CLAUDE.md spec) ─────────────────────
+// ── JSON format (matches docs/content-format.md) ─────────────
 
 interface ImportQuestion {
   point_value: number
@@ -40,20 +48,56 @@ function finalBlock(content: ContentJSON): ImportFinalJeopardy | undefined {
 export interface ContentSummary {
   round1: number
   round2: number
+  round3: number
   hasFinalJeopardy: boolean
+}
+
+/** Category counts per regular round, in round order — drives the lobby line
+ *  and the Start Game gate without another per-round ternary. */
+export function summaryRoundCounts(summary: ContentSummary): Array<{ round: RegularRound; count: number }> {
+  const byRound: Record<RegularRound, number> = { 1: summary.round1, 2: summary.round2, 3: summary.round3 }
+  return REGULAR_ROUND_NUMBERS.map(round => ({ round, count: byRound[round] }))
+}
+
+/** Regular rounds the summary says are missing or empty. Empty array = playable. */
+export function missingRounds(summary: ContentSummary | null): RegularRound[] {
+  if (!summary) return [...REGULAR_ROUND_NUMBERS]
+  return summaryRoundCounts(summary).filter(r => r.count === 0).map(r => r.round)
 }
 
 // ── Validation ───────────────────────────────────────────────
 
-function validate(content: ContentJSON): void {
+/** Throws a host-readable Error for any structural problem. Runs BEFORE the
+ *  destructive clear in importContent, so a bad file can never wipe a room's
+ *  existing content. Exported for tests. */
+export function validateContent(content: ContentJSON): void {
+  if (!content || typeof content !== 'object')
+    throw new Error('Content must be a JSON object with a "rounds" array.')
   if (!Array.isArray(content.rounds) || content.rounds.length === 0)
-    throw new Error('Content must have at least one round.')
+    throw new Error('Content must have a "rounds" array with rounds 1, 2, and 3.')
+
+  const seen = new Set<number>()
   for (const round of content.rounds) {
+    if (!round || typeof round !== 'object')
+      throw new Error('Every entry in "rounds" must be an object with "round" and "categories".')
+    if (!isRegularRound(round.round)) {
+      const shown = typeof round.round === 'number' ? String(round.round) : JSON.stringify(round.round)
+      throw new Error(
+        `Round number ${shown} is not supported. Regular rounds must be exactly ` +
+        `${REGULAR_ROUND_NUMBERS.join(', ')}; the final question goes in the "final_tap" block, not a round.`
+      )
+    }
+    if (seen.has(round.round))
+      throw new Error(`Round ${round.round} appears more than once. Each round number must be unique.`)
+    seen.add(round.round)
+
     if (!Array.isArray(round.categories))
-      throw new Error(`Round ${round.round} must have a categories array.`)
+      throw new Error(`${roundLabel(round.round)} must have a categories array.`)
+    if (round.categories.length === 0)
+      throw new Error(`${roundLabel(round.round)} has no categories. Every round needs at least one category.`)
     for (const cat of round.categories) {
       if (!cat.name?.trim())
-        throw new Error('All categories must have a name.')
+        throw new Error(`All categories must have a name (${roundLabel(round.round)}).`)
       if (cat.description !== undefined && typeof cat.description !== 'string')
         throw new Error(`Category "${cat.name}": description must be a string.`)
       if (!Array.isArray(cat.questions) || cat.questions.length === 0)
@@ -61,11 +105,20 @@ function validate(content: ContentJSON): void {
       for (const q of cat.questions) {
         if (!q.answer?.trim() || !q.correct_question?.trim())
           throw new Error(`All questions in "${cat.name}" must have answer and correct_question.`)
-        if (typeof q.point_value !== 'number')
+        if (typeof q.point_value !== 'number' || !Number.isFinite(q.point_value))
           throw new Error(`All questions in "${cat.name}" must have a numeric point_value.`)
       }
     }
   }
+
+  const missing = REGULAR_ROUND_NUMBERS.filter(r => !seen.has(r))
+  if (missing.length > 0) {
+    throw new Error(
+      `Content is missing ${missing.map(r => roundLabel(r)).join(' and ')}. ` +
+      `A game needs rounds ${REGULAR_ROUND_NUMBERS.join(', ')} plus a final_tap block. Nothing was imported.`
+    )
+  }
+
   const fj = finalBlock(content)
   if (fj) {
     if (!fj.category?.trim() || !fj.answer?.trim() || !fj.correct_question?.trim())
@@ -77,7 +130,7 @@ function validate(content: ContentJSON): void {
 
 export async function importContent(roomId: string, content: ContentJSON): Promise<void> {
   // Validate BEFORE touching the database
-  validate(content)
+  validateContent(content)
 
   // Probe the optional columns BEFORE the destructive clear below — otherwise
   // the delete succeeds, the first insert fails on a missing column, and the
@@ -140,9 +193,9 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
     insertedByRound.set(round.round, roundIds)
   }
 
-  // Randomly pick 2 questions per round (rounds 1 & 2 only) and mark as Double Taps —
-  // in different categories when the round has more than one category.
-  for (const roundNum of [1, 2]) {
+  // Randomly pick 2 questions in EVERY regular round and mark them as Double
+  // Taps — in different categories when the round has more than one category.
+  for (const roundNum of REGULAR_ROUND_NUMBERS) {
     const pool = insertedByRound.get(roundNum)
     if (!pool || pool.length === 0) continue
     const first = pool[Math.floor(Math.random() * pool.length)]
@@ -153,16 +206,17 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
     await supabase.from('questions').update({ is_double_tap: true }).in('id', picks)
   }
 
-  // Final Tap — point_value is null (wager determines scoring)
+  // Final Tap — point_value is null (wager determines scoring). Stored above the
+  // regular rounds so it can never be mistaken for a Round 3 board column.
   const finalTap = finalBlock(content)
   if (finalTap) {
     const fj = finalTap
     const { data: fjCat, error: fjCatErr } = await supabase
       .from('categories')
-      .insert({ room_id: roomId, name: fj.category, round: 3 })
+      .insert({ room_id: roomId, name: fj.category, round: FINAL_TAP_STORAGE_ROUND })
       .select()
       .single()
-    if (!fjCat || fjCatErr) throw new Error(`FJ category: ${fjCatErr?.message}`)
+    if (!fjCat || fjCatErr) throw new Error(`Final Tap category: ${fjCatErr?.message}`)
 
     const { error: fjQErr } = await supabase.from('questions').insert([{
       category_id: fjCat.id,
@@ -170,7 +224,7 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
       correct_question: fj.correct_question,
       point_value: null,
     }])
-    if (fjQErr) throw new Error(`FJ question: ${fjQErr.message}`)
+    if (fjQErr) throw new Error(`Final Tap question: ${fjQErr.message}`)
   }
 }
 
@@ -179,12 +233,18 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
 export async function getContentSummary(roomId: string): Promise<ContentSummary | null> {
   const { data } = await supabase
     .from('categories')
-    .select('round')
+    .select('id, round')
     .eq('room_id', roomId)
   if (!data || data.length === 0) return null
+
+  // Final Tap is identified by its null-value clue, so a legacy room (Final Tap
+  // stored as round 3) never counts that category as a Round 3 board.
+  const finalTap = await findFinalTapCategory(roomId, 'host')
+  const boards = data.filter(c => c.id !== finalTap?.id)
   return {
-    round1: data.filter(c => c.round === 1).length,
-    round2: data.filter(c => c.round === 2).length,
-    hasFinalJeopardy: data.some(c => c.round === 3),
+    round1: boards.filter(c => c.round === 1).length,
+    round2: boards.filter(c => c.round === 2).length,
+    round3: boards.filter(c => c.round === 3).length,
+    hasFinalJeopardy: finalTap !== null,
   }
 }

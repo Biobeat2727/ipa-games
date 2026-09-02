@@ -2,7 +2,11 @@
 // Enums
 // ============================================================
 
-export type RoomStatus = 'lobby' | 'round_1' | 'round_2' | 'final_jeopardy' | 'finished'
+// `round_3` requires the matching enum value in the database —
+// supabase/add_round_three_1_enum.sql, then add_round_three_2_game_logic.sql, must be
+// applied (as two separate SQL-editor runs) before this frontend is deployed.
+// Round helpers (labels, next-status, Double Tap floors) live in src/lib/rounds.ts.
+export type RoomStatus = 'lobby' | 'round_1' | 'round_2' | 'round_3' | 'final_jeopardy' | 'finished'
 export type FinalPhase = 'starting' | 'wager' | 'question' | 'review' | 'done'
 export type BuzzStatus = 'pending' | 'correct' | 'wrong' | 'expired' | 'skipped'
 export type WagerStatus = 'pending' | 'correct' | 'wrong'
@@ -70,7 +74,10 @@ export type Category = {
   id: string
   room_id: string
   name: string
-  round: number // 1, 2, or 3 (3 = Final Jeopardy)
+  /** 1, 2, 3 = regular boards. Final Tap is stored as 4 by current imports
+   *  (FINAL_TAP_STORAGE_ROUND); rooms imported before Round 3 existed stored
+   *  it as 3. Identify Final Tap by its null point_value — src/lib/finalTap.ts */
+  round: number
   /** Host-read flavor text shown during the round-start category reveal */
   description: string | null
   /** Index within its round from the imported JSON — drives board left-to-right
@@ -84,7 +91,7 @@ export type Question = {
   category_id: string
   answer: string
   correct_question: string // host only — query questions_public to omit this
-  point_value: number | null // null for Final Jeopardy
+  point_value: number | null // null ONLY for the Final Tap clue (wager-scored)
   is_answered: boolean
   answered_by_team_id: string | null
   is_double_tap?: boolean
