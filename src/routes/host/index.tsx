@@ -17,6 +17,9 @@ export default function HostView() {
   const [room, setRoom]          = useState<Room | null>(null)
   const [teams, setTeams]        = useState<Team[]>([])
   const [playerCounts, setPlayerCounts] = useState<Map<string, number>>(new Map())
+  const [removeConfirmTeamId, setRemoveConfirmTeamId] = useState<string | null>(null)
+  const [removingTeamId, setRemovingTeamId] = useState<string | null>(null)
+  const [teamActionError, setTeamActionError] = useState('')
   const [error, setError]        = useState('')
   const [hostUserId, setHostUserId] = useState<string | null>(null)
   const [email, setEmail]        = useState('')
@@ -249,13 +252,29 @@ export default function HostView() {
     }
   }
 
-  async function handleDeleteTeam(teamId: string) {
-    await supabase.from('players').delete().eq('team_id', teamId)
-    const { error: err } = await supabase.from('teams').delete().eq('id', teamId)
-    if (!err) {
-      setTeams(prev => prev.filter(t => t.id !== teamId))
-      setPlayerCounts(prev => { const m = new Map(prev); m.delete(teamId); return m })
+  // Same authorized transaction the in-game kick uses, so the phones on that
+  // team are told to leave instead of sitting in a lobby for a team that no
+  // longer exists (a bare row delete used to leave them stranded there).
+  async function handleRemoveTeam(team: Team) {
+    setRemoveConfirmTeamId(null)
+    setRemovingTeamId(team.id)
+    const { error: err } = await supabase.rpc('kick_team', { p_team_id: team.id })
+    setRemovingTeamId(null)
+    if (err) {
+      setTeamActionError(`Couldn't remove ${team.name}: ${err.message}`)
+      return
     }
+    setTeamActionError('')
+    setTeams(prev => prev.filter(t => t.id !== team.id))
+    setPlayerCounts(prev => { const m = new Map(prev); m.delete(team.id); return m })
+    lobbyBroadcastRef.current?.publish('team_kicked', { team_id: team.id, team_name: team.name })
+  }
+
+  // Game.tsx keeps its own live roster; mirror its kicks here so this snapshot
+  // never re-seeds a removed team back onto the game screen.
+  function handleTeamRemoved(teamId: string) {
+    setTeams(prev => prev.filter(t => t.id !== teamId))
+    setPlayerCounts(prev => { const m = new Map(prev); m.delete(teamId); return m })
   }
 
   async function handleStartGame() {
@@ -401,7 +420,7 @@ export default function HostView() {
   }
 
   if (phase === 'game' && room) {
-    return <Game roomId={room.id} initialRoom={room} teams={teams} onSignOut={handleSignOut} />
+    return <Game roomId={room.id} initialRoom={room} teams={teams} onTeamRemoved={handleTeamRemoved} onSignOut={handleSignOut} />
   }
 
   // ── Lobby ─────────────────────────────────────────────────
@@ -485,21 +504,41 @@ export default function HostView() {
                 return (
                   <li key={team.id} className="flex items-center gap-3">
                     <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
-                    <span className="font-medium flex-1">{team.name}</span>
-                    <span className="text-xs text-gray-500">
-                      {count} {count === 1 ? 'player' : 'players'}
-                    </span>
-                    <button
-                      onClick={() => handleDeleteTeam(team.id)}
-                      className="text-gray-600 hover:text-red-400 transition-colors px-1"
-                      title="Remove team"
-                    >
-                      ✕
-                    </button>
+                    <span className="font-medium flex-1 truncate">{team.name}</span>
+                    {removeConfirmTeamId === team.id ? (
+                      <div className="flex items-center gap-2 shrink-0">
+                        <span className="text-xs text-red-300">Remove?</span>
+                        <button
+                          onClick={() => void handleRemoveTeam(team)}
+                          className="text-xs text-red-400 hover:text-red-300 font-semibold transition-colors"
+                        >Yes</button>
+                        <button
+                          onClick={() => setRemoveConfirmTeamId(null)}
+                          className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+                        >Cancel</button>
+                      </div>
+                    ) : (
+                      <>
+                        <span className="text-xs text-gray-500">
+                          {count} {count === 1 ? 'player' : 'players'}
+                        </span>
+                        <button
+                          onClick={() => setRemoveConfirmTeamId(team.id)}
+                          disabled={removingTeamId != null}
+                          className="text-gray-600 hover:text-red-400 disabled:opacity-40 transition-colors px-1"
+                          title={`Remove ${team.name}`}
+                        >
+                          {removingTeamId === team.id ? '…' : '✕'}
+                        </button>
+                      </>
+                    )}
                   </li>
                 )
               })}
             </ul>
+          )}
+          {teamActionError && (
+            <p className="text-red-400 text-xs mt-3">{teamActionError}</p>
           )}
         </div>
 

@@ -36,6 +36,9 @@ No test or lint script is configured — `npm test` and `npm run lint` do not ex
   Values confirmed by Davey 2026-09-02 (Round 1 raised from 500).
 - Database first, frontend second: `supabase/add_round_three_1_enum.sql`, `_2_game_logic.sql`, then `_3_category_round_check.sql` (three separate SQL-editor runs) must be applied
   before deploying a build that emits `round_3`; apply and roll back only between games.
+- Kick team: both the lobby ✕ and the in-game scoreboard ✕ call the authorized
+  `public.kick_team()` function (`supabase/kick_team.sql`) and then broadcast `team_kicked`.
+  Apply that file before deploying a build with the kick buttons.
 
 ## Detailed Docs (read when working on these areas)
 - `docs/db-schema.md` — Full database schema (all tables/columns)

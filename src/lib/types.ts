@@ -277,6 +277,15 @@ export type Database = {
           final_score: number
         }>
       }
+      kick_team: {
+        Args: {
+          p_team_id: string
+        }
+        Returns: Array<{
+          room_id: string
+          turn_cleared: boolean
+        }>
+      }
       reveal_final_question: {
         Args: {
           p_room_id: string

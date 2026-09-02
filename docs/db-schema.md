@@ -89,6 +89,18 @@ Double Tap wagers are bounded by `greatest(score, public.double_tap_floor(round)
 (and, for fresh installs, `supabase/atomic_question_selection.sql`) and mirror
 `src/lib/rounds.ts`.
 
+## Removing a team (`kick_team`)
+
+The authenticated `kick_team(p_team_id)` function (`supabase/kick_team.sql`, security definer,
+host-owner check via `host_owns_room`) is the only way a team leaves a game: it deletes the
+team's `players`, `buzzes` and `wagers`, nulls `questions.answered_by_team_id` and the room's
+`current_turn_team_id` / `pending_selection_team_id` / `final_review_team_id` where they point
+at the team, then deletes the `teams` row — one transaction, so no FK ordering surprises.
+It returns `(room_id, turn_cleared)` and raises `55000` while `current_question_id` or
+`pending_question_id` is set, while `final_phase` is `question` / `review`, or once the room
+is `finished`. Both the lobby ✕ and the in-game scoreboard ✕ call it. Apply it before deploying
+a build that carries the kick buttons.
+
 ## Round 3 migration (three files, three separate runs)
 
 Apply **before** deploying a frontend that emits `round_3`; apply and roll back only

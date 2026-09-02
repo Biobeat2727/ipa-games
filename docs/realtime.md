@@ -12,7 +12,7 @@ Additional scoped channels:
 - `play-teams-{roomId}` — postgres_changes on `teams` (player select_team screen)
 - `play-buzz-{buzzId}` — postgres_changes on `buzzes` (player watching their own buzz result)
 - `play-team-{teamId}` — postgres_changes on `players` (lobby teammate list)
-- `play-kick-{roomId}` — broadcast `lobby_closed` listener (join_lobby/select_team/lobby phases)
+- (pre-game phases listen for `lobby_closed` / `team_kicked` on `room:{roomId}` itself, with listener-scoped unsubscribes — the old `play-kick-{roomId}` channel never received anything, since the host publishes on `room:{roomId}`)
 - `host-game-{roomId}` — postgres_changes on `rooms` + `teams`
 - `host-questions-{roomId}` — postgres_changes on `questions` filtered by `category_id=in.(...)`
 - `host-buzzes-{questionId}` — postgres_changes on `buzzes` for active question
@@ -31,6 +31,7 @@ Additional scoped channels:
 | `team_joined` | Player | `{}` | Host + other players on select_team refresh team list |
 | `player_left` | Player | `{ team_id }` | Host immediately refreshes lobby player counts |
 | `lobby_closed` | Host | `{}` | All clients kicked: players → `no_lobby`, projector → `waiting` |
+| `team_kicked` | Host | `{ team_id, team_name }` | Sent after the `kick_team` database function commits (lobby ✕ or in-game scoreboard ✕). Phones on that team clear their session and land on the Team-or-Solo screen with a "host removed your team" notice (room retained so they can rejoin); other players drop the team from their scoreboard; projector re-reads the roster. If the kicked team held the pick, the host follows with a `turn_change` to the top remaining team |
 | `game_state_change` | Host | `{ status, fj_category?, active_team_ids? }` | All clients transition to new game state. `status` is `round_1` / `round_2` / `round_3` (checked with `isRegularRoundStatus` from `src/lib/rounds.ts` — clients load that round's board, wipe question / Double Tap / category-reveal / intermission state, and show the `ROUND N` splash for rounds after the first) or `final_jeopardy` |
 | `round_intermission` | Host | `{ snapshots: ScoreSnapshot[] }` | Score-history map between rounds (after Round 1, 2 and 3) and as the end-of-game recap; clients persist it in `sessionStorage` keyed by room + status so a refresh restores it |
 | `intermission_closed` | Host | `{}` | Dismisses the score map |

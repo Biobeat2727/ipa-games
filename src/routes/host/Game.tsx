@@ -46,12 +46,20 @@ interface Props {
   roomId: string
   initialRoom: Room
   teams: Team[]
+  onTeamRemoved: (teamId: string) => void
   onSignOut: () => Promise<void>
 }
 
-export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
+export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamRemoved, onSignOut }: Props) {
   useWakeLock() // keep the host device awake for the whole game
   const [room, setRoom]             = useState<Room>(initialRoom)
+  // Live roster. Seeded from the lobby's snapshot (which can still be filling in
+  // on a host reload), then kept current from the database: late joiners appear
+  // and kicked teams drop out without a refresh.
+  const [teams, setTeams]           = useState<Team[]>(initialTeams)
+  useEffect(() => { setTeams(initialTeams) }, [initialTeams])
+  const [kickConfirmTeamId, setKickConfirmTeamId] = useState<string | null>(null)
+  const [kickingTeamId, setKickingTeamId]         = useState<string | null>(null)
   const [categories, setCategories] = useState<CategoryRow[]>([])
   const [catIds, setCatIds]         = useState<string[]>([])
   const [buzzes, setBuzzes]         = useState<Buzz[]>([])
@@ -258,6 +266,15 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
 
   // Subscribe to room + team score changes
   useEffect(() => {
+    // Full roster + scores from the database. Runs on subscribe and whenever a
+    // team is added (late join); kicks update local state directly.
+    const refreshRoster = async () => {
+      const { data } = await supabase
+        .from('teams').select().eq('room_id', roomId).order('created_at', { ascending: true })
+      if (!data) return
+      setTeams(data)
+      setScores(new Map(data.map(t => [t.id, t.score])))
+    }
     const ch = supabase.channel(`host-game-${roomId}`)
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
@@ -274,11 +291,11 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
           const t = payload.new as Team
           setScores(prev => new Map([...prev, [t.id, t.score]]))
         })
-      .subscribe(async status => {
-        if (status === 'SUBSCRIBED') {
-          const { data } = await supabase.from('teams').select('id, score').eq('room_id', roomId)
-          if (data) setScores(new Map(data.map(t => [t.id, t.score])))
-        }
+      .on('postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'teams', filter: `room_id=eq.${roomId}` },
+        () => { void refreshRoster() })
+      .subscribe(status => {
+        if (status === 'SUBSCRIBED') void refreshRoster()
       })
     return () => { supabase.removeChannel(ch) }
   }, [roomId])
@@ -1330,6 +1347,42 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
     broadcastRef.current?.publish('score_update', { teams: teams.map(t => ({ id: t.id, name: t.name, score: updatedScores.get(t.id) ?? t.score })) })
   }
 
+  // Remove a team from the game entirely. The database function deletes the
+  // team and everything that points at it in one authorized transaction (and
+  // refuses at the same moments kickBlockedReason greys the button out), then
+  // every screen is told so the kicked phones leave and the rest drop the team.
+  async function kickTeam(team: Team) {
+    setKickConfirmTeamId(null)
+    setKickingTeamId(team.id)
+    const { data, error } = await supabase.rpc('kick_team', { p_team_id: team.id })
+    setKickingTeamId(null)
+    if (error) {
+      setActionError(`Couldn't remove ${team.name}: ${error.message}`)
+      return
+    }
+    setActionError('')
+    const turnCleared = data?.[0]?.turn_cleared ?? false
+
+    const remaining = teams.filter(t => t.id !== team.id)
+    setTeams(remaining)
+    onTeamRemoved(team.id)
+    setScores(prev => { const m = new Map(prev); m.delete(team.id); return m })
+    setEditingScoreTeamId(prev => (prev === team.id ? null : prev))
+    setFjActiveTeamIds(prev => { const s = new Set(prev); s.delete(team.id); return s })
+    setFjWagers(prev => prev.filter(w => w.team_id !== team.id))
+    setFjWagerStatus(prev => { const m = new Map(prev); m.delete(team.id); return m })
+
+    broadcastRef.current?.publish('team_kicked', { team_id: team.id, team_name: team.name })
+
+    // The kicked team held the pick: a null turn blocks every board, so hand it
+    // to the top remaining team rather than wait for the host to notice.
+    if ((turnCleared || currentTurnTeamId === team.id) && isRegularRoundStatus(room.status)) {
+      const next = [...remaining]
+        .sort((a, b) => (scores.get(b.id) ?? b.score) - (scores.get(a.id) ?? a.score))[0]
+      assignTurn(next?.id ?? null)
+    }
+  }
+
   async function showRoundIntermission() {
     // The full per-judgment history is the chart's story. Fallback: if nothing was
     // recorded (shouldn't happen in a played round), snapshot the current scores.
@@ -1565,6 +1618,12 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
   }
 
   const sortedTeams    = [...teams].sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0))
+  // When a kick is not allowed (mirrors the checks inside kick_team). Null = allowed.
+  const kickBlockedReason: string | null =
+    room.status === 'finished' || fjPhase === 'done' ? 'The game is over'
+    : fjPhase === 'question' || fjPhase === 'review' ? 'Wait until the Final Tap review is done'
+    : activeQuestion || previewInfo || dtPendingTeamId || room.pending_question_id ? 'Finish or clear the current clue first'
+    : null
   // Playable boards only — the Final Tap category (round 4 today, round 3 in
   // rooms imported before Round 3 existed) never appears in the question list.
   const boardCategories = regularCategories(categories)
@@ -1693,6 +1752,19 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 <span className={`text-sm flex-1 truncate ${team.id === currentTurnTeamId ? 'text-yellow-400 font-bold' : 'text-gray-300'}`}>
                   {team.name}
                 </span>
+                {kickConfirmTeamId === team.id ? (
+                  <div className="flex items-center gap-2 shrink-0">
+                    <span className="text-xs text-red-300">Remove from game?</span>
+                    <button
+                      onClick={() => void kickTeam(team)}
+                      className="text-xs text-red-400 hover:text-red-300 font-semibold transition-colors"
+                    >Yes</button>
+                    <button
+                      onClick={() => setKickConfirmTeamId(null)}
+                      className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+                    >Cancel</button>
+                  </div>
+                ) : (<>
                 {editingScoreTeamId === team.id ? (
                   <input
                     autoFocus
@@ -1727,6 +1799,15 @@ export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
                 >
                   {team.id === currentTurnTeamId ? 'picking' : 'give'}
                 </button>
+                <button
+                  onClick={() => setKickConfirmTeamId(team.id)}
+                  disabled={kickBlockedReason != null || kickingTeamId != null}
+                  title={kickBlockedReason ?? `Remove ${team.name} from the game`}
+                  className="text-xs px-1 shrink-0 text-gray-700 hover:text-red-400 disabled:opacity-30 disabled:hover:text-gray-700 transition-colors"
+                >
+                  {kickingTeamId === team.id ? '…' : '✕'}
+                </button>
+                </>)}
               </div>
             ))}
           </div>

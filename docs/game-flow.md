@@ -38,13 +38,24 @@ browser's player session still belongs to that team and that the team's room is 
 from today. Valid sessions resume directly into `lobby` or `game`; stale sessions are cleared before
 the app discovers today's current lobby.
 
-**Kick:** When host broadcasts `lobby_closed` or room status changes to `finished`, players in `join_lobby`, `select_team`, or `lobby` phases are cleared and sent to `no_lobby`. Game-phase players receive the broadcast too and are sent to `no_lobby`.
+**Kick (everyone):** When host broadcasts `lobby_closed` or room status changes to `finished`, players in `join_lobby`, `select_team`, or `lobby` phases are cleared and sent to `no_lobby`. Game-phase players receive the broadcast too and are sent to `no_lobby`.
+
+**Kick (one team):** The host can remove a single team at any point before the Final Tap
+question is revealed (lobby ✕ or scoreboard ✕, both confirm first). `kick_team` deletes the
+team plus its players, buzzes and wagers, detaches it from any clue it answered and from the
+room's turn/review pointers, all in one transaction, then the host broadcasts `team_kicked`.
+Phones on that team clear their saved session and land on the Team-or-Solo screen with a
+"host removed your team" notice — the room is kept so they can join again (a wrong-team join
+is the usual reason). A phone that refreshes instead of receiving the broadcast reaches the
+same place through session resume (team row gone → session cleared → auto-discover). Kicks are
+refused while a clue is live or pending, during the Final Tap question/review (judge or skip
+the team there instead), and once the game is over.
 
 ---
 
 ## Lobby Phase
 - Teams join and choose names in real-time
-- Host sees team list + player counts; can delete teams
+- Host sees team list + player counts; can remove teams (see "Kick (one team)" above)
 - Host imports content (JSON) — rounds 1, 2, and 3 must all be present and non-empty
   (`docs/content-format.md`); a bad file is rejected before existing content is touched
 - Start Game requires ≥ 2 teams and content with every regular round populated

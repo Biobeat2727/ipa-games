@@ -452,6 +452,13 @@ export default function ProjectorView() {
     })
     // Fired by players when they join — keeps lobby team list in sync
     ch.subscribe('team_joined', () => refetchTeams())
+    // Host removed a team: re-read the roster (postgres_changes DELETE events
+    // don't pass the room_id filter, so the broadcast is the reliable path).
+    ch.subscribe('team_kicked', ({ data }) => {
+      const { team_id } = data as { team_id: string }
+      setCurrentTurnTeamId(prev => (prev === team_id ? null : prev))
+      refetchTeams()
+    })
     ch.subscribe('fj_wager_locked', ({ data }) => {
       const { team_id } = data as { team_id: string }
       setFjWagerStatus(prev => new Set([...prev, team_id]))

@@ -51,7 +51,7 @@
 ### Lobby screen
 - Header: "Tapped In! — Host" + "Players join at tappedin.lol"
 - Content section: imported content summary (R1/R2 category counts, FJ status) + Import/Replace JSON
-- Teams section: live list with player counts per team + ✕ delete button
+- Teams section: live list with player counts per team + ✕ remove button (inline "Remove? Yes / Cancel" confirm; runs `kick_team` and broadcasts `team_kicked` so that team's phones leave the lobby)
 - Start Game button (disabled until ≥ 2 teams and content loaded)
 - **New Game** button: broadcasts `lobby_closed`, marks room finished, returns to `no_room`
 
@@ -73,6 +73,12 @@
   board, "To the board →" / "Skip intros" finishes. The host question list is
   disabled while it's open, and a live/pending question always outranks it.
 - Manual score adjust available per team
+- **✕ Remove team** per scoreboard row (inline "Remove from game? Yes / Cancel" confirm).
+  Greyed out, with the reason in the tooltip, while a clue is live or pending, during the
+  Final Tap question/review, and after the game ends; the `kick_team` function refuses at
+  the same moments. Kicking the team that holds the pick hands it to the top remaining team.
+- The scoreboard roster is live: late-joining teams appear via a `teams` INSERT
+  subscription, and kicked teams drop out immediately
 - **New Game** button in scoreboard header: kicks all clients, marks all rooms finished, reloads
 - **⚡ FT** button (DEV only, `import.meta.env.DEV`): calls `startFinalJeopardy()` directly; hidden in production
 
@@ -128,5 +134,6 @@ The Jeopardy-style category grid (player board + projector board) is themed as a
 - Correct / Wrong judgment buttons per buzz
 - Manual score adjust (edit field per team)
 - Give turn to specific team
+- Remove (kick) a team from the game — lobby list or scoreboard ✕, see above
 - Advance rounds: Round 1 → 2 → 3 (**Begin Round N**), Round 3 → Final Tap (**Start Final Tap**); "End Round N early" for a manual advance with clues left
 - New Game (resets everything, kicks all clients)

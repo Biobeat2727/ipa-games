@@ -156,6 +156,8 @@ export default function PlayView() {
   const [playerRoundSplash, setPlayerRoundSplash] = useState<RegularRound | null>(null)
   const [myScore, setMyScore]                 = useState(0)
   const [allTeamScores, setAllTeamScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
+  // Shown on the Team-or-Solo screen after the host removes this phone's team.
+  const [kickedNotice, setKickedNotice]       = useState<string | null>(null)
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
   const [boardCategories, setBoardCategories] = useState<BoardCategory[]>([])
   // Round-start category reveal (host-driven): ids revealed so far, in reveal
@@ -666,16 +668,34 @@ export default function PlayView() {
     return () => clearInterval(id)
   }, [phase, room?.status, room?.id])
 
-  // Kick via broadcast: host sends lobby_closed on the room channel
+  // Kicks via broadcast, pre-game. The host publishes on `room:{id}` — this used
+  // to listen on a `play-kick-{id}` channel nothing ever published to, so lobby
+  // phones only ever left through the room-status fallback. Listener-scoped
+  // unsubscribes because the select_team effect shares this channel object.
   useEffect(() => {
     if (!room?.id || !PRE_GAME_PHASES.includes(phase)) return
-    const ch = ablyClient.channels.get(`play-kick-${room.id}`)
-    ch.subscribe('lobby_closed', () => {
+    const ch = ablyClient.channels.get(`room:${room.id}`)
+    const onLobbyClosed = () => {
       clearPlayerSession()
       setRoom(null); setMyTeam(null); setTeams([])
       setPhase('no_lobby')
-    })
-    return () => { ch.unsubscribe() }
+    }
+    const onTeamKicked = ({ data }: { data?: unknown }) => {
+      const { team_id, team_name } = data as { team_id: string; team_name: string }
+      if (team_id !== myTeamRef.current?.id) return
+      // Only this team leaves. The room stays so the Team-or-Solo screen can
+      // offer a way back in (a wrong-team join is the common reason for a kick).
+      clearPlayerSession()
+      setMyTeam(null); setTeammates([]); setMyScore(0)
+      setKickedNotice(`The host removed ${team_name} from the game.`)
+      setPhase('choose_mode')
+    }
+    ch.subscribe('lobby_closed', onLobbyClosed)
+    ch.subscribe('team_kicked', onTeamKicked)
+    return () => {
+      ch.unsubscribe('lobby_closed', onLobbyClosed)
+      ch.unsubscribe('team_kicked', onTeamKicked)
+    }
   }, [room?.id, phase])
 
   // Lobby → game promotion, independent of the question/status effect below.
@@ -1194,18 +1214,37 @@ export default function PlayView() {
       setRoom(prev => prev ? { ...prev, status: 'finished' } : prev)
       setFjSubPhase('done')
     })
-    ch.subscribe('lobby_closed', () => {
+    // Full local wipe, shared by the host closing the lobby (everyone out) and a
+    // kick aimed at this team (only we leave; the room stays so the Team-or-Solo
+    // screen can offer a way back in).
+    const leaveGame = (keepRoom: boolean) => {
       clearPlayerSession()
       sessionStorage.removeItem('dtWager')
+      sessionStorage.removeItem('buzzWindow')
       setPreviewInfo(null); setActiveQuestion(null); setCurrentTurnTeamId(null)
       setTimerPayload(null); setBuzzWindowTs(null); setHasBuzzed(false); setMyBuzzId(null); setBuzzPosition(null); setBuzzResult(null)
       setDoubleTapTeamId(null); setDtRevealForObserver(false); setDtTeammateWaiting(false)
       setPreBuzzTaps(0); setBuzzLockedOut(false)
       revealClaimRef.current = null
       if (revealTimerRef.current) { clearTimeout(revealTimerRef.current); revealTimerRef.current = null }
-      setRoom(null); setMyTeam(null)
+      setIntermissionSnapshots(null)
+      if (!keepRoom) setRoom(null)
+      setMyTeam(null); setTeammates([]); setAllTeamScores([]); setMyScore(0)
       setFjSubPhase(null)
-      setPhase('no_lobby')
+      setPhase(keepRoom ? 'choose_mode' : 'no_lobby')
+    }
+    ch.subscribe('lobby_closed', () => leaveGame(false))
+    ch.subscribe('team_kicked', ({ data }) => {
+      const { team_id, team_name } = data as { team_id: string; team_name: string }
+      if (team_id === myTeamRef.current?.id) {
+        setKickedNotice(`The host removed ${team_name} from the game.`)
+        leaveGame(true)
+        return
+      }
+      // Someone else's team: drop it from our scoreboard. The host re-issues the
+      // pick if that team held it, so just clear a now-dangling turn locally.
+      setAllTeamScores(prev => prev.filter(t => t.id !== team_id))
+      setCurrentTurnTeamId(prev => (prev === team_id ? null : prev))
     })
 
     ch.subscribe('team_answer_submitted', ({ data }) => {
@@ -1498,6 +1537,7 @@ export default function PlayView() {
 
     const roomCh = ablyClient.channels.get(`room:${roomId}`)
     roomCh.subscribe('team_joined', refreshTeams)
+    roomCh.subscribe('team_kicked', refreshTeams)
     roomCh.subscribe('lobby_closed', () => {
       clearPlayerSession()
       setRoom(null); setMyTeam(null); setTeams([])
@@ -1641,6 +1681,7 @@ export default function PlayView() {
     if (!player || err) { setError('Failed to join team. Try again.'); return }
 
     setTeamId(team.id); setMyTeam(team); setMyScore(team.score)
+    setKickedNotice(null)
     await fetchTeammates(team.id)
     if (room?.id) await refreshAllScores(room.id)
 
@@ -2046,6 +2087,11 @@ export default function PlayView() {
           <h1 className="neon-title text-5xl font-black mb-6 tracking-tight">Tapped In!</h1>
           {/* No "tonight's game" card: only one game runs at a time, so naming it
               told players nothing and pushed the second choice off short screens. */}
+          {kickedNotice && (
+            <p className="w-full mb-4 px-4 py-3 rounded-xl bg-red-500/10 border border-red-400/40 text-red-200 text-sm leading-snug">
+              {kickedNotice} You can join again below.
+            </p>
+          )}
           <p className="text-amber-300 font-black text-lg mb-4">How are you playing?</p>
 
           {/* Two different pours so the choice reads at a glance, not just from the
