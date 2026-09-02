@@ -1,7 +1,8 @@
 // Tapped In! 15-team load test.
 // Drives host + projector + 15 phone-sized players through a real game against
-// the live backend: join, 15 judged questions (3 with steals), score graph,
-// Final Tap with wagers, full FJ review, and the finished-game screens.
+// the live backend: join, three regular rounds (5 judged questions each, 3 with
+// steals) advanced through the REAL transition controls, the score map after
+// every round, Final Tap with wagers, full FJ review, and the finished-game screens.
 // Screenshots land in ./screenshots.
 //
 // The ONLY manual step: sign in as host in the browser window when prompted.
@@ -13,9 +14,20 @@ import puppeteer from 'puppeteer-core'
 
 const BASE = 'http://localhost:4173'
 const CHROME = 'C:\\Program Files\\Google\\Chrome\\Application\\chrome.exe'
-const ROUNDS_JSON = process.env.ROUNDS_JSON
-  ?? 'C:\\Users\\davey\\ipa_game\\rounds\\8-26-26-weekly-round.json'
 const DIR = path.dirname(fileURLToPath(import.meta.url))
+// Newest three-round file in rounds/ unless ROUNDS_JSON overrides it. Files from
+// before the Round 3 release are two-round games and the importer refuses them.
+const ROUNDS_JSON = process.env.ROUNDS_JSON ?? (() => {
+  const dir = path.join(DIR, '..', 'rounds')
+  const candidates = fs.readdirSync(dir).filter(f => f.endsWith('.json')).map(f => path.join(dir, f))
+    .filter(f => { try { const j = JSON.parse(fs.readFileSync(f, 'utf8')); return [1, 2, 3].every(n => j.rounds?.some(r => r.round === n)) } catch { return false } })
+    .sort((a, b) => fs.statSync(b).mtimeMs - fs.statSync(a).mtimeMs)
+  if (!candidates.length) throw new Error('no three-round JSON in rounds/ — set ROUNDS_JSON')
+  return candidates[0]
+})()
+// Outside the repo (Vite ignores tmp/ now, but the smoke script already keeps the
+// signed-in host profile here — share it).
+const PROFILE_DIR = path.join(process.env.LOCALAPPDATA || DIR, 'tapped-in-smoke', 'chrome-profile')
 const SHOTS = path.join(DIR, 'screenshots')
 
 const NAMES = [
@@ -85,7 +97,7 @@ const browser = await puppeteer.launch({
   executablePath: CHROME,
   headless: false,
   defaultViewport: null,
-  userDataDir: path.join(DIR, 'chrome-profile'), // keeps the host sign-in across runs
+  userDataDir: PROFILE_DIR, // keeps the host sign-in across runs
   args: ['--window-size=1500,950', '--window-position=40,40'],
   // 17 live pages make captureScreenshot occasionally exceed the 30s default
   protocolTimeout: 180_000,
@@ -151,11 +163,13 @@ try {
   }
   log(`Content file: ${path.basename(ROUNDS_JSON)} (${realDescriptions ? 'real' : 'placeholder'} descriptions)`)
   const json = JSON.stringify(content)
-  if (!(await pageHas(host, 'R1:'))) {
-    await clickButton(host, 'Import JSON')
+  // (Re)import unless the lobby already shows a complete three-round summary
+  const summaryNow = await host.evaluate(() => [...document.querySelectorAll('p')].map(p => p.innerText).find(t => t.includes('R1:')) ?? '')
+  if (!/R3: [1-9]/.test(summaryNow) || !summaryNow.includes('Final Tap ✓')) {
+    await clickButton(host, summaryNow ? 'Replace' : 'Import JSON')
     await setInput(host, 'textarea', json)
     await clickButton(host, 'Import')
-    await hasText(host, 'R1:', 30000, 'content summary')
+    await waitFor(host, () => /R3: [1-9]/.test(document.body.innerText), null, 30000, 'three-round content summary')
   }
   const summaryLine = await host.evaluate(() => [...document.querySelectorAll('p')].map(p => p.innerText).find(t => t.includes('R1:')))
   log('Content:', summaryLine)
@@ -224,48 +238,80 @@ try {
   await sleep(2500)
 
   // ── Round-start category reveal (host steps through the intros) ──
-  await hasText(host, 'Category Intros', 15000, 'reveal panel')
-  await sleep(800)
-  await shot(host, '03z-host-reveal-panel-start') // nothing revealed yet — full intro list
-  let revealClicks = 0
-  while (await host.evaluate(() =>
-    [...document.querySelectorAll('button')].some(b => !b.disabled && b.innerText.trim().startsWith('Reveal “')))) {
-    await clickButton(host, 'Reveal “')
-    revealClicks++
-    if (revealClicks === 3) {
-      await sleep(450) // mid-pop
-      await shot(projector, '03a-projector-mid-reveal')
-      await shot(players[2], '03b-player-mid-reveal')
-      await shot(host, '03c-host-reveal-panel')
+  // Every round with descriptions opens the intro panel; step through it each time.
+  async function runCategoryIntros(round) {
+    if (!(await pageHas(host, 'Category Intros'))) {
+      try { await hasText(host, 'Category Intros', 6000, 'reveal panel') } catch { log(`Round ${round}: no category intros`); return }
     }
-    await sleep(1000)
+    await sleep(800)
+    if (round === 1) await shot(host, '03z-host-reveal-panel-start') // nothing revealed yet — full intro list
+    let revealClicks = 0
+    while (await host.evaluate(() =>
+      [...document.querySelectorAll('button')].some(b => !b.disabled && b.innerText.trim().startsWith('Reveal “')))) {
+      await clickButton(host, 'Reveal “')
+      revealClicks++
+      if (round === 1 && revealClicks === 3) {
+        await sleep(450) // mid-pop
+        await shot(projector, '03a-projector-mid-reveal')
+        await shot(players[2], '03b-player-mid-reveal')
+        await shot(host, '03c-host-reveal-panel')
+      }
+      await sleep(round === 1 ? 1000 : 500)
+    }
+    await clickButton(host, 'To the board')
+    log(`Round ${round} category reveal: stepped through ${revealClicks} categories`)
+    await sleep(1200)
+    if (round === 1) await shot(host, '03d-host-board-list-descriptions') // descriptions during normal play
   }
-  await clickButton(host, 'To the board')
-  log(`Category reveal: stepped through ${revealClicks} categories`)
-  await sleep(1200)
-  await shot(host, '03d-host-board-list-descriptions') // descriptions during normal play
+  await runCategoryIntros(1)
 
-  // ── Play 15 questions (dynamic pick: highest-value non-Double-Tap first) ──
+  // ── Play 15 questions, 5 per round (dynamic pick: highest-value non-Double-Tap first) ──
   const scores = new Array(15).fill(0)
   const timings = []
 
+  // Only the round in play: its heading carries "now playing" in the host list.
+  // Serialized into the page so both helpers share one definition.
+  const currentRoundButtonsSrc = `(() => {
+    const heading = [...document.querySelectorAll('p')].find(p => p.innerText.toLowerCase().includes('now playing'))
+    const scope = heading ? heading.parentElement : document
+    return [...scope.querySelectorAll('button')]
+      .filter(b => !b.disabled && b.querySelector('span.font-mono') && !b.innerText.includes('\u{1F37A}'))
+  })()`
   async function pickQuestion() {
-    // Highest-value enabled non-🍺 question button in the host board list
-    return host.evaluate(() => {
-      const btns = [...document.querySelectorAll('button')]
-        .filter(b => !b.disabled && b.querySelector('span.font-mono') && !b.innerText.includes('🍺'))
+    return host.evaluate(src => {
+      const btns = eval(src)
         .map(b => ({ v: parseInt(b.querySelector('span.font-mono').innerText), t: b.innerText.slice(0, 40) }))
         .sort((a, b) => b.v - a.v)
       return btns[0] ?? null
-    })
+    }, currentRoundButtonsSrc)
   }
   async function clickQuestion(value) {
-    await host.evaluate(v => {
-      const b = [...document.querySelectorAll('button')]
-        .filter(x => !x.disabled && x.querySelector('span.font-mono') && !x.innerText.includes('🍺'))
-        .find(x => parseInt(x.querySelector('span.font-mono').innerText) === v)
+    await host.evaluate(({ v, src }) => {
+      const b = eval(src).find(x => parseInt(x.querySelector('span.font-mono').innerText) === v)
       b.click()
-    }, value)
+    }, { v: value, src: currentRoundButtonsSrc })
+  }
+
+  // Real round transitions — the same buttons the host presses on the night.
+  async function advanceRound(from) {
+    const next = from === 3 ? 'Final Tap' : `Round ${from + 1}`
+    await clickButton(host, `End Round ${from} early`)
+    await clickButton(host, `Show Scores & Start ${next}`)
+    await hasText(players[0], from === 1 ? 'Round One Down' : from === 2 ? 'Round Two Down' : 'Last Call', 15000, 'player score map')
+    await sleep(3500) // draw-on animation
+    await shot(players[0], `06-r${from}-player-graph`)
+    await shot(projector, `07-r${from}-projector-graph`)
+    await shot(host, `08-r${from}-host-graph`)
+    if (from === 3) {
+      await clickButton(host, 'Start Final Tap')
+      return
+    }
+    await clickButton(host, `Begin ${next}`)
+    await hasText(projector, next, 15000, `projector ${next} board`)
+    await sleep(3000) // splash
+    await shot(players[1], `06b-r${from + 1}-player-board`)
+    await shot(projector, `07b-r${from + 1}-projector-board`)
+    await runCategoryIntros(from + 1)
   }
 
   async function tapBuzz(p) {
@@ -297,6 +343,8 @@ try {
   }
 
   for (let i = 0; i < 15; i++) {
+    if (i === 5) await advanceRound(1)
+    if (i === 10) await advanceRound(2)
     const q = await pickQuestion()
     if (!q) { log('⚠ ran out of questions at', i); break }
     const t0 = Date.now()
@@ -331,7 +379,7 @@ try {
     await answers.catch(e => log('answer task note:', e.message))
     scores[i] += q.v
     timings.push(Date.now() - t0)
-    log(`Q${i + 1} [$${q.v}] ${NAMES[i]} correct → ${scores[i]} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
+    log(`R${i < 5 ? 1 : i < 10 ? 2 : 3} Q${i + 1} [$${q.v}] ${NAMES[i]} correct → ${scores[i]} (${((Date.now() - t0) / 1000).toFixed(1)}s)`)
     await sleep(1200) // board settles
   }
   log('Scores:', NAMES.map((n, i) => `${n}:${scores[i]}`).join(' '))
@@ -352,16 +400,8 @@ try {
   })
   await players[7].keyboard.press('Escape').catch(() => {})
 
-  // ── Intermission graph (real 15-18 step history) ──
-  await clickButton(host, '⚡ Graph')
-  await hasText(players[0], 'Halftime', 15000, 'player graph screen')
-  await sleep(3500) // draw-on animation
-  await shot(players[0], '06-player-graph')
-  await shot(projector, '07-projector-graph')
-  await shot(host, '08-host-graph')
-
-  // ── Final Tap (every positive team advances — all 15) ──
-  await clickButton(host, '⚡ FT')
+  // ── Round 3 → Final Tap through the real transition (every positive team advances — all 15) ──
+  await advanceRound(3)
   await hasText(host, 'Active Teams', 20000, 'FT starting panel')
   await sleep(1500)
   await shot(host, '09-host-final-tap-teams')
