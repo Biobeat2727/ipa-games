@@ -34,7 +34,7 @@ const NAMES = ['Alpha Ales', 'Bravo Brews', 'Charlie Casks']
 const LATE_NAME = 'Late Larry'
 
 // Same table as src/lib/rounds.ts DOUBLE_TAP_FLOORS and public.double_tap_floor()
-const DT_FLOOR = { round_1: 500, round_2: 2000, round_3: 3000 }
+const DT_FLOOR = { round_1: 1000, round_2: 2000, round_3: 3000 }
 
 const log = (...a) => console.log(new Date().toISOString().slice(11, 19), ...a)
 const sleep = ms => new Promise(r => setTimeout(r, ms))

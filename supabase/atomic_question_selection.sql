@@ -35,7 +35,7 @@ as $$
   select case p_round
     when 3 then 3000
     when 2 then 2000
-    else 500
+    else 1000
   end;
 $$;
 

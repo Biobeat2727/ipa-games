@@ -21,7 +21,7 @@
 --   * claim_question_selection / judge_buzz accept round_3 and map it ONLY to
 --     categories with round = 3 that hold real (non-null) point values.
 --   * confirm_question_selection / judge_buzz use one shared Double Tap floor
---     table: 500 / 2000 / 3000 for rounds 1 / 2 / 3 (mirrors DOUBLE_TAP_FLOORS
+--     table: 1000 / 2000 / 3000 for rounds 1 / 2 / 3 (mirrors DOUBLE_TAP_FLOORS
 --     in src/lib/rounds.ts — change both together).
 --   * Late team creation is allowed through round_3 and still refused in
 --     final_jeopardy (eligibility is computed at the round_3 → Final transition).
@@ -57,8 +57,8 @@ end;
 $$;
 
 -- Double Tap ceiling floor per regular round. A team may wager up to
--- greatest(score, floor). Round 3 = 3000 is the working assumption until a
--- product value is chosen; keep src/lib/rounds.ts DOUBLE_TAP_FLOORS in sync.
+-- greatest(score, floor). Values set 2026-09-02: 1000 / 2000 / 3000. Keep
+-- src/lib/rounds.ts DOUBLE_TAP_FLOORS in sync; re-run this file after a change.
 create or replace function public.double_tap_floor(p_round integer)
 returns integer
 language sql
@@ -68,7 +68,7 @@ as $$
   select case p_round
     when 3 then 3000
     when 2 then 2000
-    else 500
+    else 1000
   end;
 $$;
 
@@ -511,7 +511,7 @@ commit;
 --          public.double_tap_floor(1) as floor_r1,
 --          public.double_tap_floor(2) as floor_r2,
 --          public.double_tap_floor(3) as floor_r3;
---   -- 3, null, 500, 2000, 3000
+--   -- 3, null, 1000, 2000, 3000
 --
 -- 3. Selection + judgment accept round_3 and use the shared floor:
 --   select pg_get_functiondef('public.claim_question_selection(uuid,uuid,uuid,text)'::regprocedure)

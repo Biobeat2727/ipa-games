@@ -31,9 +31,9 @@ No test or lint script is configured — `npm test` and `npm run lint` do not ex
   New imports store the Final Tap category as `round = 4`; rooms imported before
   Round 3 existed stored it as `round = 3` and still resolve.
 - Double Tap wager ceiling = max(team score, round floor); floors are
-  500 / 2000 / 3000 for rounds 1 / 2 / 3, defined once in `src/lib/rounds.ts`
+  1000 / 2000 / 3000 for rounds 1 / 2 / 3, defined once in `src/lib/rounds.ts`
   and mirrored by `public.double_tap_floor()` in `supabase/add_round_three_2_game_logic.sql`.
-  The Round 3 value (3000) is an assumption pending a product decision.
+  Values confirmed by Davey 2026-09-02 (Round 1 raised from 500).
 - Database first, frontend second: `supabase/add_round_three_1_enum.sql`, `_2_game_logic.sql`, then `_3_category_round_check.sql` (three separate SQL-editor runs) must be applied
   before deploying a build that emits `round_3`; apply and roll back only between games.
 

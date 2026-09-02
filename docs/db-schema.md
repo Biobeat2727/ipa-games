@@ -85,7 +85,7 @@ question completion commit together and duplicate host taps cannot score twice.
 `round_1`, `round_2`, and `round_3`; selection maps each status to categories of that round
 via `public.regular_round_number(status)` and only to clues with a non-null `point_value`.
 Double Tap wagers are bounded by `greatest(score, public.double_tap_floor(round))`
-(500 / 2000 / 3000). Both helper functions are defined in `supabase/add_round_three_2_game_logic.sql`
+(1000 / 2000 / 3000). Both helper functions are defined in `supabase/add_round_three_2_game_logic.sql`
 (and, for fresh installs, `supabase/atomic_question_selection.sql`) and mirror
 `src/lib/rounds.ts`.
 

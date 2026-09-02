@@ -54,7 +54,7 @@ begin
         and q.is_double_tap = true
         and p_wager between 5 and greatest(
           t.score,
-          -- Rounds 1 / 2 / 3 → 500 / 2000 / 3000, same table as the phones
+          -- Rounds 1 / 2 / 3 → 1000 / 2000 / 3000, same table as the phones
           public.double_tap_floor(public.regular_round_number(r.status))
         )
     );

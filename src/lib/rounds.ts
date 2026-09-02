@@ -37,13 +37,13 @@ export interface RoundDefinition {
 }
 
 // ── Double Tap floors ──────────────────────────────────────────────
-// One explicit table. Rounds 1 and 2 keep their historical values; Round 3 has
-// no product-supplied number yet, so it uses 3000 (the "hardest board, biggest
-// swing" assumption — see the AGENTS.md / docs/game-flow.md note). If the value
-// changes, update supabase/add_round_three_2_game_logic.sql's double_tap_floor() to match.
+// One explicit table, set by Davey on 2026-09-02: Round 1 raised from its
+// historical 500 to 1000, Round 2 unchanged, Round 3 confirmed at 3000. If a
+// value changes, update supabase/add_round_three_2_game_logic.sql's
+// double_tap_floor() to match and re-run that file.
 export const DOUBLE_TAP_MIN_WAGER = 5
 export const DOUBLE_TAP_FLOORS: Record<RegularRound, number> = {
-  1: 500,
+  1: 1000,
   2: 2000,
   3: 3000,
 }

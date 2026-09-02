@@ -42,9 +42,9 @@ are honored. The round builder's guidance (see `.claude/skills/tapped-in-rounds/
 
 | Round | Values | Difficulty | Double Tap floor |
 |---|---|---|---|
-| 1 | 100–500 | broad bar-crowd recall | 500 |
+| 1 | 100–500 | broad bar-crowd recall | 1000 |
 | 2 | 200–1000 | harder, wordplay/deduction | 2000 |
-| 3 | 300–1500 | hardest board of the night | 3000 (assumed pending a product decision) |
+| 3 | 300–1500 | hardest board of the night | 3000 |
 
 Two Double Taps are assigned at random in **each** of the three rounds (in
 different categories when the round has more than one). A team may wager from 5 up

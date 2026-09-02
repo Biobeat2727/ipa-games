@@ -90,7 +90,7 @@ calculation, Double Tap floors — comes from `src/lib/rounds.ts` (`REGULAR_ROUN
   - **Correct:** score added, question marked `is_answered`, turn passes to winning team
   - **Wrong:** buzz marked wrong, next in queue gets fresh timer
 - All buzzes exhausted or timer expires → no points, question marked answered, turn passes
-- Double Tap wagers: 5 … max(team score, round floor); floors 500 / 2000 / 3000 for
+- Double Tap wagers: 5 … max(team score, round floor); floors 1000 / 2000 / 3000 for
   rounds 1 / 2 / 3, enforced identically on phones, host, and in the database
 - Round ends when all questions answered, or the host clicks
   **End Round N early → …** on the empty right panel (two-step: it only opens the
