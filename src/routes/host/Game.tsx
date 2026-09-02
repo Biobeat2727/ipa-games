@@ -5,6 +5,7 @@ import { clearHostSession } from '../../lib/session'
 import type { Buzz, FinalPhase, Question, Room, ScoreSnapshot, Team, Wager } from '../../lib/types'
 import ScoreHistoryChart from '../../components/ScoreHistoryChart'
 import { compareCategoryOrder } from '../../lib/categoryOrder'
+import { useWakeLock } from '../../lib/useWakeLock'
 import {
   FINAL_TAP_LABEL,
   REGULAR_ROUNDS,
@@ -49,6 +50,7 @@ interface Props {
 }
 
 export default function Game({ roomId, initialRoom, teams, onSignOut }: Props) {
+  useWakeLock() // keep the host device awake for the whole game
   const [room, setRoom]             = useState<Room>(initialRoom)
   const [categories, setCategories] = useState<CategoryRow[]>([])
   const [catIds, setCatIds]         = useState<string[]>([])

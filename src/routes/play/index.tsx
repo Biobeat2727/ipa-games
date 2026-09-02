@@ -17,6 +17,7 @@ import FeedbackForm from '../../components/FeedbackForm'
 import { BeerGlass, TapHeader, tapHeaderRevealFor } from '../../components/TapCategoryColumn'
 import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { useVisualViewportHeight } from '../../lib/useVisualViewportHeight'
+import { useWakeLock } from '../../lib/useWakeLock'
 import { Bubbles, PintHero, CheersPints, SoloPint } from '../../components/Barware'
 import { QUIPS } from '../../lib/quips'
 import { findCurrentActiveRoom, getLocalDayStartIso } from '../../lib/roomDiscovery'
@@ -168,6 +169,7 @@ export default function PlayView() {
 
   // Answer screens size to this so the phone keyboard can't bury the submit button
   const viewportHeight = useVisualViewportHeight()
+  useWakeLock() // keep phones from locking mid-round (beta-test finding)
   const [teamNames, setTeamNames]             = useState<Map<string, string>>(new Map())
   const [previewInfo, setPreviewInfo]         = useState<PreviewInfo | null>(null)
   const [doubleTapTeamId, setDoubleTapTeamId] = useState<string | null>(null)

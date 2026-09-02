@@ -20,6 +20,7 @@ import {
   statusToRound,
 } from '../../lib/rounds'
 import { findFinalTapCategory } from '../../lib/finalTap'
+import { useWakeLock } from '../../lib/useWakeLock'
 
 interface TimerPayload {
   start_timestamp: number
@@ -42,6 +43,7 @@ const JOIN_URL = 'https://tappedin.lol'
 type Phase = 'checking' | 'waiting' | 'connected'
 
 export default function ProjectorView() {
+  useWakeLock() // keep the projector machine from sleeping mid-game
   const [phase, setPhase]               = useState<Phase>('checking')
   const [room, setRoom]                 = useState<Room | null>(null)
   const [teams, setTeams]               = useState<Team[]>([])
