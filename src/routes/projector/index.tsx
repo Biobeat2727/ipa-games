@@ -42,6 +42,14 @@ const JOIN_URL = 'https://tappedin.lol'
 
 type Phase = 'checking' | 'waiting' | 'connected'
 
+// Clue text sized by length so a long clue still fits a 16:9 projector with the
+// buzz list or the Final timer under it. Up to 120 chars keeps exactly the sizes
+// every tested clue has used; a 240-char Round 3 clue used to run off the screen.
+function clueFontSize(len: number, vw: number, maxRem: number): string {
+  const scale = len <= 120 ? 1 : len <= 180 ? 0.8 : len <= 240 ? 0.65 : 0.57
+  return `clamp(1.5rem, ${(vw * scale).toFixed(2)}vw, ${(maxRem * scale).toFixed(2)}rem)`
+}
+
 export default function ProjectorView() {
   useWakeLock() // keep the projector machine from sleeping mid-game
   const [phase, setPhase]               = useState<Phase>('checking')
@@ -840,11 +848,15 @@ export default function ProjectorView() {
               Final Tap — {fjCategoryName}
             </p>
             <p className="font-black text-white leading-tight mb-10 max-w-5xl"
-              style={{ fontSize: 'clamp(2rem, 5.5vw, 5rem)' }}>
+              style={{ fontSize: clueFontSize(fjQuestion.answer.length, 5.5, 5) }}>
               {fjQuestion.answer}
             </p>
             <p className={`font-mono font-black tabular-nums leading-none ${low ? 'text-red-400' : 'text-gray-400'}`}
-              style={{ fontSize: 'clamp(5rem, 15vw, 12rem)', animation: low ? 'timer-pulse 0.8s ease-in-out infinite' : undefined }}>
+              style={{
+                // A long clue needs the vertical room more than a wall-sized timer does
+                fontSize: fjQuestion.answer.length > 140 ? 'clamp(4rem, 10vw, 8rem)' : 'clamp(5rem, 15vw, 12rem)',
+                animation: low ? 'timer-pulse 0.8s ease-in-out infinite' : undefined,
+              }}>
               {rem}
             </p>
           </div>
@@ -940,7 +952,8 @@ export default function ProjectorView() {
           style={{ fontSize: compact ? 'clamp(1.5rem, 3.5vw, 3rem)' : 'clamp(2rem, 6vw, 5rem)' }}
         />
         <p className={`relative z-10 text-yellow-300 ${compact ? 'mb-4' : 'mb-12'}`} style={{ fontSize: 'clamp(1rem, 2vw, 1.75rem)', marginTop: compact ? '-1.5rem' : '-3rem' }}>pts</p>
-        <div className={`relative z-10 w-full ${compact ? 'grid grid-cols-2 gap-1.5 max-w-5xl' : 'space-y-3 max-w-2xl'}`}>
+        {/* Past 16 teams even two columns run off the top of the screen → three */}
+        <div className={`relative z-10 w-full ${compact ? `grid gap-1.5 ${finalSorted.length > 16 ? 'grid-cols-3 max-w-7xl' : 'grid-cols-2 max-w-5xl'}` : 'space-y-3 max-w-2xl'}`}>
           {finalSorted.map((team, i) => (
             <div key={team.id} className={`flex items-center rounded-2xl ${compact ? 'gap-3 px-5 py-2' : 'gap-4 px-8 py-5'} ${
               i === 0 ? 'bg-yellow-400/10 border-2 border-yellow-400/60' : 'glass-card'
@@ -993,7 +1006,7 @@ export default function ProjectorView() {
               {previewInfo.pointValue != null && ` — $${previewInfo.pointValue}`}
             </p>
             <p className="font-black leading-tight mb-10 max-w-6xl"
-              style={{ fontSize: 'clamp(2rem, 5vw, 4.5rem)' }}>
+              style={{ fontSize: clueFontSize(previewQuestion.answer.length, 5, 4.5) }}>
               {previewQuestion.answer}
             </p>
           </>
@@ -1313,7 +1326,7 @@ export default function ProjectorView() {
             {activeQuestion.point_value != null && ` — $${activeQuestion.point_value}`}
           </p>
           <p className="font-black leading-tight mb-10 max-w-6xl"
-            style={{ fontSize: 'clamp(2rem, 5vw, 4.5rem)' }}>
+            style={{ fontSize: clueFontSize(activeQuestion.answer.length, 5, 4.5) }}>
             {activeQuestion.answer}
           </p>
 

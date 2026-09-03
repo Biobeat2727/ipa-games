@@ -114,6 +114,12 @@
 
 ---
 
+**Clue text sizing (projector):** preview, buzzer-open and Final Tap clues scale by length
+(`clueFontSize` in `src/routes/projector/index.tsx` — full size up to 120 chars, then 0.8 / 0.65 /
+0.57 at 180 / 240 / longer) so a 240-char clue plus the buzz list or the Final timer still fits
+1600×900 without scrolling. The Final timer also drops to a smaller size above 140 chars. Verified
+with `tmp/projector-fit-test.mjs`. Game-over standings go three-column above 16 teams.
+
 ## Board Visual Theme — Tap & Glass (bar aesthetic)
 
 The Jeopardy-style category grid (player board + projector board) is themed as a bar tap wall: each category is a tap handle, each point-value tile is a beer glass that's full (unanswered) or empty (answered).
