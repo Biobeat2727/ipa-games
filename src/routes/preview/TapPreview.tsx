@@ -3,7 +3,13 @@ import TapCategoryColumn, { TapHeader } from '../../components/TapCategoryColumn
 import ScoreHistoryChart, { type ScoreSnapshot } from '../../components/ScoreHistoryChart'
 import { TipJar, TipJarProjector, VenueFooter } from '../../components/TipJar'
 
-const CATEGORIES = ['Beer History', 'Local Breweries', 'Hops & Barley', 'Bar Trivia']
+// `/preview?cats=TV Dads,Leftovers,Conspiracies,…` swaps in real names — the way
+// to check a week's category names at phone width before the night.
+const CATEGORIES = (() => {
+  const fromUrl = new URLSearchParams(window.location.search).get('cats')
+  const names = fromUrl?.split(',').map(s => s.trim()).filter(Boolean)
+  return names?.length ? names : ['Beer History', 'Local Breweries', 'Hops & Barley', 'Bar Trivia']
+})()
 const POINT_VALUES = [100, 200, 300, 400, 500]
 
 // ── Bump-chart sandbox data ───────────────────────────────────

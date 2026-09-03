@@ -1,4 +1,4 @@
-import { useState, type MouseEvent } from 'react'
+import { useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
 
 type GlassState = 'full' | 'draining' | 'empty'
 
@@ -153,8 +153,71 @@ export function tapHeaderRevealFor(revealedIds: string[] | null, catId: string):
   return catId === revealedIds[revealedIds.length - 1] ? 'revealing' : 'shown'
 }
 
+// ── Sign text fitting ────────────────────────────────────────
+// A phone column fits only ~6 uppercase characters per line. Multi-word names
+// wrap between words on their own; a single long word ("Conspiracies") had no
+// break point and was clipped. Automatic hyphenation isn't deterministic across
+// phones (it needs a dictionary the device may not have), so instead:
+//   1. measure the longest word and shrink the sign's font just enough for it
+//      to fit on one line, down to SIGN_MIN_FONT_SCALE;
+//   2. if it still can't fit, break at a soft hyphen placed mid-word
+//      ("Conspi-racies"), never one character from the end ("Sequel-s").
+// Measured on a 375px phone with five columns: ~46px per sign, ~7.3px per
+// uppercase character at the base size. 0.72 lets an 8-letter word ("Unsolved",
+// "Medicine") stay on one line; anything longer breaks at its soft hyphen.
+const SIGN_BASE_FONT = 'clamp(0.7rem, 1.7vw, 1.3rem)'
+const SIGN_MIN_FONT_SCALE = 0.7
+const SOFT_HYPHEN_MIN_WORD = 9
+// Scaled text lands within a pixel of the column and sub-pixel rounding can
+// still tip it over — always aim a little under the available width.
+const SIGN_FIT_MARGIN = 0.95
+
+function longestWord(name: string): string {
+  return name.split(/\s+/).reduce((a, b) => (b.length > a.length ? b : a), '')
+}
+function softHyphenate(name: string): string {
+  return name.split(' ').map(w => {
+    if (w.length < SOFT_HYPHEN_MIN_WORD) return w
+    const cut = Math.ceil(w.length / 2)
+    return w.slice(0, cut) + '­' + w.slice(cut)
+  }).join(' ')
+}
+
 export function TapHeader({ categoryName, reveal = 'shown' }: { categoryName: string; reveal?: TapHeaderReveal }) {
   const hidden = reveal === 'hidden'
+  const textRef  = useRef<HTMLParagraphElement>(null)
+  const probeRef = useRef<HTMLSpanElement>(null)
+  const [fontScale, setFontScale] = useState(1)
+
+  useLayoutEffect(() => {
+    const text = textRef.current
+    const probe = probeRef.current
+    if (!text || !probe) return
+    const fit = () => {
+      const avail = text.clientWidth
+      const need  = probe.offsetWidth
+      if (avail <= 0 || need <= 0) return
+      const ratio = (avail * SIGN_FIT_MARGIN) / need
+      if (ratio >= 1) { setFontScale(1); return }
+      const word = longestWord(categoryName)
+      if (ratio >= SIGN_MIN_FONT_SCALE || word.length < SOFT_HYPHEN_MIN_WORD) {
+        setFontScale(Math.max(SIGN_MIN_FONT_SCALE, ratio))
+        return
+      }
+      // It will break at the soft hyphen either way, so size for the longer
+      // half (plus the hyphen) instead of shrinking the whole word to the floor.
+      const cut = Math.ceil(word.length / 2)
+      const halfNeed = need * (Math.max(cut, word.length - cut) + 1) / word.length
+      setFontScale(Math.min(1, Math.max(SIGN_MIN_FONT_SCALE, (avail * SIGN_FIT_MARGIN) / halfNeed)))
+    }
+    fit()
+    const ro = new ResizeObserver(fit)
+    ro.observe(text)
+    // Web font arriving after first paint changes the measurement
+    document.fonts?.ready.then(fit).catch(() => {})
+    return () => ro.disconnect()
+  }, [categoryName])
+
   return (
     <div className="flex flex-col items-center">
       {/* knob */}
@@ -185,15 +248,26 @@ export function TapHeader({ categoryName, reveal = 'shown' }: { categoryName: st
         {/* The real name always occupies the layout (invisible while hidden) so
             the header row doesn't jump taller when a two-line name reveals */}
         <p
+          ref={textRef}
           className="relative font-black uppercase leading-tight text-amber-50"
           style={{
-            fontSize: 'clamp(0.7rem, 1.7vw, 1.3rem)',
+            fontSize: fontScale === 1 ? SIGN_BASE_FONT : `calc(${SIGN_BASE_FONT} * ${fontScale.toFixed(3)})`,
             letterSpacing: '0.02em',
             textShadow: '0 1px 1px rgba(0,0,0,0.5)',
             opacity: hidden ? 0 : 1,
+            // Last resort only — the soft hyphen is the intended break point
+            overflowWrap: 'anywhere',
           }}
         >
-          {categoryName}
+          {softHyphenate(categoryName)}
+          {/* Unscaled, single-line copy of the longest word: what "fits" is measured against */}
+          <span
+            ref={probeRef}
+            aria-hidden
+            style={{ position: 'absolute', visibility: 'hidden', whiteSpace: 'nowrap', pointerEvents: 'none', fontSize: SIGN_BASE_FONT, left: 0, top: 0 }}
+          >
+            {longestWord(categoryName)}
+          </span>
         </p>
         {hidden && (
           <span
