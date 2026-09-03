@@ -2143,6 +2143,7 @@ export default function PlayView() {
           </p>
           <input
             type="text"
+            autoComplete="off" autoCorrect="off" autoCapitalize="words" spellCheck={false}
             placeholder="Your name"
             value={soloName}
             onChange={e => { setSoloName(e.target.value); if (error) setError('') }}
@@ -2185,6 +2186,7 @@ export default function PlayView() {
           </p>
           <input
             type="text"
+            autoComplete="off" autoCorrect="off" autoCapitalize="words" spellCheck={false}
             placeholder="Your name"
             value={nickname}
             onChange={e => setNickname(e.target.value)}
@@ -2231,6 +2233,7 @@ export default function PlayView() {
             <div className="space-y-2 mb-6">
               <input
                 type="text"
+                autoComplete="off" autoCorrect="off" autoCapitalize="words" spellCheck={false}
                 placeholder="Team name"
                 value={newTeamName}
                 onChange={e => { setNewTeamName(e.target.value); if (error) setError('') }}
@@ -2372,6 +2375,7 @@ export default function PlayView() {
         <div className="w-full max-w-xs space-y-4">
           <input
             type="number"
+            autoComplete="off"
             inputMode="numeric"
             min={0}
             max={maxWager}
@@ -2813,6 +2817,7 @@ export default function PlayView() {
         <div className="w-full max-w-xs space-y-4">
           <input
             type="number"
+            autoComplete="off"
             inputMode="numeric"
             autoFocus
             min={5}
