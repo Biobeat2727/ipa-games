@@ -26,6 +26,21 @@ Players store their `team_id` in `localStorage`. On return visit:
 - Look up team → look up room → if the room is active and was created today, resume into lobby/game
 - If membership, team, or current room is missing → clear the stale session and discover today's lobby
 
+Player startup keeps retrying through connection failures, with an eight-second timeout
+per network request and capped backoff. A restore can take longer while requests
+keep succeeding. Returning to the tab, coming back online, or tapping Retry skips
+backoff without interrupting a working request. After six seconds, the phone explains that recovery is automatic and
+shows **Try again now** and **Rejoin game**; the controls stay visible until recovery
+finishes. Rejoin opens the current team list, or today's finished results when no
+active room exists. It retains the saved seat until discovery succeeds and preserves
+all database teams and scores. Selecting another team confirms the destination
+membership before removing this session's memberships on other teams in the same
+room; attendance from previous games is preserved. Failed
+cleanup remains retryable and does not report a successful join.
+Membership checks tolerate historical duplicate player rows, and rejoining the
+same team reuses an existing membership instead of inserting another one.
+Requests from abandoned recovery attempts cannot restore a stale team.
+
 Host, player, and projector room discovery all use the same current-day query. The authenticated
 host additionally filters by room ownership.
 

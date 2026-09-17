@@ -11,12 +11,14 @@ export function getLocalDayStartIso(): string {
  *  Lets a projector (or phone) reloaded on the results screen show the results
  *  again instead of "waiting for host" — callers must still prefer an active
  *  room when one exists. */
-export async function findMostRecentFinishedRoomToday(): Promise<Room | null> {
-  const { data, error } = await supabase
+export async function findMostRecentFinishedRoomToday(signal?: AbortSignal): Promise<Room | null> {
+  let query = supabase
     .from('rooms')
     .select()
     .eq('status', 'finished')
     .gte('created_at', getLocalDayStartIso())
+  if (signal) query = query.abortSignal(signal)
+  const { data, error } = await query
     .order('created_at', { ascending: false })
     .limit(1)
     .maybeSingle()
@@ -24,7 +26,7 @@ export async function findMostRecentFinishedRoomToday(): Promise<Room | null> {
   return data ?? null
 }
 
-export async function findCurrentActiveRoom(hostId?: string): Promise<Room | null> {
+export async function findCurrentActiveRoom(hostId?: string, signal?: AbortSignal): Promise<Room | null> {
   let query = supabase
     .from('rooms')
     .select()
@@ -32,6 +34,7 @@ export async function findCurrentActiveRoom(hostId?: string): Promise<Room | nul
     .gte('created_at', getLocalDayStartIso())
 
   if (hostId) query = query.eq('host_id', hostId)
+  if (signal) query = query.abortSignal(signal)
 
   const { data, error } = await query
     .order('created_at', { ascending: false })

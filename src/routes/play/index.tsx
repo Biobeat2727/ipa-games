@@ -20,7 +20,8 @@ import { useVisualViewportHeight } from '../../lib/useVisualViewportHeight'
 import { useWakeLock } from '../../lib/useWakeLock'
 import { Bubbles, PintHero, CheersPints, SoloPint } from '../../components/Barware'
 import { QUIPS } from '../../lib/quips'
-import { findCurrentActiveRoom, getLocalDayStartIso } from '../../lib/roomDiscovery'
+import { playerRequest } from '../../lib/playerRecovery'
+import { findCurrentActiveRoom, findMostRecentFinishedRoomToday, getLocalDayStartIso } from '../../lib/roomDiscovery'
 import {
   FINAL_TAP_LABEL,
   FIRST_ROUND,
@@ -110,6 +111,8 @@ function QuipCycler() {
 
 export default function PlayView() {
   const [phase, setPhase]             = useState<Phase>('checking')
+  const [recoveryAttempt, setRecoveryAttempt] = useState(0)
+  const [recoverySlow, setRecoverySlow] = useState(false)
   const [error, setError]             = useState('')
   const [loading, setLoading]         = useState(false)
   const [room, setRoom]               = useState<Room | null>(null)
@@ -238,6 +241,11 @@ export default function PlayView() {
   const revealClaimRef         = useRef<string | null>(null) // question id whose reveal is owned by the Ably broadcast path
   const activeQuestionRef      = useRef<QuestionPublic | null>(null) // lets the DB fallback see whether the claimed reveal is still on screen
   const revealTimerRef         = useRef<ReturnType<typeof setTimeout> | null>(null) // pending scheduled reveal
+  const joinInFlightRef        = useRef(false)
+  const rejoinRequestedRef     = useRef(false)
+  const retryRecoveryRef       = useRef<() => void>(() => {})
+  const creatingTeamRef        = useRef(false)
+  const pendingCreatedTeamRef  = useRef<Team | null>(null)
   const selectionClaimingRef   = useRef(false)
   const selectionNoticeTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Beta-test timing tool (host-toggled, see docs): remembers the last-seen debugTiming
@@ -376,91 +384,161 @@ export default function PlayView() {
     setTeammates(data ?? [])
   }, [])
 
-  // Load all team scores for overlay
-  const refreshAllScores = useCallback(async (roomId: string) => {
-    const { data } = await supabase.from('teams').select('id, name, score').eq('room_id', roomId)
-    if (data) setAllTeamScores(data)
-  }, [])
-
-  // On mount: resume saved session or auto-resolve the single active room
+  // Startup recovery is cancellable and keeps the saved seat through outages.
+  // A membership lookup asks whether ANY row exists: historical duplicate joins
+  // must not turn a valid membership into a permanent maybeSingle error.
   useEffect(() => {
-    const savedTeamId = getTeamId()
+    if (phase !== 'checking') { setRecoverySlow(false); return }
+    let cancelled = false
+    let failures = 0
+    let retryTimer: ReturnType<typeof setTimeout> | undefined
+    let controller: AbortController | undefined
+    const slowTimer = setTimeout(() => setRecoverySlow(true), 6000)
 
-    async function autoResolve() {
-      try {
-        const activeRoom = await findCurrentActiveRoom()
-        if (!activeRoom) { setPhase('no_lobby'); return }
+    async function restore(signal: AbortSignal) {
+      const request = <T,>(fn: (signal: AbortSignal) => PromiseLike<T>) => playerRequest(fn, signal)
+      const alive = () => !cancelled && !signal.aborted
+      const discover = async () => {
+        const activeRoom = await request(s => findCurrentActiveRoom(undefined, s))
+        if (!alive()) return
+        if (activeRoom && rejoinRequestedRef.current) {
+          const { data, error: rosterError } = await request(s => supabase.from('teams').select()
+            .eq('room_id', activeRoom.id).order('created_at', { ascending: true }).abortSignal(s))
+          if (!alive()) return
+          if (rosterError) throw rosterError
+          clearPlayerSession()
+          setError('')
+          setShowCreate(false)
+          setKickedNotice(null)
+          setTeams(data ?? [])
+          setRoom(activeRoom)
+          rejoinRequestedRef.current = false
+          setPhase('select_team')
+          return
+        }
+        if (!activeRoom && rejoinRequestedRef.current) {
+          const finished = await request(s => findMostRecentFinishedRoomToday(s))
+          if (!alive()) return
+          if (finished) {
+            const { data, error: scoresError } = await request(s => supabase.from('teams').select()
+              .eq('room_id', finished.id).abortSignal(s))
+            if (!alive()) return
+            if (scoresError) throw scoresError
+            const mine = data?.find(t => t.id === getTeamId()) ?? null
+            setMyTeam(mine)
+            setMyScore(mine?.score ?? 0)
+            setFjFinalScores(data ?? [])
+            setFjSubPhase('done')
+            setRoom(finished)
+            rejoinRequestedRef.current = false
+            setPhase('game')
+            return
+          }
+        }
+        rejoinRequestedRef.current = false
         setRoom(activeRoom)
-        setPhase('choose_mode')
-      } catch {
-        setPhase('no_lobby')
+        setPhase(activeRoom ? 'choose_mode' : 'no_lobby')
       }
-    }
+      const savedTeamId = getTeamId()
+      if (!savedTeamId || rejoinRequestedRef.current) return discover()
 
-    // Resume must distinguish "the server says you are not on this team" from "the
-    // query did not come back". Both used to look identical (data === null), and
-    // both cleared the saved team — so one flaky request on a mid-game refresh
-    // ejected a live player AND destroyed the seat, making further refreshes
-    // useless. Only a clean answer from the server is allowed to clear anything.
-    async function resume(teamId: string, attempt = 0): Promise<void> {
       const [teamRes, playerRes] = await Promise.all([
-        supabase.from('teams').select().eq('id', teamId).maybeSingle(),
-        supabase.from('players')
-          .select('id')
-          .eq('team_id', teamId)
-          .eq('session_id', getSessionId())
-          .maybeSingle(),
+        request(s => supabase.from('teams').select().eq('id', savedTeamId).abortSignal(s).maybeSingle()),
+        request(s => supabase.from('players').select('id')
+          .eq('team_id', savedTeamId).eq('session_id', getSessionId())
+          .limit(1).abortSignal(s).maybeSingle()),
       ])
-
-      if (teamRes.error || playerRes.error) return retryResume(teamId, attempt)
-
-      const teamData = teamRes.data
-      const playerMembership = playerRes.data
-      // Clean answer, genuinely not a member (team deleted, or removed by the host).
-      if (!teamData || !playerMembership) { clearPlayerSession(); return autoResolve() }
-
-      const roomRes = await supabase
-        .from('rooms')
-        .select()
-        .eq('id', teamData.room_id)
-        .gte('created_at', getLocalDayStartIso())
-        .maybeSingle()
-
-      if (roomRes.error) return retryResume(teamId, attempt)
-      const roomData = roomRes.data
-      if (!roomData) { clearPlayerSession(); return autoResolve() }
-      if (roomData.status === 'finished') {
-        // Post-game refresh: a phone reloaded on the results screen should get
-        // the results back, not the waiting screen. Keep the finished room only
-        // while no newer game has opened; a newer lobby always wins.
-        let newer: Room | null = null
-        try { newer = await findCurrentActiveRoom() } catch { return retryResume(teamId, attempt) }
-        if (newer && newer.id !== roomData.id) { clearPlayerSession(); return autoResolve() }
+      if (!alive()) return
+      if (teamRes.error || playerRes.error) throw teamRes.error ?? playerRes.error
+      if (!teamRes.data || !playerRes.data) {
+        clearPlayerSession()
+        return discover()
       }
-      setRoom(roomData)
-      setMyTeam(teamData)
-      setMyScore(teamData.score)
-      // Hydrate turn from DB on resume
-      if (roomData.current_turn_team_id !== undefined) {
-        setCurrentTurnTeamId(roomData.current_turn_team_id ?? null)
+      const team = teamRes.data
+      const roomRes = await request(s => supabase.from('rooms').select()
+        .eq('id', team.room_id).gte('created_at', getLocalDayStartIso())
+        .abortSignal(s).maybeSingle())
+      if (!alive()) return
+      if (roomRes.error) throw roomRes.error
+      const savedRoom = roomRes.data
+      if (!savedRoom) {
+        clearPlayerSession()
+        return discover()
       }
-      await fetchTeammates(teamId)
-      await refreshAllScores(roomData.id)
-      setPhase(roomData.status === 'lobby' ? 'lobby' : 'game')
+      if (savedRoom.status === 'finished') {
+        const newer = await request(s => findCurrentActiveRoom(undefined, s))
+        if (!alive()) return
+        if (newer && newer.id !== savedRoom.id) {
+          clearPlayerSession()
+          setRoom(newer)
+          setPhase('choose_mode')
+          return
+        }
+      }
+
+      const [playersRes, scoresRes] = await Promise.all([
+        request(s => supabase.from('players').select().eq('team_id', team.id)
+          .order('created_at', { ascending: true }).abortSignal(s)),
+        request(s => supabase.from('teams').select('id, name, score').eq('room_id', savedRoom.id).abortSignal(s)),
+      ])
+      if (!alive()) return
+      if (playersRes.error || scoresRes.error) throw playersRes.error ?? scoresRes.error
+      // Commit together, only after every startup request succeeds. An abandoned
+      // attempt must never restore the old team over a player's fresh join.
+      setRoom(savedRoom)
+      setMyTeam(team)
+      setMyScore(team.score)
+      setCurrentTurnTeamId(savedRoom.current_turn_team_id ?? null)
+      setTeammates(playersRes.data ?? [])
+      setAllTeamScores(scoresRes.data ?? [])
+      setPhase(savedRoom.status === 'lobby' ? 'lobby' : 'game')
     }
 
-    // Keep retrying rather than ejecting. The saved team is left untouched, so even
-    // if the player closes the tab mid-outage they can still resume later.
-    async function retryResume(teamId: string, attempt: number): Promise<void> {
-      if (attempt >= 6) return          // stay on the loading screen; a refresh retries
-      const backoff = Math.min(4000, 400 * 2 ** attempt)
-      await new Promise(r => setTimeout(r, backoff))
-      return resume(teamId, attempt + 1)
+    let inFlight = false
+    async function attempt() {
+      if (cancelled || inFlight) return
+      clearTimeout(retryTimer)
+      inFlight = true
+      controller = new AbortController()
+      try {
+        await restore(controller.signal)
+      } catch {
+        controller.abort()
+        if (!cancelled) {
+          retryTimer = setTimeout(() => { void attempt() }, Math.min(8000, 500 * 2 ** Math.min(failures++, 4)))
+        }
+      } finally {
+        inFlight = false
+      }
     }
+    // A manual/online retry skips backoff but never aborts a working request.
+    const retryNow = () => { void attempt() }
+    retryRecoveryRef.current = retryNow
+    const onVisible = () => { if (document.visibilityState === 'visible') retryNow() }
+    window.addEventListener('online', retryNow)
+    document.addEventListener('visibilitychange', onVisible)
+    void attempt()
+    return () => {
+      cancelled = true
+      controller?.abort()
+      clearTimeout(retryTimer)
+      clearTimeout(slowTimer)
+      window.removeEventListener('online', retryNow)
+      document.removeEventListener('visibilitychange', onVisible)
+    }
+  }, [phase, recoveryAttempt])
 
-    if (savedTeamId) void resume(savedTeamId)
-    else void autoResolve()
-  }, [fetchTeammates, refreshAllScores])
+  function rejoinGame() {
+    // Retain the saved seat until discovery succeeds, including finished results.
+    rejoinRequestedRef.current = true
+    for (const key of ['dtWager', 'intermission', 'buzzWindow']) sessionStorage.removeItem(key)
+    setRoom(null)
+    setMyTeam(null)
+    setError('')
+    setShowCreate(false)
+    setKickedNotice(null)
+    setRecoveryAttempt(n => n + 1)
+  }
 
   // Poll for an active room while in 'no_lobby' phase (every 3 seconds)
   useEffect(() => {
@@ -1616,24 +1694,38 @@ export default function PlayView() {
     setPhase(next)
   }
 
+  async function createAndJoinTeam(name: string, playerName?: string) {
+    if (!name || !room || creatingTeamRef.current) return
+    creatingTeamRef.current = true
+    setLoading(true); setError('')
+    try {
+      // A confirmed team insert followed by a failed membership request is still
+      // our team. Retry that join instead of creating an orphan or rejecting its name.
+      let team = pendingCreatedTeamRef.current
+      if (!team || team.room_id !== room.id || team.name !== name) {
+        if (teams.some(t => t.name.trim().toLowerCase() === name.toLowerCase())) {
+          setError(`"${name}" is already taken — pick another name.`)
+          return
+        }
+        const { data, error: createError } = await playerRequest(signal => supabase.from('teams')
+          .insert({ room_id: room.id, name }).select().abortSignal(signal).single())
+        if (createError || !data) throw createError ?? new Error('Team was not confirmed')
+        team = data
+        pendingCreatedTeamRef.current = team
+      }
+      await joinTeam(team, playerName)
+    } catch {
+      setError('Could not join the game. Check your connection and try again.')
+    } finally {
+      creatingTeamRef.current = false
+      setLoading(false)
+    }
+  }
+
   async function handleSoloJoin() {
     const name = soloName.trim()
-    if (!name || !room) return
-    // Team names are not unique in the schema, so two solo players sharing a first
-    // name would put two identical rows on the projector. Catch it here instead.
-    if (teams.some(t => t.name.trim().toLowerCase() === name.toLowerCase())) {
-      setError(`"${name}" is already on the board — add a last initial or something to tell you apart.`)
-      return
-    }
-    setLoading(true); setError('')
-    const { data: team, error: err } = await supabase
-      .from('teams').insert({ room_id: room.id, name }).select().single()
-    if (!team || err) { setLoading(false); setError('Could not get you in. Check your connection and try again.'); return }
-    // A solo player IS their team: the one name they typed is both the team name
-    // on the projector and their own nickname. Passed explicitly because the
-    // setNickname below has not applied yet when joinTeam inserts.
     setNickname(name)
-    await joinTeam(team, name)
+    await createAndJoinTeam(name, name)
   }
 
   async function handleLeave() {
@@ -1672,40 +1764,47 @@ export default function PlayView() {
   }
 
   async function joinTeam(team: Team, nicknameOverride?: string) {
+    if (joinInFlightRef.current) return
+    joinInFlightRef.current = true
     setLoading(true); setError('')
-    const { data: player, error: err } = await supabase
-      .from('players')
-      .insert({ team_id: team.id, session_id: getSessionId(), nickname: (nicknameOverride ?? nickname).trim() || null })
-      .select().single()
-    setLoading(false)
-    if (!player || err) { setError('Failed to join team. Try again.'); return }
-
-    setTeamId(team.id); setMyTeam(team); setMyScore(team.score)
-    setKickedNotice(null)
-    await fetchTeammates(team.id)
-    if (room?.id) await refreshAllScores(room.id)
-
-    lobbyChannelRef.current?.publish('team_joined', {})
-    // A late arrival joins a game already in progress (any regular round) — go
-    // straight to the board. Only a lobby-status room waits for the host.
-    setPhase(room && room.status !== 'lobby' ? 'game' : 'lobby')
+    try {
+      const sessionId = getSessionId()
+      // Rejoin and a retry after a lost insert response reuse the existing seat.
+      const { data: existing, error: lookupError } = await playerRequest(signal => supabase.from('players')
+        .select('id').eq('team_id', team.id).eq('session_id', sessionId).limit(1).abortSignal(signal).maybeSingle())
+      if (lookupError) throw lookupError
+      if (!existing) {
+        const { data: player, error: joinError } = await playerRequest(signal => supabase.from('players')
+          .insert({ team_id: team.id, session_id: sessionId, nickname: (nicknameOverride ?? nickname).trim() || null })
+          .select().abortSignal(signal).single())
+        if (joinError || !player) throw joinError ?? new Error('Join was not confirmed')
+      }
+      // Confirm the destination first, then retire only this session's other
+      // memberships in this room. Preserve attendance from previous games.
+      // If cleanup fails, retry the same join; do not claim success.
+      const otherTeamIds = teams.filter(t => t.room_id === team.room_id && t.id !== team.id).map(t => t.id)
+      if (otherTeamIds.length > 0) {
+        const { error: cleanupError } = await playerRequest(signal => supabase.from('players')
+          .delete().eq('session_id', sessionId).in('team_id', otherTeamIds).abortSignal(signal))
+        if (cleanupError) throw cleanupError
+      }
+      pendingCreatedTeamRef.current = null
+      setTeamId(team.id); setMyTeam(team); setMyScore(team.score)
+      setKickedNotice(null)
+      // Let the normal startup recovery hydrate the room and roster, with its
+      // timeout and retries, instead of leaving a successful join waiting forever.
+      setPhase('checking')
+      lobbyChannelRef.current?.publish('team_joined', {})
+    } catch {
+      setError('Could not join your team. Check your connection and try again.')
+    } finally {
+      joinInFlightRef.current = false
+      setLoading(false)
+    }
   }
 
   async function handleCreateTeam() {
-    if (!newTeamName.trim() || !room) return
-    const name = newTeamName.trim()
-    // Same guard as the solo path: nothing in the schema stops two identical team
-    // names, and two matching rows on the projector is exactly the confusion this
-    // flow is meant to remove.
-    if (teams.some(t => t.name.trim().toLowerCase() === name.toLowerCase())) {
-      setError(`"${name}" is already taken — pick another name.`)
-      return
-    }
-    setLoading(true)
-    const { data: team, error: err } = await supabase
-      .from('teams').insert({ room_id: room.id, name: newTeamName.trim() }).select().single()
-    if (!team || err) { setLoading(false); setError('Failed to create team. Try again.'); return }
-    await joinTeam(team)
+    await createAndJoinTeam(newTeamName.trim())
   }
 
   async function handleSubmitBuzz() {
@@ -2055,7 +2154,27 @@ export default function PlayView() {
     return (
       <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6">
         <PintHero className="w-16 h-24 mb-6 opacity-90" />
-        <p className="text-amber-200/70 text-lg animate-pulse">Finding game…</p>
+        <p role="status" className="text-amber-200/70 text-lg animate-pulse">
+          {recoverySlow ? 'Reconnecting to your game…' : 'Finding game…'}
+        </p>
+        {recoverySlow && (
+          <div className="mt-5 max-w-xs text-center">
+            <p className="text-amber-100/70 text-sm">We’re still trying. You don’t need to refresh.</p>
+            <button
+              onClick={() => retryRecoveryRef.current()}
+              className="mt-5 w-full rounded-xl bg-amber-400 px-5 py-3 font-bold text-gray-950"
+            >
+              Try again now
+            </button>
+            <button
+              onClick={rejoinGame}
+              className="mt-3 w-full rounded-xl border border-amber-200/30 px-5 py-3 font-semibold text-amber-100"
+            >
+              Rejoin game
+            </button>
+            <p className="mt-2 text-xs text-amber-100/60">Rejoining lets you choose your team again. Your team’s score stays safe.</p>
+          </div>
+        )}
       </div>
     )
   }
