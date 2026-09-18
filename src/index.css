@@ -1,5 +1,18 @@
 @import "tailwindcss";
 
+/* iOS rubber-band / scroll-bounce fix. The buzz screen already sets
+   overscroll-behavior:none on its own container, but that only stops scroll
+   CHAINING from that element to its parent — it can't stop the document
+   itself from bouncing, because html/body is the actual root scroller iOS
+   bounces. Without this, a touch that starts anywhere touch-action doesn't
+   explicitly lock down can still be read by iOS as a page drag, which is
+   what was swallowing/delaying buzzer taps. Doesn't disable normal scrolling
+   (27 screens in play/index.tsx rely on document scroll for long content) —
+   it only kills the elastic overscroll/pull-to-refresh past the edges. */
+html, body {
+  overscroll-behavior: none;
+}
+
 @keyframes card-flip {
   0%   { transform: rotateY(0deg); }
   100% { transform: rotateY(180deg); }
