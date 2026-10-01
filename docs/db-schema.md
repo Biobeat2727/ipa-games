@@ -155,3 +155,18 @@ judgment is a safe no-op; a conflicting judgment is rejected.
 The authenticated `finish_game` function rejects completion while an active team's submitted
 wager is still pending, clears transient room fields, and returns authoritative final scores.
 Calling it again after a lost response is safe.
+
+## `mailing_list` (`supabase/add_mailing_list.sql`)
+Tapped In! email opt-ins from the player results screen.
+| Column | Type | Notes |
+|---|---|---|
+| id | uuid, pk | |
+| email | text, unique | Lowercased + trimmed by `join_mailing_list` |
+| room_id | uuid → rooms, nullable | Game they signed up at (`on delete set null`) |
+| team_name | text, nullable | Denormalized, ≤100 chars |
+| created_at | timestamptz | |
+
+Players never touch the table: they call `public.join_mailing_list(p_email, p_room_id, p_team_name)`
+(security definer; validates the address, ignores duplicates silently). RLS: no anon access;
+SELECT only for an authorized host (`is_authorized_host()`), which powers the host's
+"Download CSV" button. Apply the SQL before deploying the sign-up form.

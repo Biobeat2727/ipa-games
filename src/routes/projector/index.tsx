@@ -865,8 +865,8 @@ export default function ProjectorView() {
           {/* Timer bar */}
           <div className="h-3 bg-black/40 w-full shrink-0">
             <div
-              className={`h-full transition-all duration-500 ${low ? 'bg-red-500' : 'bg-yellow-400'}`}
-              style={{ width: `${pct}%` }}
+              className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${low ? 'bg-red-500' : 'bg-yellow-400'}`}
+              style={{ transform: `scaleX(${Math.max(0, Math.min(1, (pct) / 100))})` }}
             />
           </div>
           <div className="flex-1 flex flex-col items-center justify-center px-16 text-center">
@@ -1338,8 +1338,8 @@ export default function ProjectorView() {
         <div className="relative z-10 h-3 bg-black/40 w-full shrink-0">
           {firstPending && (
             <div
-              className={`h-full transition-all duration-500 ${timerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
-              style={{ width: `${timerPct}%` }}
+              className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${timerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
+              style={{ transform: `scaleX(${Math.max(0, Math.min(1, (timerPct) / 100))})` }}
             />
           )}
         </div>

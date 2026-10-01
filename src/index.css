@@ -230,6 +230,34 @@ button {
   100% { transform: scale(1);    opacity: 1; }
 }
 
+/* Board glass carbonation (TapCategoryColumn BeerGlass): transform + opacity
+   only, so it runs on the compositor instead of repainting each glass. */
+.glass-bubbles { overflow: hidden; }
+/* Each bubble is a full-height column with its dot at the bottom, so a %
+   translate moves it the height of the glass. */
+.glass-bubble {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  width: var(--bubble-size, 4px);
+  animation: glass-bubble-rise 2.4s linear infinite;
+  will-change: transform, opacity;
+}
+.glass-bubble::after {
+  content: '';
+  position: absolute;
+  bottom: 0;
+  left: 0;
+  width: var(--bubble-size, 4px);
+  height: var(--bubble-size, 4px);
+  border-radius: 9999px;
+  background: rgba(254, 243, 199, 0.65);
+}
+@keyframes glass-bubble-rise {
+  0%   { transform: translateY(0);    opacity: 0.7; }
+  100% { transform: translateY(-85%); opacity: 0; }
+}
+
 /* Accessibility: collapse all animation for users who ask for reduced motion */
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after {

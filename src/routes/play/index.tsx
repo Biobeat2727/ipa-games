@@ -14,6 +14,7 @@ import ScoreOverlay from '../../components/ScoreOverlay'
 import ScoreHistoryChart, { getTeamColor } from '../../components/ScoreHistoryChart'
 import { TipJar, VenueFooter } from '../../components/TipJar'
 import FeedbackForm from '../../components/FeedbackForm'
+import MailingListSignup from '../../components/MailingListSignup'
 import { BeerGlass, TapHeader, tapHeaderRevealFor } from '../../components/TapCategoryColumn'
 import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { useVisualViewportHeight } from '../../lib/useVisualViewportHeight'
@@ -2200,7 +2201,7 @@ export default function PlayView() {
   const scoreChip = (
     <button
       onClick={() => setShowScoreOverlay(true)}
-      className={`absolute top-4 right-4 bg-[#17120b]/90 border border-amber-500/20 shadow-lg shadow-black/40 backdrop-blur-sm rounded-2xl px-3 py-2 text-right z-10 ${scoreChipPulse ? 'score-chip-pulse' : ''}`}
+      className={`absolute top-4 right-4 bg-[#17120b]/90 border border-amber-500/20 shadow-lg shadow-black/40 rounded-2xl px-3 py-2 text-right z-10 ${scoreChipPulse ? 'score-chip-pulse' : ''}`}
     >
       {myTeam && (
         <p className="text-gray-500 text-xs leading-tight truncate max-w-[6rem]">{myTeam.name}</p>
@@ -2610,8 +2611,8 @@ export default function PlayView() {
         {/* Timer bar */}
         <div className="h-2 bg-black/40 w-full shrink-0">
           <div
-            className={`h-full transition-all duration-500 ${low ? 'bg-red-500' : 'bg-yellow-400'}`}
-            style={{ width: `${pct}%` }}
+            className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${low ? 'bg-red-500' : 'bg-yellow-400'}`}
+            style={{ transform: `scaleX(${Math.max(0, Math.min(1, (pct) / 100))})` }}
           />
         </div>
         <div className="flex-1 min-h-0 flex flex-col p-5 max-w-sm mx-auto w-full">
@@ -2793,7 +2794,9 @@ export default function PlayView() {
         {myEntry && !iWon && (
           <p className="text-gray-400 text-sm">Your final score: <span className="text-white font-black">{myEntry.score.toLocaleString()}</span></p>
         )}
-        <TipJar style={{ marginTop: '1.5rem', width: '100%', maxWidth: '20rem', animation: 'slide-up-in 0.4s ease-out 0.8s both' }} />
+        <MailingListSignup roomId={room?.id} teamName={myTeam?.name}
+          style={{ marginTop: '1.5rem', animation: 'slide-up-in 0.4s ease-out 0.75s both' }} />
+        <TipJar style={{ marginTop: '1rem', width: '100%', maxWidth: '20rem', animation: 'slide-up-in 0.4s ease-out 0.8s both' }} />
         <div className="w-full flex justify-center" style={{ marginTop: '1rem', animation: 'slide-up-in 0.4s ease-out 0.85s both' }}>
           <FeedbackForm roomId={room?.id} teamId={myTeam?.id} teamName={myTeam?.name} />
         </div>
@@ -3113,7 +3116,7 @@ export default function PlayView() {
                   if (isFlipping) {
                     return (
                       <div key={q.id} className="h-20 rounded"
-                        style={{ perspective: '600px', filter: 'drop-shadow(0 6px 20px rgba(0,0,0,0.7))' }}>
+                        style={{ perspective: '600px' }}>
                         <div className="relative h-full w-full"
                           style={{ transformStyle: 'preserve-3d', animation: 'card-flip 0.6s ease-in-out forwards' }}>
                           <div className="absolute inset-0 rounded flex items-center justify-center font-mono font-black text-amber-950"
@@ -3121,7 +3124,10 @@ export default function PlayView() {
                               backfaceVisibility: 'hidden',
                               fontSize: 'clamp(1rem, 4vw, 1.4rem)',
                               background: 'linear-gradient(145deg, #fcd34d 0%, #f59e0b 60%, #c2650a 100%)',
-                              boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.25)',
+                              // Shadow lives on each face (rasterized once, then just
+                              // rotated) — a drop-shadow filter on the wrapper was
+                              // re-blurred every frame of the flip
+                              boxShadow: '0 6px 16px rgba(0,0,0,0.6), inset 0 1px 0 rgba(255,255,255,0.25)',
                             }}>
                             ${pv}
                           </div>
@@ -3130,6 +3136,7 @@ export default function PlayView() {
                               backfaceVisibility: 'hidden',
                               transform: 'rotateY(180deg)',
                               background: 'linear-gradient(180deg, #92400e 0%, #78350f 55%, #451a03 100%)',
+                              boxShadow: '0 6px 16px rgba(0,0,0,0.6)',
                             }}>
                             <p className="font-black uppercase text-amber-50 leading-tight"
                               style={{ fontSize: 'clamp(0.55rem, 2.5vw, 0.75rem)' }}>
@@ -3185,10 +3192,14 @@ export default function PlayView() {
                 transform: overlayExpanding
                   ? 'none'
                   : `translate(${dx}px, ${dy}px) scale(${scaleX}, ${scaleY})`,
+                // Transform only: animating border-radius alongside it forced a
+                // full-screen repaint every frame of the zoom on slower phones.
+                // The radius just squares off as the zoom starts.
                 transition: overlayExpanding
-                  ? 'transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94), border-radius 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
+                  ? 'transform 0.5s cubic-bezier(0.25, 0.46, 0.45, 0.94)'
                   : 'none',
                 transformOrigin: 'center center',
+                willChange: 'transform',
                 borderRadius: overlayExpanding
                   ? '0px'
                   : `${(8 / scaleX).toFixed(1)}px / ${(8 / scaleY).toFixed(1)}px`,
@@ -3272,8 +3283,8 @@ export default function PlayView() {
 
           <div className="w-full h-2 bg-white/10 rounded-full mb-6 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all duration-500 ${dtTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
-              style={{ width: `${dtTimerPct}%` }}
+              className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${dtTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
+              style={{ transform: `scaleX(${Math.max(0, Math.min(1, (dtTimerPct) / 100))})` }}
             />
           </div>
 
@@ -3334,8 +3345,8 @@ export default function PlayView() {
 
           <div className="w-full h-2 bg-white/10 rounded-full mb-4 overflow-hidden">
             <div
-              className={`h-full rounded-full transition-all duration-500 ${ansTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
-              style={{ width: `${ansTimerPct}%` }}
+              className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${ansTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
+              style={{ transform: `scaleX(${Math.max(0, Math.min(1, (ansTimerPct) / 100))})` }}
             />
           </div>
 
@@ -3479,8 +3490,8 @@ export default function PlayView() {
             </div>
             <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
               <div
-                className={`h-full rounded-full transition-all duration-500 ${buzzTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
-                style={{ width: `${buzzWindowPct}%` }}
+                className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${buzzTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
+                style={{ transform: `scaleX(${Math.max(0, Math.min(1, (buzzWindowPct) / 100))})` }}
               />
             </div>
           </div>

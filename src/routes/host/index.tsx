@@ -9,6 +9,7 @@ import type { ContentJSON, ContentSummary } from '../../lib/content'
 import { FINAL_TAP_LABEL, FIRST_ROUND, roundDefinition, roundLabel, roundToStatus } from '../../lib/rounds'
 import type { Room, Team } from '../../lib/types'
 import Game from './Game'
+import MailingListExport from '../../components/MailingListExport'
 import { useEmptyTeamSweep } from '../../lib/useEmptyTeamSweep'
 
 type Phase = 'checking' | 'sign_in' | 'access_denied' | 'no_room' | 'creating' | 'lobby' | 'game' | 'error'
@@ -600,6 +601,8 @@ export default function HostView() {
             : starting ? 'Starting…'
             : 'Start Game'}
         </button>
+
+        <MailingListExport className="mt-4" />
 
         <button
           onClick={handleNewGame}

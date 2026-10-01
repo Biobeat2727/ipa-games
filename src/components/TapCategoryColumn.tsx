@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
+import { useId, useLayoutEffect, useRef, useState, type MouseEvent } from 'react'
 
 type GlassState = 'full' | 'draining' | 'empty'
 
@@ -26,52 +26,58 @@ export function BeerGlass({
   const fillY    = 98 - (fillPct / 100) * 88
   const fillH    = (fillPct / 100) * 88
   const isDisabled = disabled || state === 'empty'
+  // Unique per glass: a board repeats every point value once per column, and
+  // duplicate gradient/clip ids resolve unpredictably
+  const uid = useId().replace(/:/g, '')
+  const id = (name: string) => `${name}-${uid}`
 
   return (
     <button
       onClick={onClick}
       disabled={isDisabled}
-      className={`relative w-full h-full flex items-center justify-center transition-[filter,opacity] disabled:cursor-default ${
-        dimmed ? 'opacity-60 grayscale-[35%]' : !isDisabled ? 'hover:brightness-110 active:brightness-95' : ''
+      // Dim with opacity only — a filter (grayscale/brightness) on 25–30 glasses
+      // made every turn change repaint the whole board at once
+      className={`relative w-full h-full flex items-center justify-center transition-opacity disabled:cursor-default ${
+        dimmed ? 'opacity-55' : !isDisabled ? 'active:opacity-80' : ''
       }`}
     >
-      <svg viewBox="0 0 70 104" preserveAspectRatio={fit ? 'xMidYMax meet' : 'none'} className="w-full h-full" style={{ filter: 'drop-shadow(0 3px 3px rgba(0,0,0,0.45))' }}>
+      <svg viewBox="0 0 70 104" preserveAspectRatio={fit ? 'xMidYMax meet' : 'none'} className="w-full h-full">
         <defs>
-          <clipPath id={`glass-clip-${pointValue}`}>
+          <clipPath id={id('glass-clip')}>
             <path d={GLASS_PATH} />
           </clipPath>
-          <linearGradient id={`beer-${pointValue}`} x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={id('beer')} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%"   stopColor="#fcd34d" />
             <stop offset="45%"  stopColor="#f59e0b" />
             <stop offset="100%" stopColor="#c2650a" />
           </linearGradient>
-          <linearGradient id={`glass-body-${pointValue}`} x1="0" y1="0" x2="1" y2="0">
+          <linearGradient id={id('glass-body')} x1="0" y1="0" x2="1" y2="0">
             <stop offset="0%"   stopColor="rgba(255,255,255,0.14)" />
             <stop offset="18%"  stopColor="rgba(255,255,255,0.02)" />
             <stop offset="82%"  stopColor="rgba(255,255,255,0.02)" />
             <stop offset="100%" stopColor="rgba(255,255,255,0.14)" />
           </linearGradient>
-          <radialGradient id={`shadow-${pointValue}`} cx="50%" cy="50%" r="50%">
+          <radialGradient id={id('shadow')} cx="50%" cy="50%" r="50%">
             <stop offset="0%" stopColor="rgba(0,0,0,0.5)" />
             <stop offset="100%" stopColor="rgba(0,0,0,0)" />
           </radialGradient>
-          <linearGradient id={`foam-${pointValue}`} x1="0" y1="0" x2="0" y2="1">
+          <linearGradient id={id('foam')} x1="0" y1="0" x2="0" y2="1">
             <stop offset="0%"   stopColor="#ffffff" />
             <stop offset="100%" stopColor="#f3e3bd" />
           </linearGradient>
         </defs>
 
         {/* grounding shadow */}
-        <ellipse cx="35" cy="100" rx="24" ry="3.5" fill={`url(#shadow-${pointValue})`} />
+        <ellipse cx="35" cy="100" rx="27" ry="4" fill={`url(#${id('shadow')})`} />
 
         {/* glass body */}
-        <path d={GLASS_PATH} fill={`url(#glass-body-${pointValue})`} stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+        <path d={GLASS_PATH} fill={`url(#${id('glass-body')})`} stroke="rgba(255,255,255,0.4)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
 
         {/* beer fill + foam, clipped to glass shape */}
-        <g clipPath={`url(#glass-clip-${pointValue})`}>
+        <g clipPath={`url(#${id('glass-clip')})`}>
           <rect
             x="0" y={fillY} width="70" height={fillH}
-            fill={`url(#beer-${pointValue})`}
+            fill={`url(#${id('beer')})`}
             style={{ transition: 'y 900ms ease-in, height 900ms ease-in' }}
           />
           {/* carbonation streaks */}
@@ -88,7 +94,7 @@ export function BeerGlass({
             <g style={{ transition: 'transform 900ms ease-in' }} transform={`translate(0, ${fillY - 9})`}>
               <path
                 d="M 0 6 C 3 1 7 0 10 3 C 13 6 16 1 20 1 C 24 1 26 6 30 5 C 34 4 35 0 39 1 C 43 2 44 6 48 5 C 52 4 53 0 57 1 C 61 2 63 6 66 4 C 68 3 69 2 70 3 L 70 13 L 0 13 Z"
-                fill={`url(#foam-${pointValue})`}
+                fill={`url(#${id('foam')})`}
               />
               {/* subtle bubble texture within the foam body, not sitting proud of it */}
               <circle cx="10" cy="7" r="0.9" fill="rgba(255,255,255,0.7)" />
@@ -101,19 +107,6 @@ export function BeerGlass({
               <rect x="0" y="12" width="70" height="1.5" fill="rgba(180,120,20,0.3)" />
             </g>
           )}
-          {/* rising bubbles */}
-          {fillPct > 0 && (
-            <>
-              <circle cx="26" cy="75" r="1.3" fill="#fef3c7" opacity="0.55">
-                <animate attributeName="cy" values="90;15" dur="2.4s" repeatCount="indefinite" />
-                <animate attributeName="opacity" values="0.55;0" dur="2.4s" repeatCount="indefinite" />
-              </circle>
-              <circle cx="42" cy="82" r="1" fill="#fef3c7" opacity="0.45">
-                <animate attributeName="cy" values="92;20" dur="1.9s" begin="0.5s" repeatCount="indefinite" />
-                <animate attributeName="opacity" values="0.45;0" dur="1.9s" begin="0.5s" repeatCount="indefinite" />
-              </circle>
-            </>
-          )}
         </g>
 
         {/* glass rim */}
@@ -122,6 +115,17 @@ export function BeerGlass({
         {/* glass shine */}
         <path d="M 16 11 L 19 84" stroke="rgba(255,255,255,0.3)" strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
       </svg>
+
+      {/* Rising bubbles: two tiny HTML dots animated with transform/opacity only,
+          so the compositor moves them without repainting the glass (the old SVG
+          <animate> bubbles repainted every glass every frame). Only on glasses
+          that can still be picked — dimmed/answered glasses sit still. */}
+      {state === 'full' && !dimmed && !isDisabled && (
+        <span aria-hidden className="glass-bubbles absolute pointer-events-none" style={{ left: '30%', right: '30%', top: '22%', bottom: '10%' }}>
+          <span className="glass-bubble" style={{ left: '12%', animationDuration: '2.4s' }} />
+          <span className="glass-bubble" style={{ left: '62%', animationDuration: '1.9s', animationDelay: '-0.9s', ['--bubble-size' as string]: '3px' }} />
+        </span>
+      )}
 
       {state !== 'empty' && (
         <span

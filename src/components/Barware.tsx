@@ -9,11 +9,14 @@ const GLASS_PATH = 'M 8 6 L 13 92 Q 35 98 57 92 L 62 6 Z'
 export function PintHero({ className = 'w-20 h-32' }: { className?: string }) {
   const uid = useId()
   return (
-    <div className={className} style={{ animation: 'hero-float 3.5s ease-in-out infinite' }}>
+    <div className={`relative ${className}`} style={{ animation: 'hero-float 3.5s ease-in-out infinite' }}>
+      {/* Static amber glow behind the glass. Was a 20px drop-shadow filter on the
+          SVG, which had to be re-blurred every frame the bubbles moved. */}
+      <div aria-hidden className="absolute pointer-events-none"
+        style={{ inset: '8% -18% -6%', background: 'radial-gradient(closest-side, rgba(245,158,11,0.28), rgba(245,158,11,0) 100%)' }} />
       <svg
         viewBox="0 0 70 104"
-        className="w-full h-full"
-        style={{ filter: 'drop-shadow(0 6px 20px rgba(245,158,11,0.3))' }}
+        className="relative w-full h-full"
       >
         <defs>
           <clipPath id={`hero-clip-${uid}`}>
@@ -61,24 +64,17 @@ export function PintHero({ className = 'w-20 h-32' }: { className?: string }) {
             <rect x="24" y="26" width="1.4" height="64" fill="rgba(255,255,255,0.22)" />
             <rect x="43" y="30" width="1.1" height="56" fill="rgba(255,255,255,0.16)" />
           </g>
-          {/* rising bubbles */}
-          <circle cx="26" cy="75" r="1.3" fill="#fef3c7" opacity="0.55">
-            <animate attributeName="cy" values="90;28" dur="2.4s" repeatCount="indefinite" />
-            <animate attributeName="opacity" values="0.55;0" dur="2.4s" repeatCount="indefinite" />
-          </circle>
-          <circle cx="42" cy="82" r="1" fill="#fef3c7" opacity="0.45">
-            <animate attributeName="cy" values="92;32" dur="1.9s" begin="0.5s" repeatCount="indefinite" />
-            <animate attributeName="opacity" values="0.45;0" dur="1.9s" begin="0.5s" repeatCount="indefinite" />
-          </circle>
-          <circle cx="34" cy="85" r="0.8" fill="#fef3c7" opacity="0.4">
-            <animate attributeName="cy" values="94;30" dur="2.8s" begin="1.1s" repeatCount="indefinite" />
-            <animate attributeName="opacity" values="0.4;0" dur="2.8s" begin="1.1s" repeatCount="indefinite" />
-          </circle>
         </g>
 
         <ellipse cx="35" cy="6" rx="27" ry="2.4" fill="none" stroke="rgba(255,255,255,0.45)" strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
         <path d="M 16 11 L 19 84" stroke="rgba(255,255,255,0.3)" strokeWidth="2" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
       </svg>
+      {/* Rising bubbles — compositor-only (see .glass-bubble in index.css) */}
+      <span aria-hidden className="glass-bubbles absolute pointer-events-none" style={{ left: '30%', right: '30%', top: '30%', bottom: '8%' }}>
+        <span className="glass-bubble" style={{ left: '8%', animationDuration: '2.4s' }} />
+        <span className="glass-bubble" style={{ left: '62%', animationDuration: '1.9s', animationDelay: '-0.6s', ['--bubble-size' as string]: '3px' }} />
+        <span className="glass-bubble" style={{ left: '38%', animationDuration: '2.8s', animationDelay: '-1.5s', ['--bubble-size' as string]: '2.5px' }} />
+      </span>
     </div>
   )
 }

@@ -8,6 +8,7 @@ import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { useWakeLock } from '../../lib/useWakeLock'
 import { useEmptyTeamSweep } from '../../lib/useEmptyTeamSweep'
 import ConfirmAction from '../../components/ConfirmAction'
+import MailingListExport from '../../components/MailingListExport'
 import {
   FINAL_TAP_LABEL,
   REGULAR_ROUNDS,
@@ -2165,8 +2166,8 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                 </div>
                 <div className="w-full h-2 bg-gray-800 rounded-full overflow-hidden">
                   <div
-                    className={`h-full rounded-full transition-all duration-500 ${fjTimerSeconds <= 15 ? 'bg-red-500' : 'bg-yellow-400'}`}
-                    style={{ width: `${(fjTimerSeconds / 90) * 100}%` }}
+                    className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${fjTimerSeconds <= 15 ? 'bg-red-500' : 'bg-yellow-400'}`}
+                    style={{ transform: `scaleX(${Math.max(0, Math.min(1, ((fjTimerSeconds / 90) * 100) / 100))})` }}
                   />
                 </div>
               </div>
@@ -2364,6 +2365,7 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
               >
                 📈 Show Score Map
               </button>
+              <MailingListExport />
               {newGameConfirm ? (
                 <div className="flex flex-col gap-2 w-full">
                   <p className="text-sm text-center text-gray-400">Start a new game? This will clear everything.</p>
@@ -2717,8 +2719,8 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                   </div>
                   <div className="w-full h-1.5 bg-gray-800 rounded-full overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all duration-500 ${buzzWindowRemaining <= 10 ? 'bg-red-500' : 'bg-yellow-400'}`}
-                      style={{ width: `${(buzzWindowRemaining / 25) * 100}%` }}
+                      className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${buzzWindowRemaining <= 10 ? 'bg-red-500' : 'bg-yellow-400'}`}
+                      style={{ transform: `scaleX(${Math.max(0, Math.min(1, ((buzzWindowRemaining / 25) * 100) / 100))})` }}
                     />
                   </div>
                 </div>
@@ -2781,8 +2783,8 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                 {doubleTapWager !== null && (
                   <div className="w-full h-1.5 bg-gray-800 rounded-full mb-4 overflow-hidden">
                     <div
-                      className={`h-full rounded-full transition-all duration-500 ${timerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
-                      style={{ width: `${(timerSeconds / RESPONSE_SECONDS) * 100}%` }}
+                      className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${timerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
+                      style={{ transform: `scaleX(${Math.max(0, Math.min(1, ((timerSeconds / RESPONSE_SECONDS) * 100) / 100))})` }}
                     />
                   </div>
                 )}

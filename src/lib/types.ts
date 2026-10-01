@@ -60,6 +60,14 @@ export type Player = {
 
 /** Post-game player feedback. Insert-only for anon; the host reads it in the
  *  Supabase dashboard. See supabase/add_feedback.sql */
+export type MailingListEntry = {
+  id: string
+  email: string
+  room_id: string | null
+  team_name: string | null
+  created_at: string
+}
+
 export type Feedback = {
   id: string
   room_id: string | null
@@ -202,6 +210,13 @@ export type Database = {
         Update: Partial<Omit<Feedback, 'id'>>
         Relationships: []
       }
+      // supabase/add_mailing_list.sql — host-readable only; players write via join_mailing_list
+      mailing_list: {
+        Row: MailingListEntry
+        Insert: never
+        Update: never
+        Relationships: []
+      }
     }
     Views: {
       questions_public: {
@@ -276,6 +291,14 @@ export type Database = {
           team_name: string
           final_score: number
         }>
+      }
+      join_mailing_list: {
+        Args: {
+          p_email: string
+          p_room_id?: string | null
+          p_team_name?: string | null
+        }
+        Returns: undefined
       }
       kick_team: {
         Args: {
