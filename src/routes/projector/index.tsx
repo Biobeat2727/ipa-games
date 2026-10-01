@@ -85,6 +85,28 @@ export default function ProjectorView() {
   // round changes, lobby close, and any question preview/activation so a missed
   // event can never leave the big screen blank or stale across games.
   const [catRevealIds, setCatRevealIds] = useState<string[] | null>(null)
+  // Round start / load: headers stay hidden until the host's intro verdict
+  // (`category_reveal`) arrives, instead of flashing the full board first. Falls
+  // back to showing the board if the host never answers.
+  const revealVerdictTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const revealGateKeyRef = useRef<string | null>(null)
+  const settleRevealVerdict = useCallback((ids: string[] | null) => {
+    if (revealVerdictTimerRef.current) { clearTimeout(revealVerdictTimerRef.current); revealVerdictTimerRef.current = null }
+    setCatRevealIds(ids)
+  }, [])
+  // Once per room+round: a regular round with nothing in play hides every header
+  // and asks the host where the intro stands.
+  const gateRevealFor = useCallback((r: Pick<Room, 'id' | 'status' | 'current_question_id' | 'pending_question_id'>) => {
+    if (!isRegularRoundStatus(r.status)) return
+    const key = `${r.id}:${r.status}`
+    if (revealGateKeyRef.current === key) return
+    revealGateKeyRef.current = key
+    if (r.current_question_id || r.pending_question_id) { settleRevealVerdict(null); return }
+    setCatRevealIds([])
+    if (revealVerdictTimerRef.current) clearTimeout(revealVerdictTimerRef.current)
+    revealVerdictTimerRef.current = setTimeout(() => settleRevealVerdict(null), 4000)
+    void ablyClient.channels.get(`room:${r.id}`).publish('category_reveal_sync', {}).catch(() => undefined)
+  }, [settleRevealVerdict])
 
   // Winner celebration confetti (fires a few bursts when the game ends)
   const [confettiActive, setConfettiActive] = useState(false)
@@ -220,7 +242,9 @@ export default function ProjectorView() {
     roomRef.current = found
     setRoom(found)
     setIntermissionSnapshots(null)
-    setCatRevealIds(null)
+    revealGateKeyRef.current = null
+    settleRevealVerdict(null)
+    gateRevealFor(found)
     setFjReveal(null)
     const { data } = await supabase
       .from('teams').select().eq('room_id', found.id).order('score', { ascending: false })
@@ -293,6 +317,7 @@ export default function ProjectorView() {
           const updated = payload.new as Room
           roomRef.current = updated
           setRoom(updated)
+          gateRevealFor(updated)
           if (isRegularRoundStatus(updated.status)) {
             await loadCategories(roomId, updated.status)
           } else if (updated.status === 'final_jeopardy') {
@@ -336,7 +361,7 @@ export default function ProjectorView() {
     })
     ch.subscribe('question_activated', ({ data }) => {
       const { question_id } = data as { question_id: string }
-      setCatRevealIds(null) // intros are over once a question is live
+      settleRevealVerdict(null) // intros are over once a question is live
       if (doubleTapPreviewTimerRef.current) clearTimeout(doubleTapPreviewTimerRef.current)
       setPreviewInfo(null)
       setDoubleTapSplash(false)
@@ -416,7 +441,7 @@ export default function ProjectorView() {
     })
     ch.subscribe('category_reveal', ({ data }) => {
       const { revealed_ids, done } = data as { round: number; revealed_ids: string[]; done?: boolean }
-      setCatRevealIds(done ? null : revealed_ids)
+      settleRevealVerdict(done ? null : revealed_ids)
     })
     ch.subscribe('round_intermission', ({ data }) => {
       const { snapshots } = data as { snapshots: ScoreSnapshot[] }
@@ -435,10 +460,11 @@ export default function ProjectorView() {
       if (fj_category) setFjCategoryName(fj_category)
       if (isRegularRoundStatus(status)) {
         const round = statusToRound(status) ?? FIRST_ROUND
-        // Any round start wipes reveal state — a stale set from a previous game
-        // (New Game mid-reveal) would blank every header on the new board.
-        // Also drop any lingering preview / Double Tap splash from the last board.
-        setCatRevealIds(null)
+        // Any round start replaces reveal state — headers go hidden until the
+        // host's verdict for THIS round (a stale set from a previous game can't
+        // carry over). Also drop any lingering preview / Double Tap splash.
+        const r = roomRef.current
+        if (r) gateRevealFor({ id: r.id, status: status as Room['status'], current_question_id: null, pending_question_id: null })
         if (doubleTapPreviewTimerRef.current) clearTimeout(doubleTapPreviewTimerRef.current)
         setPreviewInfo(null)
         setDoubleTapSplash(false)
@@ -504,7 +530,8 @@ export default function ProjectorView() {
     ch.subscribe('lobby_closed', () => {
       setRoom(null)
       setTeams([]); setCategories([]); setBuzzes([])
-      setCatRevealIds(null)
+      revealGateKeyRef.current = null
+      settleRevealVerdict(null)
       setPhase('waiting')
     })
     // On (re)connect, re-sync all state so nothing is missed

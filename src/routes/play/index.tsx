@@ -72,6 +72,9 @@ interface PreviewInfo {
 // before falling back to its own fetch. Covers missed broadcasts and page refreshes,
 // while giving the (near-instant) broadcast time to win on a normal live activation.
 const REVEAL_FALLBACK_GRACE_MS = 500
+// How long a fresh board stays hidden waiting for the host's category-intro
+// verdict before giving up and showing it (host offline / never answers).
+const REVEAL_VERDICT_TIMEOUT_MS = 4000
 
 // "1st" / "2nd" / "3rd" / "11th" — handles the 11-13 special cases correctly
 function ordinal(n: number): string {
@@ -175,6 +178,12 @@ export default function PlayView() {
   // broadcast, any round change, AND any question preview/activation — so a
   // phone that missed `done` can never stay gated once play actually starts.
   const [catRevealIds, setCatRevealIds] = useState<string[] | null>(null)
+  // Round start / load: headers stay hidden until the host says whether there's
+  // an intro (`category_reveal`). Without this the board flashed fully revealed
+  // until the intro's first broadcast arrived. Falls back to showing the board
+  // if the host never answers (host offline).
+  const [revealVerdictPending, setRevealVerdictPending] = useState(false)
+  const revealVerdictTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   // Podium standings start collapsed to the podium places so the tip jar,
   // feedback box and venue links are reachable without scrolling past 15 rows
   const [showAllStandings, setShowAllStandings] = useState(false)
@@ -384,6 +393,19 @@ export default function PlayView() {
         .sort((a, b) => (a.point_value ?? 0) - (b.point_value ?? 0)),
     })))
   }, [])
+
+  const settleRevealVerdict = useCallback((ids: string[] | null) => {
+    if (revealVerdictTimerRef.current) { clearTimeout(revealVerdictTimerRef.current); revealVerdictTimerRef.current = null }
+    setRevealVerdictPending(false)
+    setCatRevealIds(ids)
+  }, [])
+  const awaitRevealVerdict = useCallback((roomId: string) => {
+    setCatRevealIds([])
+    setRevealVerdictPending(true)
+    if (revealVerdictTimerRef.current) clearTimeout(revealVerdictTimerRef.current)
+    revealVerdictTimerRef.current = setTimeout(() => settleRevealVerdict(null), REVEAL_VERDICT_TIMEOUT_MS)
+    void ablyClient.channels.get(`room:${roomId}`).publish('category_reveal_sync', {}).catch(() => undefined)
+  }, [settleRevealVerdict])
 
   const fetchTeammates = useCallback(async (teamId: string) => {
     const { data } = await supabase
@@ -921,7 +943,7 @@ export default function PlayView() {
       const p = data as PreviewInfo & { selectorTeamId?: string; doubleTapPending?: boolean; hostAssigned?: boolean }
       // A question in play means the category intros are over — self-heal any
       // phone that missed the reveal's `done` broadcast (backgrounded, rejoined)
-      setCatRevealIds(null)
+      settleRevealVerdict(null)
 
       // First DT broadcast (tile tap, before wager) — observers show the reveal animation
       if (p.doubleTapPending && p.selectorTeamId) {
@@ -973,7 +995,7 @@ export default function PlayView() {
       const { question_id, question, double_tap_team_id, buzz_opened_at, debugTiming } = data as {
         question_id: string; question?: QuestionPublic; double_tap_team_id?: string; buzz_opened_at?: number; debugTiming?: boolean
       }
-      setCatRevealIds(null) // intros are over once a question is live
+      settleRevealVerdict(null) // intros are over once a question is live
       // Remember whether this question is being timing-tracked, so even the
       // FALLBACK-DB path below (which never sees this payload) knows to self-report.
       debugTimingRef.current = !!debugTiming
@@ -1177,7 +1199,7 @@ export default function PlayView() {
     })
     ch.subscribe('category_reveal', ({ data }) => {
       const { revealed_ids, done } = data as { round: number; revealed_ids: string[]; done?: boolean }
-      setCatRevealIds(done ? null : revealed_ids)
+      settleRevealVerdict(done ? null : revealed_ids)
     })
     ch.subscribe('round_intermission', ({ data }) => {
       const { snapshots } = data as { snapshots: ScoreSnapshot[] }
@@ -1210,7 +1232,7 @@ export default function PlayView() {
         // reveal, intermission) so nothing from the last board lingers
         setIntermissionSnapshots(null)
         sessionStorage.removeItem('intermission')
-        setCatRevealIds(null) // host re-inits the reveal for the new round if it has one
+        awaitRevealVerdict(r.id) // hidden until the host opens the intro (or says there is none)
         setBuzzFailed(false)
         setPreviewInfo(null)
         setActiveQuestion(null)
@@ -1367,6 +1389,11 @@ export default function PlayView() {
     // Rounds 1–3 each load their own board; Final Tap / finished keep the last
     // board in memory (it is never shown in those phases)
     const round = statusToRound(room.status) ?? FIRST_ROUND
+    // Entering a regular round (game start, refresh, rejoin) with nothing in play:
+    // keep the headers hidden until the host gives its intro verdict
+    if (isRegularRoundStatus(room.status) && !room.current_question_id && !room.pending_question_id) {
+      awaitRevealVerdict(room.id)
+    }
     loadBoard(room.id, round)
     supabase.from('teams').select('id, name, score').eq('room_id', room.id).then(({ data }) => {
       if (data) {
@@ -1374,7 +1401,7 @@ export default function PlayView() {
         setAllTeamScores(data)
       }
     })
-  }, [phase, room?.id, room?.status, loadBoard])
+  }, [phase, room?.id, room?.status, loadBoard]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persisted Final Tap recovery. Broadcasts move live clients immediately; these room fields
   // put refreshed or reconnected phones back into the same phase and original deadline.
@@ -3047,7 +3074,9 @@ export default function PlayView() {
         {/* pt-24 clears the score chip (top-4 + ~5rem tall) — at pt-16 a long
             "X is choosing…" line ran underneath it */}
         <div className="pt-24 pb-3 px-4 text-center shrink-0">
-          {catRevealIds != null ? (
+          {revealVerdictPending ? (
+            <p className="text-gray-600 text-sm">Setting up the board…</p>
+          ) : catRevealIds != null ? (
             // During the intros nobody can pick — don't flash "Your pick!" over
             // a board of disabled glasses
             <p className="text-amber-300 font-black text-lg">🍺 Category reveal — eyes on the big screen!</p>

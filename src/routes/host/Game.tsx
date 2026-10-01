@@ -255,6 +255,9 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
         }
       }
     }
+    // A phone/projector that just started a round (or loaded mid-round) holds its
+    // headers hidden and asks where the intro stands — answer from live state.
+    ch.subscribe('category_reveal_sync', () => replyRevealSyncRef.current())
     ch.on('attached', ensureInitialTurn)
     broadcastRef.current = ch
     if (ch.state === 'attached') ensureInitialTurn()
@@ -1460,6 +1463,22 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
   // descriptions and nothing has been played yet. sessionStorage remembers a
   // finished/skipped intro (and mid-intro progress) so a same-tab refresh
   // resumes instead of re-blanking boards; a question in flight always wins.
+  //
+  // Clients keep every header hidden at round start until they hear a verdict, so
+  // the host must ALWAYS give one: the intro opening, or `done` for a round with
+  // no intro (no descriptions, already finished, already in play).
+  function introDecision(round: number): 'open' | 'skip' | 'unknown' {
+    const cats = categories.filter(c => c.round === round)
+    if (cats.length === 0) return 'unknown' // board still loading
+    if (!cats.some(c => c.description)) return 'skip'
+    if (sessionStorage.getItem(`catRevealDone:${roomId}:${round}`)) return 'skip'
+    if (cats.some(c => c.questions.some(q => q.is_answered))) return 'skip' // mid-round refresh
+    // A question already previewed/active means the round has really started —
+    // never open the intro panel over live play (host rejoining on a new device)
+    if (room.current_question_id || room.pending_question_id) return 'skip'
+    return 'open'
+  }
+  const announcedSkipRoundRef = useRef<string | null>(null)
   useEffect(() => {
     const round = statusToRound(room.status)
     if (round === null) {
@@ -1467,13 +1486,18 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
       return
     }
     if (catRevealRound === round) return
+    const decision = introDecision(round)
+    if (decision === 'skip') {
+      // Once per round: release any client holding its headers for a verdict
+      const key = `${room.status}`
+      if (announcedSkipRoundRef.current !== key) {
+        announcedSkipRoundRef.current = key
+        broadcastRef.current?.publish('category_reveal', { round, revealed_ids: [], done: true })
+      }
+      return
+    }
+    if (decision !== 'open') return
     const cats = categories.filter(c => c.round === round)
-    if (cats.length === 0 || !cats.some(c => c.description)) return
-    if (sessionStorage.getItem(`catRevealDone:${roomId}:${round}`)) return
-    if (cats.some(c => c.questions.some(q => q.is_answered))) return // mid-round refresh
-    // A question already previewed/active means the round has really started —
-    // never open the intro panel over live play (host rejoining on a new device)
-    if (room.current_question_id || room.pending_question_id) return
     const resumed = Math.min(
       parseInt(sessionStorage.getItem(`catRevealProg:${roomId}:${round}`) ?? '0', 10) || 0,
       cats.length
@@ -1490,6 +1514,24 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
   const catRevealCats = catRevealRound != null
     ? categories.filter(c => c.round === catRevealRound)
     : []
+
+  // Answer to `category_reveal_sync` (refreshed each render — read via ref from
+  // the channel subscription). 'unknown'/'open' stay silent: the opener effect
+  // above is about to broadcast the real state itself.
+  const replyRevealSyncRef = useRef<() => void>(() => {})
+  replyRevealSyncRef.current = () => {
+    const round = statusToRound(room.status)
+    if (round === null) return
+    if (catRevealRound === round) {
+      broadcastRef.current?.publish('category_reveal', {
+        round,
+        revealed_ids: catRevealCats.slice(0, catRevealCount).map(c => c.id),
+        done: false,
+      })
+    } else if (introDecision(round) === 'skip') {
+      broadcastRef.current?.publish('category_reveal', { round, revealed_ids: [], done: true })
+    }
+  }
 
   // While the intro is open, re-broadcast the current revealed set every few
   // seconds — a phone or projector that refreshed mid-intro (and so defaulted
