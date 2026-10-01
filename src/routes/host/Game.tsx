@@ -6,6 +6,7 @@ import type { Buzz, FinalPhase, Question, Room, ScoreSnapshot, Team, Wager } fro
 import ScoreHistoryChart from '../../components/ScoreHistoryChart'
 import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { useWakeLock } from '../../lib/useWakeLock'
+import { useEmptyTeamSweep } from '../../lib/useEmptyTeamSweep'
 import {
   FINAL_TAP_LABEL,
   REGULAR_ROUNDS,
@@ -1351,14 +1352,19 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
   // team and everything that points at it in one authorized transaction (and
   // refuses at the same moments kickBlockedReason greys the button out), then
   // every screen is told so the kicked phones leave and the rest drop the team.
-  async function kickTeam(team: Team) {
-    setKickConfirmTeamId(null)
-    setKickingTeamId(team.id)
+  // `auto` = the empty-team sweep, not the host's ✕: no confirm UI to touch, and a
+  // refusal stays quiet (the sweep simply retries once play is idle).
+  async function kickTeam(team: Team, auto = false): Promise<boolean> {
+    if (!auto) {
+      setKickConfirmTeamId(null)
+      setKickingTeamId(team.id)
+    }
     const { data, error } = await supabase.rpc('kick_team', { p_team_id: team.id })
-    setKickingTeamId(null)
+    if (!auto) setKickingTeamId(null)
     if (error) {
-      setActionError(`Couldn't remove ${team.name}: ${error.message}`)
-      return
+      if (!auto) setActionError(`Couldn't remove ${team.name}: ${error.message}`)
+      else console.warn(`[empty-team sweep] couldn't remove ${team.name}: ${error.message}`)
+      return false
     }
     setActionError('')
     const turnCleared = data?.[0]?.turn_cleared ?? false
@@ -1381,6 +1387,7 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
         .sort((a, b) => (scores.get(b.id) ?? b.score) - (scores.get(a.id) ?? a.score))[0]
       assignTurn(next?.id ?? null)
     }
+    return true
   }
 
   async function showRoundIntermission() {
@@ -1624,6 +1631,13 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
     : fjPhase === 'question' || fjPhase === 'review' ? 'Wait until the Final Tap review is done'
     : activeQuestion || previewInfo || dtPendingTeamId || room.pending_question_id ? 'Finish or clear the current clue first'
     : null
+  // Everyone on a team left → drop it once play is idle (see useEmptyTeamSweep)
+  useEmptyTeamSweep({
+    enabled: true,
+    teams,
+    blocked: kickBlockedReason !== null || kickingTeamId !== null,
+    remove: team => kickTeam(team, true),
+  })
   // Playable boards only — the Final Tap category (round 4 today, round 3 in
   // rooms imported before Round 3 existed) never appears in the question list.
   const boardCategories = regularCategories(categories)

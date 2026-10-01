@@ -9,6 +9,7 @@ import type { ContentJSON, ContentSummary } from '../../lib/content'
 import { FINAL_TAP_LABEL, FIRST_ROUND, roundDefinition, roundLabel, roundToStatus } from '../../lib/rounds'
 import type { Room, Team } from '../../lib/types'
 import Game from './Game'
+import { useEmptyTeamSweep } from '../../lib/useEmptyTeamSweep'
 
 type Phase = 'checking' | 'sign_in' | 'access_denied' | 'no_room' | 'creating' | 'lobby' | 'game' | 'error'
 
@@ -255,20 +256,33 @@ export default function HostView() {
   // Same authorized transaction the in-game kick uses, so the phones on that
   // team are told to leave instead of sitting in a lobby for a team that no
   // longer exists (a bare row delete used to leave them stranded there).
-  async function handleRemoveTeam(team: Team) {
-    setRemoveConfirmTeamId(null)
-    setRemovingTeamId(team.id)
+  // `auto` = the empty-team sweep: no confirm UI, and failures stay quiet (it retries).
+  async function handleRemoveTeam(team: Team, auto = false): Promise<boolean> {
+    if (!auto) {
+      setRemoveConfirmTeamId(null)
+      setRemovingTeamId(team.id)
+    }
     const { error: err } = await supabase.rpc('kick_team', { p_team_id: team.id })
-    setRemovingTeamId(null)
+    if (!auto) setRemovingTeamId(null)
     if (err) {
-      setTeamActionError(`Couldn't remove ${team.name}: ${err.message}`)
-      return
+      if (!auto) setTeamActionError(`Couldn't remove ${team.name}: ${err.message}`)
+      else console.warn(`[empty-team sweep] couldn't remove ${team.name}: ${err.message}`)
+      return false
     }
     setTeamActionError('')
     setTeams(prev => prev.filter(t => t.id !== team.id))
     setPlayerCounts(prev => { const m = new Map(prev); m.delete(team.id); return m })
     lobbyBroadcastRef.current?.publish('team_kicked', { team_id: team.id, team_name: team.name })
+    return true
   }
+
+  // Everyone on a team left → drop it (Game.tsx runs the same sweep in-game)
+  useEmptyTeamSweep({
+    enabled: phase === 'lobby',
+    teams,
+    blocked: removingTeamId !== null,
+    remove: team => handleRemoveTeam(team, true),
+  })
 
   // Game.tsx keeps its own live roster; mirror its kicks here so this snapshot
   // never re-seeds a removed team back onto the game screen.

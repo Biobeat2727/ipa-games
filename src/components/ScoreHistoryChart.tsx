@@ -14,6 +14,9 @@ interface Props {
    *  standings list). When selectedTeamId is undefined the chart manages its own. */
   selectedTeamId?: string | null
   onSelectTeam?: (id: string | null) => void
+  /** Projector: nobody can tap the big screen, so drop the detail bar / tap hint
+   *  and give its height to the chart. */
+  hideDetailBar?: boolean
 }
 
 // Distinct colors that pop on dark backgrounds — enough for 12 teams before cycling
@@ -63,7 +66,7 @@ function niceStep(raw: number): number {
 // path instead of being re-sorted on top. Re-sorting keyed SVG children moves DOM nodes,
 // which restarts their CSS intro animations — the whole chart would blank and redraw on
 // every tap. Same reason `drew` freezes the intro styles once the animation finishes.
-export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highlightTeamId, selectedTeamId, onSelectTeam }: Props) {
+export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highlightTeamId, selectedTeamId, onSelectTeam, hideDetailBar }: Props) {
   const [internalSelectedId, setInternalSelectedId] = useState<string | null>(highlightTeamId ?? null)
   const controlled = selectedTeamId !== undefined
   const selectedId = controlled ? selectedTeamId : internalSelectedId
@@ -286,7 +289,7 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
       </div>
 
       {/* Detail bar — who the selected line is */}
-      <div className="shrink-0 mt-2 flex items-center justify-center">
+      {!hideDetailBar && <div className="shrink-0 mt-2 flex items-center justify-center">
         {selectedId && selName ? (
           <div className="flex items-center gap-3 bg-gray-900 border border-gray-800 rounded-xl px-4 py-2 max-w-full"
             style={{ borderColor: `${selColor}55` }}>
@@ -308,7 +311,7 @@ export default function ScoreHistoryChart({ snapshots, teamNames, teamIds, highl
             Tap a line to see whose it is
           </p>
         )}
-      </div>
+      </div>}
     </div>
   )
 }

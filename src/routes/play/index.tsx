@@ -152,6 +152,13 @@ export default function PlayView() {
   // tremor) are not spam and must not cost someone the question.
   const preBuzzTapTimesRef                   = useRef<number[]>([])
   const [buzzLockedOut, setBuzzLockedOut]     = useState(false)
+  // True when the lockout came from a teammate's phone (team_locked_out broadcast):
+  // one player's early taps sit the whole team out, so nobody routes around it
+  // by handing the buzz to the phone next to them.
+  const [lockedByTeammate, setLockedByTeammate] = useState(false)
+  // Question id of the current real preview — scopes incoming team lockouts so a
+  // late broadcast from the previous question can't lock the next one.
+  const previewQidRef                        = useRef<string | null>(null)
   // Buzz insert failed (flaky wifi) — surface it loudly so the player retries
   // instead of silently believing they're in the queue.
   const [buzzFailed, setBuzzFailed]           = useState(false)
@@ -950,6 +957,7 @@ export default function PlayView() {
       sessionStorage.removeItem('dtWager')
       setPreBuzzTaps(0)
       setBuzzLockedOut(false)
+      previewQidRef.current = p.questionId
       setPreviewInfo(p)
       // A wager is locked (by a teammate or a host override) — close any wager
       // screen still open on this device.
@@ -1105,6 +1113,16 @@ export default function PlayView() {
         pending_selection_claimed_at: null,
         pending_selection_wager: null,
       } : prev)
+    })
+    ch.subscribe('team_locked_out', ({ data }) => {
+      const p = data as { team_id: string; question_id: string }
+      if (p.team_id !== myTeamRef.current?.id) return
+      if (p.question_id !== previewQidRef.current &&
+          p.question_id !== roomRef.current?.current_question_id) return
+      setBuzzLockedOut(locked => {
+        if (!locked) setLockedByTeammate(true)
+        return true
+      })
     })
     ch.subscribe('timer_start', ({ data }) => {
       const p = data as TimerPayload
@@ -1702,8 +1720,19 @@ export default function PlayView() {
       // A confirmed team insert followed by a failed membership request is still
       // our team. Retry that join instead of creating an orphan or rejecting its name.
       let team = pendingCreatedTeamRef.current
+      let sweptTeamId: string | null = null
+      // The host's empty-team sweep removes a team nobody joined, so a retry long
+      // after the failed join may find it gone — start over with a fresh insert.
+      if (team && team.room_id === room.id && team.name === name) {
+        const pendingId = team.id
+        const { data: still, error: checkError } = await playerRequest(signal => supabase.from('teams')
+          .select('id').eq('id', pendingId).abortSignal(signal).maybeSingle())
+        if (checkError) throw checkError
+        if (!still) { sweptTeamId = pendingId; team = null; pendingCreatedTeamRef.current = null }
+      }
       if (!team || team.room_id !== room.id || team.name !== name) {
-        if (teams.some(t => t.name.trim().toLowerCase() === name.toLowerCase())) {
+        // (the local list may still hold our own swept team under this name)
+        if (teams.some(t => t.id !== sweptTeamId && t.name.trim().toLowerCase() === name.toLowerCase())) {
           setError(`"${name}" is already taken — pick another name.`)
           return
         }
@@ -1860,7 +1889,8 @@ export default function PlayView() {
   }
 
   // Anti-spam: count taps on the pre-buzzer (preview) screen. 3 taps before the buzzer
-  // appears = this device is locked out of buzzing until another player answers.
+  // appears = this player's whole TEAM is locked out of buzzing until another player
+  // answers (team_locked_out broadcast reaches the teammates' phones).
   function handlePreBuzzTap() {
     if (buzzLockedOut) return
     const SPAM_TAPS = 3
@@ -1871,7 +1901,14 @@ export default function PlayView() {
     const recent = [...preBuzzTapTimesRef.current, now].filter(t => now - t <= SPAM_WINDOW_MS)
     preBuzzTapTimesRef.current = recent
     setPreBuzzTaps(recent.length)
-    if (recent.length >= SPAM_TAPS) setBuzzLockedOut(true)
+    if (recent.length >= SPAM_TAPS) {
+      setBuzzLockedOut(true)
+      setLockedByTeammate(false)
+      const qId = previewInfo?.questionId
+      if (myTeam && qId) {
+        broadcastRef.current?.publish('team_locked_out', { team_id: myTeam.id, question_id: qId })
+      }
+    }
   }
 
   function fireBuzz(clientX: number, clientY: number, target: HTMLButtonElement) {
@@ -3153,9 +3190,13 @@ export default function PlayView() {
             )}
             <p className="text-amber-100/60 text-sm animate-pulse">Waiting for host…</p>
             {buzzLockedOut ? (
-              <p className="text-red-400 text-sm font-bold mt-3">🔒 Too many early taps — you're locked out of this one</p>
+              <p className="text-red-400 text-sm font-bold mt-3">
+                {lockedByTeammate
+                  ? '🔒 A teammate tapped too early — your team is locked out of this one'
+                  : "🔒 Too many early taps — your team is locked out of this one"}
+              </p>
             ) : preBuzzTaps > 0 ? (
-              <p className="text-amber-400 text-xs font-semibold mt-3">Easy — tapping before the buzzer opens will lock you out</p>
+              <p className="text-amber-400 text-xs font-semibold mt-3">Easy — tapping before the buzzer opens will lock your team out</p>
             ) : null}
             <QuipCycler />
             {/* Anti-spam catcher. Only taps landing where the buzz button WILL be
@@ -3427,7 +3468,9 @@ export default function PlayView() {
           {buzzLockedOut ? (
             <div className="w-full py-8 rounded-2xl font-black text-xl bg-white/5 border border-white/10 text-red-400/80 text-center leading-snug">
               🔒 Locked out
-              <span className="block text-sm font-medium text-gray-500 mt-1">You tapped too early — wait for another team to answer</span>
+              <span className="block text-sm font-medium text-gray-500 mt-1 px-4">
+                {lockedByTeammate ? 'A teammate tapped too early' : 'You tapped too early'} — wait for another team to answer
+              </span>
             </div>
           ) : buzzWindowClosed ? (
             <div className="w-full py-8 rounded-2xl font-black text-xl bg-white/5 border border-white/10 text-gray-500 text-center">
