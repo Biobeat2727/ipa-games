@@ -7,6 +7,7 @@ import ScoreHistoryChart from '../../components/ScoreHistoryChart'
 import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { useWakeLock } from '../../lib/useWakeLock'
 import { useEmptyTeamSweep } from '../../lib/useEmptyTeamSweep'
+import ConfirmAction from '../../components/ConfirmAction'
 import {
   FINAL_TAP_LABEL,
   REGULAR_ROUNDS,
@@ -1969,12 +1970,14 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
               </button>
             )}
             {catRevealCount < catRevealCats.length && (
-              <button
-                onClick={finishCategoryReveal}
+              <ConfirmAction
+                onConfirm={finishCategoryReveal}
+                prompt="Skip the rest of the intros?"
+                confirmLabel="Skip"
                 className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
               >
                 Skip intros — show the whole board
-              </button>
+              </ConfirmAction>
             )}
           </div>
         ) : intermissionSnapshots ? (
@@ -2081,13 +2084,15 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                     No Final Tap question found in this game's content — check that your
                     import file has a final_tap block.
                   </p>
-                  <button
-                    onClick={endFinalTapWithoutQuestion}
+                  <ConfirmAction
+                    onConfirm={endFinalTapWithoutQuestion}
                     disabled={gameFinishSaving}
+                    prompt="End the game now?"
+                    confirmLabel="End game"
                     className="w-full py-3 rounded-xl font-black bg-amber-500 text-gray-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
                   >
                     {gameFinishSaving ? 'Finishing…' : 'End Game with Current Scores →'}
-                  </button>
+                  </ConfirmAction>
                   {gameFinishError && <p className="text-red-400 text-sm">{gameFinishError}</p>}
                 </div>
               )}
@@ -2134,13 +2139,15 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                     No Final Tap question found in this game's content, so the reveal can't
                     run. Collected wagers will be discarded — nothing can judge them.
                   </p>
-                  <button
-                    onClick={endFinalTapWithoutQuestion}
+                  <ConfirmAction
+                    onConfirm={endFinalTapWithoutQuestion}
                     disabled={gameFinishSaving}
+                    prompt="End the game now?"
+                    confirmLabel="End game"
                     className="w-full py-3 rounded-xl font-black bg-amber-500 text-gray-950 hover:bg-amber-400 disabled:opacity-50 transition-colors"
                   >
                     {gameFinishSaving ? 'Finishing…' : 'End Game with Current Scores →'}
-                  </button>
+                  </ConfirmAction>
                   {gameFinishError && <p className="text-red-400 text-sm">{gameFinishError}</p>}
                 </div>
               )}
@@ -2646,13 +2653,17 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                 // Manual early advance (RND-02): host's call when the clock says so.
                 // Only shows the transition panel — nothing changes until the host
                 // confirms with "Show Scores & Start …".
-                <button
-                  onClick={endRoundEarly}
-                  className="mt-6 text-xs text-gray-600 hover:text-yellow-400 transition-colors"
-                  title={`Skip the remaining ${roundLabel(activeRound)} clues and move on to ${nextLabel}`}
-                >
-                  End {roundLabel(activeRound)} early → {nextLabel}
-                </button>
+                <div className="mt-6">
+                  <ConfirmAction
+                    onConfirm={endRoundEarly}
+                    prompt={`End ${roundLabel(activeRound)} with clues left?`}
+                    confirmLabel="End round"
+                    className="text-xs text-gray-600 hover:text-yellow-400 transition-colors"
+                    title={`Skip the remaining ${roundLabel(activeRound)} clues and move on to ${nextLabel}`}
+                  >
+                    End {roundLabel(activeRound)} early → {nextLabel}
+                  </ConfirmAction>
+                </div>
               )}
             </div>
           )

@@ -20,6 +20,7 @@ export default function HostView() {
   const [playerCounts, setPlayerCounts] = useState<Map<string, number>>(new Map())
   const [removeConfirmTeamId, setRemoveConfirmTeamId] = useState<string | null>(null)
   const [removingTeamId, setRemovingTeamId] = useState<string | null>(null)
+  const [starting, setStarting] = useState(false)
   const [teamActionError, setTeamActionError] = useState('')
   const [error, setError]        = useState('')
   const [hostUserId, setHostUserId] = useState<string | null>(null)
@@ -292,7 +293,39 @@ export default function HostView() {
   }
 
   async function handleStartGame() {
-    if (!room) return
+    if (!room || starting) return
+    setStarting(true)
+    try {
+      await startGame(room)
+    } finally {
+      setStarting(false)
+    }
+  }
+
+  async function startGame(room: Room) {
+    // A team nobody is on can't pick from the board — if it got the first turn
+    // the round would sit waiting on it. The 30s sweep grace (for teams mid-join)
+    // doesn't apply at the start line: drop every empty team before the round.
+    if (teams.length > 0) {
+      const { data: playerRows, error: countError } = await supabase
+        .from('players').select('team_id').in('team_id', teams.map(t => t.id))
+      if (countError) {
+        setTeamActionError(`Couldn't check teams before starting: ${countError.message}`)
+        return
+      }
+      const occupied = new Set((playerRows ?? []).map(p => p.team_id as string))
+      const empty = teams.filter(t => !occupied.has(t.id))
+      for (const team of empty) {
+        if (!(await handleRemoveTeam(team, true))) {
+          setTeamActionError(`Couldn't remove empty team ${team.name} — remove it with ✕, then start.`)
+          return
+        }
+      }
+      if (teams.length - empty.length < 2) {
+        setTeamActionError(`Removed ${empty.length} empty team${empty.length === 1 ? '' : 's'} — need 2+ teams with players to start.`)
+        return
+      }
+    }
     const firstStatus = roundToStatus(FIRST_ROUND)
     const { error: err } = await supabase
       .from('rooms').update({
@@ -558,12 +591,13 @@ export default function HostView() {
 
         <button
           onClick={handleStartGame}
-          disabled={!canStart}
+          disabled={!canStart || starting}
           className="w-full py-4 rounded-2xl text-xl font-black bg-yellow-400 text-gray-950 disabled:opacity-25 disabled:cursor-not-allowed transition-opacity"
         >
           {!summary ? 'Import content to start'
             : roundsMissing.length > 0 ? `Content is missing ${roundsMissing.map(r => roundLabel(r)).join(' & ')}`
             : teams.length < 2 ? 'Need 2+ teams'
+            : starting ? 'Starting…'
             : 'Start Game'}
         </button>
 
