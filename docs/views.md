@@ -101,7 +101,7 @@
 
 ### Connected screens (driven by `room.status`)
 1. **Lobby** — QR code linking to `window.location.origin`, join URL text, live team list as teams join
-2. **Question preview** — category — $value header plus the clue text, so the room reads along while the host reads it aloud, then "Listening…". Same header/type sizing as the active-question screen so opening the buzzer does not reflow the clue
+2. **Question preview** — category name + $value (🍺 Double Tap marker when it is one), then "Listening…". The clue text is deliberately **not** shown — phones and projector reveal it only when the host opens the buzzer, so teams have to listen to the host read it
 3. **Category grid** — full Jeopardy board for the current round (label "Round 1" / "Round 2" / "Round 3" in the score bar), tap/glass visual theme (see below), score bar, whose turn. During round-start category intros, unrevealed headers render as dim "?" tap handles and each reveal pops in (`category_reveal` broadcast)
 3b. **Round splash** — `ROUND 2` / `ROUND 3` full-screen for 2.5s with the transition sound
 3c. **Round intermission** — score-history map with "Round N in the books" and the next phase ("Round 2 up next…", "Round 3 up next…", "Final Tap up next…")
@@ -114,7 +114,7 @@
 
 ---
 
-**Clue text sizing (projector):** preview, buzzer-open and Final Tap clues scale by length
+**Clue text sizing (projector):** buzzer-open and Final Tap clues scale by length
 (`clueFontSize` in `src/routes/projector/index.tsx` — full size up to 120 chars, then 0.8 / 0.65 /
 0.57 at 180 / 240 / longer) so a 240-char clue plus the buzz list or the Final timer still fits
 1600×900 without scrolling. The Final timer also drops to a smaller size above 140 chars. Verified

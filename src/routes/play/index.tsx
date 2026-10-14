@@ -66,7 +66,6 @@ interface PreviewInfo {
   pointValue: number | null
   startTs: number
   doubleTapWager?: number
-  answer?: string
 }
 
 // How long the DB-driven reveal path waits for the Ably broadcast to claim a reveal
@@ -687,7 +686,6 @@ export default function PlayView() {
             ? new Date(room.pending_selection_claimed_at).getTime()
             : Date.now(),
           doubleTapWager: room.pending_selection_wager,
-          answer: question.answer,
         })
         return
       }
@@ -712,7 +710,6 @@ export default function PlayView() {
       startTs: room.pending_selection_claimed_at
         ? new Date(room.pending_selection_claimed_at).getTime()
         : Date.now(),
-      answer: question.answer,
     })
   }, [
     phase,
@@ -2098,7 +2095,6 @@ export default function PlayView() {
       pointValue:   q?.point_value ?? null,
       startTs:      Date.now(),
       ...(wager !== null ? { doubleTapWager: wager } : {}),
-      answer:       q?.answer ?? '',
     }
     const rect = elOrRect instanceof HTMLElement ? elOrRect.getBoundingClientRect() : elOrRect
     setTileRect(rect)
@@ -3222,12 +3218,8 @@ export default function PlayView() {
                 ${previewInfo.pointValue}
               </p>
             )}
-            {previewInfo.answer && (
-              <p className="text-white font-semibold leading-snug mb-8 max-w-md"
-                style={{ fontSize: 'clamp(1.1rem, 4vw, 1.5rem)' }}>
-                {previewInfo.answer}
-              </p>
-            )}
+            {/* No clue text here: it stays hidden until the host opens the buzzer,
+                so teams have to listen to the host read it */}
             <p className="text-amber-100/60 text-sm animate-pulse">Waiting for host…</p>
             {buzzLockedOut ? (
               <p className="text-red-400 text-sm font-bold mt-3">
@@ -3241,8 +3233,8 @@ export default function PlayView() {
             <QuipCycler />
             {/* Anti-spam catcher. Only taps landing where the buzz button WILL be
                 count toward the lockout: pre-loading a tap means parking a thumb on
-                the button's spot, whereas a tap up on the clue text is someone
-                reading. On the buzz screen the answer card and buzz-window bar take
+                the button's spot, whereas a tap up near the category is just a
+                fidget. On the buzz screen the answer card and buzz-window bar take
                 the top of the viewport and the button fills the centered flex-1
                 below, so that band is roughly the bottom 60%. Transparent, and
                 clear of the score chip (top-4 right-4). */}

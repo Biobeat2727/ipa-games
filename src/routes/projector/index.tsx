@@ -1012,49 +1012,28 @@ export default function ProjectorView() {
     )
   }
 
-  // Category preview (player selected, waiting for host to open buzzer)
+  // Category preview (player selected, waiting for host to open buzzer).
+  // The clue itself stays off the screen until the buzzer opens, so the room
+  // has to listen to the host read it.
   if (previewInfo && !activeQuestion) {
-    // The room reads along while the host reads the clue aloud. The text comes
-    // from the already-loaded questions_public rows (no correct_question in
-    // them), so this is a display change only — nothing new goes over the wire.
-    const previewQuestion = categories.flatMap(c => c.questions)
-      .find(q => q.id === previewInfo.questionId) ?? null
+    const isDoubleTap = categories.flatMap(c => c.questions)
+      .some(q => q.id === previewInfo.questionId && q.is_double_tap)
 
     return (
       <div className="h-screen wood-bg text-white flex flex-col items-center justify-center text-center p-8">
-        {previewQuestion ? (
-          <>
-            {/* Same header + clue sizing the buzzer-open screen uses, so opening
-                the buzzer doesn't reflow the clue mid-read */}
-            <p className="text-amber-400 font-bold uppercase tracking-[0.3em] mb-5"
-              style={{ fontSize: 'clamp(1rem, 2.2vw, 1.6rem)' }}>
-              {previewQuestion.is_double_tap && '🍺 Double Tap · '}
-              {previewInfo.categoryName}
-              {previewInfo.pointValue != null && ` — $${previewInfo.pointValue}`}
-            </p>
-            <p className="font-black leading-tight mb-10 max-w-6xl"
-              style={{ fontSize: clueFontSize(previewQuestion.answer.length, 5, 4.5) }}>
-              {previewQuestion.answer}
-            </p>
-          </>
-        ) : (
-          // Clue not in local state yet — fall back to the category card
-          <>
-            <p className="text-amber-300 uppercase tracking-[0.3em] mb-8"
-              style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>
-              Category
-            </p>
-            <p className="font-black text-white leading-none mb-6"
-              style={{ fontSize: 'clamp(3rem, 10vw, 8rem)' }}>
-              {previewInfo.categoryName}
-            </p>
-            {previewInfo.pointValue != null && (
-              <p className="text-yellow-400 font-mono font-black mb-12"
-                style={{ fontSize: 'clamp(2rem, 6vw, 5rem)' }}>
-                ${previewInfo.pointValue}
-              </p>
-            )}
-          </>
+        <p className="text-amber-300 uppercase tracking-[0.3em] mb-8"
+          style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>
+          {isDoubleTap ? '🍺 Double Tap · Category' : 'Category'}
+        </p>
+        <p className="font-black text-white leading-none mb-6"
+          style={{ fontSize: 'clamp(3rem, 10vw, 8rem)' }}>
+          {previewInfo.categoryName}
+        </p>
+        {previewInfo.pointValue != null && (
+          <p className="text-yellow-400 font-mono font-black mb-12"
+            style={{ fontSize: 'clamp(2rem, 6vw, 5rem)' }}>
+            ${previewInfo.pointValue}
+          </p>
         )}
         <p className="text-amber-200/60 uppercase tracking-widest animate-pulse"
           style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>

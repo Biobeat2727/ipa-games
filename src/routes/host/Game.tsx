@@ -681,7 +681,7 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
       startTs: Date.now(),
     }
     // No selectorTeamId — receivers treat a selector-less preview as a plain reveal.
-    broadcastRef.current?.publish('question_preview', { ...preview, answer: q.answer })
+    broadcastRef.current?.publish('question_preview', preview)
     setDtPendingTeamId(null)
     setDoubleTapWager(null)
     setPreviewInfo(preview)
