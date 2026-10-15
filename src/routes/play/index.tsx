@@ -243,7 +243,9 @@ export default function PlayView() {
   // Refs to avoid stale closures
   const responseSubmittedRef = useRef(false)
   const responseTextRef      = useRef('')
-  const myBuzzIdRef          = useRef<string | null>(null)
+  const autoSubmitStartedRef = useRef(false)
+  const submitResponseRef    = useRef<(text: string) => Promise<boolean>>(async () => false)
+  const myBuzzIdRef         = useRef<string | null>(null)
   const myTeamRef            = useRef<Team | null>(null)
   const roomRef                = useRef<Room | null>(null)
   const broadcastRef           = useRef<ReturnType<typeof ablyClient.channels.get> | null>(null)
@@ -1546,23 +1548,39 @@ export default function PlayView() {
   }, [buzzWindowTs])
 
   // Timer countdown
+  // Like Final Tap, an answer the team is still typing is sent just before the
+  // database deadline so the host sees it; Supabase still decides if it was on time.
   useEffect(() => {
     if (!timerPayload) { setTimeRemaining(null); return }
+    autoSubmitStartedRef.current = false
+    const deadline = timerPayload.start_timestamp + timerPayload.duration_seconds * 1000
 
     // `id` must be declared before tick() runs: restoring into an ALREADY-expired
     // answer window makes the first tick hit remaining === 0, and a `const id`
     // below would throw (TDZ) and blank the player screen mid-question.
     let id: ReturnType<typeof setInterval> | null = null
     const tick = () => {
-      const remaining = Math.max(0, Math.floor(
-        (timerPayload.start_timestamp + timerPayload.duration_seconds * 1000 - serverNow()) / 1000
-      ))
+      const millisecondsRemaining = deadline - serverNow()
+      const remaining = Math.max(0, Math.floor(millisecondsRemaining / 1000))
       setTimeRemaining(remaining)
-      if (remaining === 0 && id) { clearInterval(id); id = null }
-      return remaining
+      if (
+        millisecondsRemaining > 0
+        && millisecondsRemaining <= 750
+        && timerPayload.team_id === myTeamRef.current?.id
+        && !responseSubmittedRef.current
+        && !autoSubmitStartedRef.current
+        && responseTextRef.current.trim()
+      ) {
+        autoSubmitStartedRef.current = true
+        void submitResponseRef.current(responseTextRef.current).then(saved => {
+          if (!saved && deadline > serverNow()) autoSubmitStartedRef.current = false
+        })
+      }
+      if (millisecondsRemaining <= 0 && id) { clearInterval(id); id = null }
+      return millisecondsRemaining
     }
 
-    if (tick() > 0) id = setInterval(tick, 500)
+    if (tick() > 0) id = setInterval(tick, 250)
     return () => { if (id) clearInterval(id) }
   }, [timerPayload])
 
@@ -1963,12 +1981,13 @@ export default function PlayView() {
     fireBuzz(e.clientX, e.clientY, e.currentTarget)
   }
 
-  async function handleSubmitResponse() {
+  async function submitResponse(text: string) {
     const buzzId = myBuzzId ?? timerPayload?.buzz_id
-    if (!buzzId || !responseText.trim()) return
+    const response = text.trim()
+    if (!buzzId || !response || responseSubmittedRef.current) return false
     responseSubmittedRef.current = true // guard before await to prevent duplicate taps on this phone
     const { data: submitted, error: submitError } = await supabase.from('buzzes').update({
-      response: responseText.trim(),
+      response,
       response_submitted_at: new Date().toISOString(),
     }).eq('id', buzzId).is('response_submitted_at', null).select().maybeSingle()
 
@@ -1977,7 +1996,7 @@ export default function PlayView() {
       if (submitError.message.includes('Response window has closed')) {
         setTimeRemaining(0)
       }
-      return
+      return false
     }
 
     if (!submitted) {
@@ -1985,17 +2004,21 @@ export default function PlayView() {
         .from('buzzes').select('response').eq('id', buzzId).single()
       if (existing?.response) setResponseText(existing.response)
       setResponseSubmitted(true)
-      return
+      return true
     }
 
+    setResponseText(response)
     setResponseSubmitted(true)
     broadcastRef.current?.publish('team_answer_submitted', {
       team_id: myTeam?.id,
       buzz_id: buzzId,
       buzzPosition,
-      response: responseText.trim(),
+      response,
     })
+    return true
   }
+  submitResponseRef.current = submitResponse
+  const handleSubmitResponse = () => { void submitResponse(responseText) }
 
   function showSelectionNotice(message: string) {
     if (selectionNoticeTimerRef.current) clearTimeout(selectionNoticeTimerRef.current)
@@ -3303,7 +3326,7 @@ export default function PlayView() {
           {dtTimer === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
               <p className="text-red-400 font-black text-3xl mb-2">Time's up!</p>
-              <p className="text-gray-500 text-sm">You didn't answer in time.</p>
+              <p className="text-gray-500 text-sm">{responseText.trim() ? 'Sending what you typed…' : "You didn't answer in time."}</p>
             </div>
           ) : (
             <>
@@ -3365,7 +3388,7 @@ export default function PlayView() {
           {ansTimer === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
               <p className="text-red-400 font-black text-3xl mb-2">Time's up!</p>
-              <p className="text-gray-500 text-sm">You didn't answer in time.</p>
+              <p className="text-gray-500 text-sm">{responseText.trim() ? 'Sending what you typed…' : "You didn't answer in time."}</p>
             </div>
           ) : (
             <>
