@@ -2185,6 +2185,24 @@ export default function PlayView() {
   // scrolls internally instead of pushing them off screen.
   const answerScreenStyle = viewportHeight ? { height: `${viewportHeight}px`, minHeight: 0 } : undefined
 
+  // With the keyboard up there's ~300-450px of visible screen, and the chrome
+  // around the clue (header, timer bar, label, text box, button) ate almost all
+  // of it — a 130-char clue got squeezed to two lines. On a short viewport the
+  // answer screens tighten everything except the clue so the whole clue stays
+  // readable while typing. 520 sits above every phone's keyboard-open height but
+  // below a keyboard-down iPhone SE, so the normal layout is untouched.
+  const answerCompact = viewportHeight !== null && viewportHeight < 520
+  const ac = answerCompact
+    // Keyboard up: text box and a short Submit share one row (like a chat input)
+    ? { screen: 'px-4 py-3', inner: '', header: 'mb-1', title: 'text-base', timer: 'text-2xl', bar: 'mb-2',
+        card: 'px-3 py-2 mb-2', label: 'hidden', row: 'flex gap-2 shrink-0', textarea: 'flex-1 min-w-0 py-2',
+        rows: 1, button: 'px-5 py-2', submit: 'Submit' }
+    : { screen: 'p-6', inner: 'pt-2', header: 'mb-2', title: 'text-xl', timer: 'text-4xl', bar: 'mb-4',
+        card: 'p-4 mb-4', label: '', row: 'contents', textarea: 'w-full py-3 mb-4',
+        rows: 2, button: 'w-full py-4', submit: 'Submit Response' }
+  const answerClueClass = (clue: string, normal = 'text-lg') =>
+    !answerCompact ? normal : clue.length > 180 ? 'text-sm' : clue.length > 150 ? 'text-[15px]' : 'text-base'
+
   // Enter drops the keyboard but deliberately does NOT submit: a stray Enter would
   // otherwise lock in a half-typed answer, and submissions are one-shot. Closing the
   // keyboard reveals the submit button, so the tap that follows is the confirmation.
@@ -2611,17 +2629,17 @@ export default function PlayView() {
             style={{ transform: `scaleX(${Math.max(0, Math.min(1, (pct) / 100))})` }}
           />
         </div>
-        <div className="flex-1 min-h-0 flex flex-col p-5 max-w-sm mx-auto w-full">
-          <div className="flex items-center justify-between mb-4 pt-3">
+        <div className={`flex-1 min-h-0 flex flex-col ${answerCompact ? 'px-4 py-2' : 'p-5'} max-w-sm mx-auto w-full`}>
+          <div className={`flex items-center justify-between ${answerCompact ? 'mb-1' : 'mb-4 pt-3'}`}>
             <p className="text-amber-400 text-xs uppercase tracking-widest">Final Tap</p>
-            <span className={`inline-block font-mono text-3xl font-black tabular-nums ${low ? 'text-red-400' : 'text-white'}`}
+            <span className={`inline-block font-mono ${answerCompact ? 'text-2xl' : 'text-3xl'} font-black tabular-nums ${low ? 'text-red-400' : 'text-white'}`}
               style={low ? { animation: 'timer-pulse 0.8s ease-in-out infinite' } : undefined}>
               {remaining}
             </span>
           </div>
-          <div className="glass-card rounded-2xl p-5 mb-4 min-h-0 overflow-y-auto">
-            <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The Answer</p>
-            <p className="text-xl font-bold leading-snug">{fjQuestion.answer}</p>
+          <div className={`glass-card rounded-2xl ${answerCompact ? ac.card : 'p-5 mb-4'} min-h-0 overflow-y-auto`}>
+            <p className={`text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2 ${ac.label}`}>The Answer</p>
+            <p className={`${answerClueClass(fjQuestion.answer, 'text-xl')} font-bold leading-snug`}>{fjQuestion.answer}</p>
           </div>
           {fjResponseSubmitted ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
@@ -2633,28 +2651,30 @@ export default function PlayView() {
             </div>
           ) : (
             <>
-              <textarea
-                autoFocus
-                placeholder="Type your response…"
-                value={fjResponse}
-                onChange={e => setFjResponse(e.target.value)}
-                onKeyDown={dismissKeyboardOnEnter}
-                enterKeyHint="done"
-                disabled={fjResponseSubmitting}
-                maxLength={500}
-                rows={2}
-                className="w-full shrink-0 bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
-              />
               {fjResponseError && (
                 <p role="alert" className="text-red-400 text-sm text-center mb-3">{fjResponseError}</p>
               )}
-              <button
-                onClick={handleSubmitFJResponse}
-                disabled={!fjResponse.trim() || fjResponseSubmitting}
-                className="btn-beer w-full shrink-0 py-4 rounded-2xl font-black text-lg"
-              >
-                {fjResponseSubmitting ? 'Locking…' : 'Submit Response'}
-              </button>
+              <div className={ac.row}>
+                <textarea
+                  autoFocus
+                  placeholder="Type your response…"
+                  value={fjResponse}
+                  onChange={e => setFjResponse(e.target.value)}
+                  onKeyDown={dismissKeyboardOnEnter}
+                  enterKeyHint="done"
+                  disabled={fjResponseSubmitting}
+                  maxLength={500}
+                  rows={ac.rows}
+                  className={`shrink-0 bg-white/5 border border-white/10 text-white rounded-2xl px-4 ${ac.textarea} outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg`}
+                />
+                <button
+                  onClick={handleSubmitFJResponse}
+                  disabled={!fjResponse.trim() || fjResponseSubmitting}
+                  className={`btn-beer shrink-0 ${ac.button} rounded-2xl font-black text-lg`}
+                >
+                  {fjResponseSubmitting ? 'Locking…' : ac.submit}
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -3260,29 +3280,29 @@ export default function PlayView() {
     const dtTimerPct = (dtTimer / 40) * 100
     const dtTimerLow = dtTimer <= 10
     return (
-      <div className="relative min-h-screen bar-bg text-white flex flex-col p-6 overflow-hidden" style={answerScreenStyle}>
+      <div className={`relative min-h-screen bar-bg text-white flex flex-col ${ac.screen} overflow-hidden`} style={answerScreenStyle}>
         {scoreOverlayEl}
         {/* No score chip while answering: it sat on top of the countdown, and the
             clock matters more than "all scores" during a 15-second typing window */}
-        <div className="max-w-sm mx-auto w-full flex flex-col flex-1 min-h-0 pt-2">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-yellow-400 font-black text-xl">Your turn!</p>
-            <span className={`inline-block font-mono text-4xl font-black tabular-nums ${dtTimerLow ? 'text-red-400' : 'text-white'}`}
+        <div className={`max-w-sm mx-auto w-full flex flex-col flex-1 min-h-0 ${ac.inner}`}>
+          <div className={`flex items-center justify-between ${ac.header}`}>
+            <p className={`text-yellow-400 font-black ${ac.title}`}>Your turn!</p>
+            <span className={`inline-block font-mono ${ac.timer} font-black tabular-nums ${dtTimerLow ? 'text-red-400' : 'text-white'}`}
               style={dtTimerLow ? { animation: 'timer-pulse 0.8s ease-in-out infinite' } : undefined}>
               {dtTimer}
             </span>
           </div>
 
-          <div className="w-full h-2 bg-white/10 rounded-full mb-6 overflow-hidden">
+          <div className={`w-full h-2 bg-white/10 rounded-full ${answerCompact ? 'mb-2' : 'mb-6'} overflow-hidden`}>
             <div
               className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${dtTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
               style={{ transform: `scaleX(${Math.max(0, Math.min(1, (dtTimerPct) / 100))})` }}
             />
           </div>
 
-          <div className="glass-card rounded-2xl p-4 mb-4 min-h-0 overflow-y-auto">
-            <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The answer</p>
-            <p className="text-lg font-bold leading-snug">{activeQuestion.answer}</p>
+          <div className={`glass-card rounded-2xl ${ac.card} min-h-0 overflow-y-auto`}>
+            <p className={`text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2 ${ac.label}`}>The answer</p>
+            <p className={`${answerClueClass(activeQuestion.answer)} font-bold leading-snug`}>{activeQuestion.answer}</p>
           </div>
 
           {dtTimer === 0 ? (
@@ -3292,23 +3312,25 @@ export default function PlayView() {
             </div>
           ) : (
             <>
-              <textarea
-                autoFocus
-                placeholder="Type your response…"
-                value={responseText}
-                onChange={e => setResponseText(e.target.value)}
-                onKeyDown={dismissKeyboardOnEnter}
-                enterKeyHint="done"
-                rows={2}
-                className="w-full shrink-0 bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
-              />
-              <button
-                onClick={handleSubmitResponse}
-                disabled={!responseText.trim()}
-                className="btn-beer w-full shrink-0 py-4 rounded-2xl font-black text-lg"
-              >
-                Submit Response
-              </button>
+              <div className={ac.row}>
+                <textarea
+                  autoFocus
+                  placeholder="Type your response…"
+                  value={responseText}
+                  onChange={e => setResponseText(e.target.value)}
+                  onKeyDown={dismissKeyboardOnEnter}
+                  enterKeyHint="done"
+                  rows={ac.rows}
+                  className={`shrink-0 bg-white/5 border border-white/10 text-white rounded-2xl px-4 ${ac.textarea} outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg`}
+                />
+                <button
+                  onClick={handleSubmitResponse}
+                  disabled={!responseText.trim()}
+                  className={`btn-beer shrink-0 ${ac.button} rounded-2xl font-black text-lg`}
+                >
+                  {ac.submit}
+                </button>
+              </div>
             </>
           )}
         </div>
@@ -3322,29 +3344,29 @@ export default function PlayView() {
     const ansTimerPct = (ansTimer / 15) * 100
     const ansTimerLow = ansTimer <= 3
     return (
-      <div className="relative min-h-screen bar-bg text-white flex flex-col p-6 overflow-hidden" style={answerScreenStyle}>
+      <div className={`relative min-h-screen bar-bg text-white flex flex-col ${ac.screen} overflow-hidden`} style={answerScreenStyle}>
         {scoreOverlayEl}
         {/* No score chip while answering: it sat on top of the countdown, and the
             clock matters more than "all scores" during a 15-second typing window */}
-        <div className="max-w-sm mx-auto w-full flex flex-col flex-1 min-h-0 pt-2">
-          <div className="flex items-center justify-between mb-2">
-            <p className="text-yellow-400 font-black text-xl">{buzzWasMine ? "You're in! Type fast!" : 'Teammate buzzed! Type fast!'}</p>
-            <span className={`inline-block font-mono text-4xl font-black tabular-nums ${ansTimerLow ? 'text-red-400' : 'text-white'}`}
+        <div className={`max-w-sm mx-auto w-full flex flex-col flex-1 min-h-0 ${ac.inner}`}>
+          <div className={`flex items-center justify-between ${ac.header}`}>
+            <p className={`text-yellow-400 font-black ${ac.title}`}>{buzzWasMine ? "You're in! Type fast!" : 'Teammate buzzed! Type fast!'}</p>
+            <span className={`inline-block font-mono ${ac.timer} font-black tabular-nums ${ansTimerLow ? 'text-red-400' : 'text-white'}`}
               style={ansTimerLow ? { animation: 'timer-pulse 0.8s ease-in-out infinite' } : undefined}>
               {ansTimer}
             </span>
           </div>
 
-          <div className="w-full h-2 bg-white/10 rounded-full mb-4 overflow-hidden">
+          <div className={`w-full h-2 bg-white/10 rounded-full ${ac.bar} overflow-hidden`}>
             <div
               className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${ansTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
               style={{ transform: `scaleX(${Math.max(0, Math.min(1, (ansTimerPct) / 100))})` }}
             />
           </div>
 
-          <div className="glass-card rounded-2xl p-4 mb-4 min-h-0 overflow-y-auto">
-            <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The answer</p>
-            <p className="text-lg font-bold leading-snug">{activeQuestion.answer}</p>
+          <div className={`glass-card rounded-2xl ${ac.card} min-h-0 overflow-y-auto`}>
+            <p className={`text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2 ${ac.label}`}>The answer</p>
+            <p className={`${answerClueClass(activeQuestion.answer)} font-bold leading-snug`}>{activeQuestion.answer}</p>
           </div>
 
           {ansTimer === 0 ? (
@@ -3354,23 +3376,25 @@ export default function PlayView() {
             </div>
           ) : (
             <>
-              <textarea
-                autoFocus
-                placeholder="Type your response…"
-                value={responseText}
-                onChange={e => setResponseText(e.target.value)}
-                onKeyDown={dismissKeyboardOnEnter}
-                enterKeyHint="done"
-                rows={2}
-                className="w-full shrink-0 bg-white/5 border border-white/10 text-white rounded-2xl px-4 py-3 outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg mb-4"
-              />
-              <button
-                onClick={handleSubmitResponse}
-                disabled={!responseText.trim()}
-                className="btn-beer w-full shrink-0 py-4 rounded-2xl font-black text-lg"
-              >
-                Submit Response
-              </button>
+              <div className={ac.row}>
+                <textarea
+                  autoFocus
+                  placeholder="Type your response…"
+                  value={responseText}
+                  onChange={e => setResponseText(e.target.value)}
+                  onKeyDown={dismissKeyboardOnEnter}
+                  enterKeyHint="done"
+                  rows={ac.rows}
+                  className={`shrink-0 bg-white/5 border border-white/10 text-white rounded-2xl px-4 ${ac.textarea} outline-none focus:ring-2 focus:ring-amber-400 focus:border-transparent placeholder:text-gray-600 resize-none text-lg`}
+                />
+                <button
+                  onClick={handleSubmitResponse}
+                  disabled={!responseText.trim()}
+                  className={`btn-beer shrink-0 ${ac.button} rounded-2xl font-black text-lg`}
+                >
+                  {ac.submit}
+                </button>
+              </div>
             </>
           )}
         </div>

@@ -20,7 +20,7 @@
    `sessionStorage`
 1. **Board** — category grid (view only unless your turn); tap/glass visual theme (see below); the board shown is the one for `statusToRound(room.status)` — rounds 1, 2 and 3 each have their own
 2. **Your pick** — category grid is interactive; select a question
-3. **Question preview** — category name + point value + 10s countdown
+3. **Question preview** — category name + point value (no clue text — it appears when the host opens the buzzer)
 4. **Question active** — clue visible + red **Buzz** button (full-width)
 5. **Buzzed in** — "You buzzed! Waiting your turn…"
 6. **Your turn** — text input + countdown timer
@@ -34,6 +34,15 @@
 14. **Final Tap: reviewing** — "Response submitted, awaiting results…"
 15. **Eliminated** — "Thanks for playing!" + leaderboard (teams finishing Round 3 at 0 or below); set to `done` sub-phase
 16. **Game over** — final leaderboard + winner (`fjSubPhase === 'done'`)
+
+**Answer screens with the keyboard up** (Your turn, Double Tap answer, Final Tap question):
+all three size to `visualViewport` height. When that drops below 520px (keyboard open on any
+phone) they switch to a compact layout — tighter padding, smaller header/timer, no "The answer"
+label, a 1-line text box with a short **Submit** beside it, and smaller type for clues over
+150 / 180 chars — so the whole clue stays readable above the keyboard (checked to 229 chars on
+an iPhone SE with the keyboard from y=300). Keyboard down, the layout is the normal full-width one.
+Checks: `tmp/keyboard-test.mjs` (`PHONE=375x667 KB_TOP=300` for the SE) and the Final Tap keyboard
+step in `tmp/projector-fit-test.mjs`.
 
 ---
 
