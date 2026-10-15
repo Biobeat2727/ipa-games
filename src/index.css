@@ -271,13 +271,3 @@ button {
   }
 }
 
-/* Play route — landscape orientation warning (shown only on narrow landscape, i.e. phones rotated) */
-.play-landscape-warning {
-  display: none !important;
-}
-
-@media (orientation: landscape) and (max-height: 480px) and (pointer: coarse) {
-  .play-landscape-warning {
-    display: flex !important;
-  }
-}
