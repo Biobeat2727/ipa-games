@@ -11,6 +11,9 @@
    it only kills the elastic overscroll/pull-to-refresh past the edges. */
 html, body {
   overscroll-behavior: none;
+  /* Same base as .bar-bg, so any page area outside a screen's own box (e.g.
+     below a keyboard-height answer screen) is dark instead of browser white. */
+  background: #0b0906;
 }
 
 @keyframes card-flip {
