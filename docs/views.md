@@ -36,11 +36,15 @@
 16. **Game over** — final leaderboard + winner (`fjSubPhase === 'done'`)
 
 **Answer screens with the keyboard up** (Your turn, Double Tap answer, Final Tap question):
-all three size to `visualViewport` height. When that drops below 520px (keyboard open on any
-phone) they switch to a compact layout — tighter padding, smaller header/timer, no "The answer"
-label, a 1-line text box with a short **Submit** beside it, and smaller type for clues over
-150 / 180 chars — so the whole clue stays readable above the keyboard (checked to 229 chars on
-an iPhone SE with the keyboard from y=300). Keyboard down, the layout is the normal full-width one.
+all three size to `visualViewport` height. The clue is a `FitClue` (`src/components/FitClue.tsx`):
+it takes the room between the timer and the text box and picks the largest font that fits,
+**16px floor, 30px cap** (readability for older players — don't shrink the floor; a clue that
+can't fit at 16px scrolls instead). When the visible height drops below 520px (keyboard open
+on any phone) the chrome compacts too: tighter padding, smaller header/timer, no "The answer"
+label, a 1-line text box with a short **Submit** beside it. Measured with the keyboard up:
+128-char clue → 30px on a 412×915 Android, 29px on a 390×844 iPhone, 22px on an iPhone SE;
+a 229-char clue → 16px on the SE, fully visible. Phone OS text-size settings are NOT relied on
+(iOS Safari ignores them for normal pages).
 Checks: `tmp/keyboard-test.mjs` (`PHONE=375x667 KB_TOP=300` for the SE) and the Final Tap keyboard
 step in `tmp/projector-fit-test.mjs`.
 

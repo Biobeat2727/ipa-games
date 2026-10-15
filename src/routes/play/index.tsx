@@ -18,6 +18,7 @@ import MailingListSignup from '../../components/MailingListSignup'
 import { BeerGlass, TapHeader, tapHeaderRevealFor } from '../../components/TapCategoryColumn'
 import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { useVisualViewportHeight } from '../../lib/useVisualViewportHeight'
+import FitClue from '../../components/FitClue'
 import { useWakeLock } from '../../lib/useWakeLock'
 import { Bubbles, PintHero, CheersPints, SoloPint } from '../../components/Barware'
 import { QUIPS } from '../../lib/quips'
@@ -2185,23 +2186,21 @@ export default function PlayView() {
   // scrolls internally instead of pushing them off screen.
   const answerScreenStyle = viewportHeight ? { height: `${viewportHeight}px`, minHeight: 0 } : undefined
 
-  // With the keyboard up there's ~300-450px of visible screen, and the chrome
-  // around the clue (header, timer bar, label, text box, button) ate almost all
-  // of it — a 130-char clue got squeezed to two lines. On a short viewport the
-  // answer screens tighten everything except the clue so the whole clue stays
-  // readable while typing. 520 sits above every phone's keyboard-open height but
-  // below a keyboard-down iPhone SE, so the normal layout is untouched.
+  // With the keyboard up there's ~300-450px of visible screen. On a short
+  // viewport the answer screens trim the chrome around the clue (padding, header,
+  // label, a side-by-side text box + Submit) and FitClue sizes the clue to the
+  // room that's left — big on roomy phones, never below 16px on small ones.
+  // 520 sits above every phone's keyboard-open height but below a keyboard-down
+  // iPhone SE, so the normal layout is untouched.
   const answerCompact = viewportHeight !== null && viewportHeight < 520
   const ac = answerCompact
     // Keyboard up: text box and a short Submit share one row (like a chat input)
     ? { screen: 'px-4 py-3', inner: '', header: 'mb-1', title: 'text-base', timer: 'text-2xl', bar: 'mb-2',
-        card: 'px-3 py-2 mb-2', label: 'hidden', row: 'flex gap-2 shrink-0', textarea: 'flex-1 min-w-0 py-2',
+        card: 'px-3 py-2', cardGap: 'mb-2', row: 'flex gap-2 shrink-0', textarea: 'flex-1 min-w-0 py-2',
         rows: 1, button: 'px-5 py-2', submit: 'Submit' }
     : { screen: 'p-6', inner: 'pt-2', header: 'mb-2', title: 'text-xl', timer: 'text-4xl', bar: 'mb-4',
-        card: 'p-4 mb-4', label: '', row: 'contents', textarea: 'w-full py-3 mb-4',
+        card: 'p-4', cardGap: 'mb-4', row: 'contents', textarea: 'w-full py-3 mb-4',
         rows: 2, button: 'w-full py-4', submit: 'Submit Response' }
-  const answerClueClass = (clue: string, normal = 'text-lg') =>
-    !answerCompact ? normal : clue.length > 180 ? 'text-sm' : clue.length > 150 ? 'text-[15px]' : 'text-base'
 
   // Enter drops the keyboard but deliberately does NOT submit: a stray Enter would
   // otherwise lock in a half-typed answer, and submissions are one-shot. Closing the
@@ -2637,10 +2636,8 @@ export default function PlayView() {
               {remaining}
             </span>
           </div>
-          <div className={`glass-card rounded-2xl ${answerCompact ? ac.card : 'p-5 mb-4'} min-h-0 overflow-y-auto`}>
-            <p className={`text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2 ${ac.label}`}>The Answer</p>
-            <p className={`${answerClueClass(fjQuestion.answer, 'text-xl')} font-bold leading-snug`}>{fjQuestion.answer}</p>
-          </div>
+          <FitClue text={fjQuestion.answer} label="The Answer" showLabel={!answerCompact}
+            cardClassName={answerCompact ? ac.card : 'p-5'} regionClassName={ac.cardGap} />
           {fjResponseSubmitted ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
               <div className="w-3 h-3 rounded-full bg-yellow-400 animate-pulse" />
@@ -3300,10 +3297,8 @@ export default function PlayView() {
             />
           </div>
 
-          <div className={`glass-card rounded-2xl ${ac.card} min-h-0 overflow-y-auto`}>
-            <p className={`text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2 ${ac.label}`}>The answer</p>
-            <p className={`${answerClueClass(activeQuestion.answer)} font-bold leading-snug`}>{activeQuestion.answer}</p>
-          </div>
+          <FitClue text={activeQuestion.answer} label="The answer" showLabel={!answerCompact}
+            cardClassName={ac.card} regionClassName={ac.cardGap} />
 
           {dtTimer === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
@@ -3364,10 +3359,8 @@ export default function PlayView() {
             />
           </div>
 
-          <div className={`glass-card rounded-2xl ${ac.card} min-h-0 overflow-y-auto`}>
-            <p className={`text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2 ${ac.label}`}>The answer</p>
-            <p className={`${answerClueClass(activeQuestion.answer)} font-bold leading-snug`}>{activeQuestion.answer}</p>
-          </div>
+          <FitClue text={activeQuestion.answer} label="The answer" showLabel={!answerCompact}
+            cardClassName={ac.card} regionClassName={ac.cardGap} />
 
           {ansTimer === 0 ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center py-8">
