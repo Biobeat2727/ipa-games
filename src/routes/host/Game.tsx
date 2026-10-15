@@ -2189,10 +2189,10 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
               {fjQuestion && (
                 <div className="bg-gray-900 rounded-2xl p-5 border border-gray-800 flex-1">
                   <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">The Answer</p>
-                  <p className="text-lg font-bold leading-snug mb-4">{fjQuestion.answer}</p>
+                  <p className="text-3xl font-bold leading-snug mb-4">{fjQuestion.answer}</p>
                   <div className="border-t border-gray-800 pt-3">
                     <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">Expected Response</p>
-                    <p className="text-green-400 font-semibold">{fjQuestion.correct_question}</p>
+                    <p className="text-green-400 text-2xl font-semibold leading-snug">{fjQuestion.correct_question}</p>
                   </div>
                 </div>
               )}
@@ -2277,14 +2277,14 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                   <p className="text-xs text-yellow-400 font-mono mb-4">Wagered {reviewWager.amount} pts</p>
                   <div className="flex-1 bg-gray-800 rounded-xl p-4 min-h-16">
                     {reviewWager.response
-                      ? <p className="text-white text-lg">{reviewWager.response}</p>
+                      ? <p className="text-white text-3xl font-semibold leading-snug break-words">{reviewWager.response}</p>
                       : <p className="text-gray-600 text-sm italic">No response submitted</p>}
                   </div>
                 </div>
                 {fjQuestion && (
                   <div className="bg-gray-950 rounded-xl px-4 py-2 border border-gray-800">
                     <p className="text-xs text-gray-600 uppercase tracking-wider">Expected</p>
-                    <p className="text-green-400 text-sm font-semibold">{fjQuestion.correct_question}</p>
+                    <p className="text-green-400 text-2xl font-semibold leading-snug">{fjQuestion.correct_question}</p>
                   </div>
                 )}
                 {fjJudgmentError && (
@@ -2522,11 +2522,11 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                   <div className="w-full space-y-3">
                     <div className="bg-gray-800 border border-gray-700 rounded-xl p-4">
                       <p className="text-xs text-gray-500 uppercase tracking-widest mb-2">Clue</p>
-                      <p className="text-white text-lg font-semibold leading-snug">{q.answer}</p>
+                      <p className="text-white text-3xl font-semibold leading-snug">{q.answer}</p>
                     </div>
                     <div className="bg-green-950 border border-green-800 rounded-xl p-4">
                       <p className="text-xs text-green-600 uppercase tracking-widest mb-2">Answer</p>
-                      <p className="text-green-300 text-base font-bold">{q.correct_question}</p>
+                      <p className="text-green-300 text-2xl font-bold leading-snug">{q.correct_question}</p>
                     </div>
                   </div>
                 ) : null
@@ -2708,7 +2708,7 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                   </button>
                 </div>
               </div>
-              <p className="text-lg font-bold mt-3 mb-3 leading-snug">{activeQuestion.answer}</p>
+              <p className="text-3xl font-bold mt-3 mb-3 leading-snug">{activeQuestion.answer}</p>
               {buzzWindowRemaining !== null && doubleTapWager === null && (
                 <div className="mb-4">
                   <div className="flex justify-between items-center mb-1">
@@ -2761,7 +2761,7 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
               )}
               <div className="border-t border-gray-800 pt-3">
                 <p className="text-xs text-gray-600 uppercase tracking-wider mb-1">Expected response</p>
-                <p className="text-green-400 font-semibold">{activeQuestion.correct_question}</p>
+                <p className="text-green-400 text-2xl font-semibold leading-snug">{activeQuestion.correct_question}</p>
               </div>
             </div>
 
@@ -2793,7 +2793,7 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
 
                 <div className="flex-1 bg-gray-800 rounded-xl p-4 mb-5 min-h-20">
                   {judgingBuzz.response ? (
-                    <p className="text-white text-lg">{judgingBuzz.response}</p>
+                    <p className="text-white text-3xl font-semibold leading-snug break-words">{judgingBuzz.response}</p>
                   ) : judgingBuzz.response_submitted_at ? (
                     <p className="text-gray-500 text-sm italic">⏱ No response — time expired</p>
                   ) : (
@@ -2896,7 +2896,7 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                               {teamName(buzz.team_id)}
                             </p>
                             {buzz.response && (
-                              <p className="text-sm text-gray-300 italic truncate">{buzz.response}</p>
+                              <p className="text-xl text-gray-200 italic leading-snug break-words">{buzz.response}</p>
                             )}
                             {buzz.status === 'pending' && !buzz.response && (
                               <p className="text-xs text-gray-600">typing…</p>
