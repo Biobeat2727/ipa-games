@@ -44,6 +44,10 @@ revoke insert, update, delete on public.players from public, anon;
 revoke insert, update, delete on public.buzzes  from public, anon;
 revoke all                    on public.wagers  from public, anon;
 revoke insert                 on public.teams   from public, anon;
+-- Supabase's default grants also give anon TRUNCATE / TRIGGER / REFERENCES. The
+-- API can't use them, but nothing needs them either (added after the first run;
+-- re-running this file is safe).
+revoke truncate, trigger, references on public.players, public.buzzes, public.teams from public, anon;
 grant select on public.players, public.buzzes to anon;
 grant select, insert, update, delete on public.players, public.buzzes, public.wagers to authenticated;
 
