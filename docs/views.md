@@ -20,8 +20,8 @@
    `sessionStorage`
 1. **Board** — category grid (view only unless your turn); tap/glass visual theme (see below); the board shown is the one for `statusToRound(room.status)` — rounds 1, 2 and 3 each have their own
 2. **Your pick** — category grid is interactive; select a question
-3. **Question preview (pre-armed)** — the buzz screen's own layout: card shows category + $value (no clue text), countdown bar sits full and grey, and the **TAP IN!** button is in place but greyed out. Taps on it feed the anti-spam counter (3 in 1.5s locks the team out) instead of buzzing. Double Tap previews keep the plain category card instead.
-4. **Question active** — same screen: the card text flips to the clue and the button lights up (`buzzer-ignite`). The bar + button group is pinned to the bottom and the clue is a `FitClue` above it, so the button never moves between the two states (`renderBuzzStage` in `play/index.tsx`)
+3. **Question preview (pre-armed)** — the orange wood (`wood-bg`) screen the tile zooms into: big centered category + $value (no clue text), countdown bar sits full and grey, and the **TAP IN!** button is in place but greyed out. Taps on it feed the anti-spam counter (3 in 1.5s locks the team out) instead of buzzing. Double Tap previews keep the plain category card instead.
+4. **Question active** — same orange screen: the category + value shrink to a small line and the clue fills the space in big centered type (Jeopardy-style), and the button lights up (`buzzer-ignite`). The bar + button group is pinned to the bottom and the clue is a plain `FitClue` (16–36px) above it, so the button never moves between the two states (`renderBuzzStage` in `play/index.tsx`)
 5. **Buzzed in** — "You buzzed! Waiting your turn…"
 6. **Your turn** — text input + countdown timer
 7. **Response submitted** — "Waiting for host…"

@@ -3096,26 +3096,33 @@ export default function PlayView() {
       <>
         {scoreChip}
         <div className="max-w-sm mx-auto w-full flex-1 min-h-0 flex flex-col">
-          {/* The card takes whatever room is above the bar + button group, which is
-              pinned to the bottom: the clue replacing the value (and a long clue on a
-              small phone) shrinks the clue's type, never moves the button. */}
+          {/* Jeopardy-style: the picked tile fills the orange screen. Category + value
+              while the host reads; the clue takes over the same space when the buzzer
+              opens. This region gets whatever room is above the bar + button group,
+              which is pinned to the bottom, so a long clue shrinks its type (FitClue,
+              16px floor) and never moves the button. */}
           {armed ? (
-            <FitClue text={clue} label={categoryName ?? 'The answer'} max={26}
-              cardClassName="p-5 pt-14" regionClassName="mb-4"
-              footer={pointValue != null && (
-                <p className="text-yellow-400 font-mono text-sm mt-3 font-semibold">{pointValue} pts</p>
-              )} />
+            <>
+              <p className="shrink-0 pt-16 text-center text-amber-300/80 text-xs uppercase tracking-[0.2em] truncate">
+                {categoryName}{categoryName && pointValue != null && ' · '}{pointValue != null && `$${pointValue}`}
+              </p>
+              <FitClue text={clue} label="" showLabel={false} plain min={16} max={36}
+                regionClassName="flex flex-col justify-center mb-4"
+                cardClassName="text-center px-1 py-2 [text-shadow:0_2px_6px_rgba(0,0,0,0.55)]" />
+            </>
           ) : (
-            <div className="flex-1 min-h-0 mb-4">
-              <div className="glass-card rounded-2xl p-5 pt-14 max-h-full overflow-hidden">
-                <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">{categoryName}</p>
-                {/* No clue text yet: it stays hidden until the host opens the buzzer,
-                    so teams have to listen to the host read it */}
-                {pointValue != null && (
-                  <p className="text-yellow-400 font-mono font-black text-4xl leading-snug">${pointValue}</p>
-                )}
-                <p className="text-amber-100/60 text-sm mt-3 animate-pulse">Listen up — the buzzer opens when the host finishes reading</p>
-              </div>
+            <div className="flex-1 min-h-0 mb-4 pt-12 flex flex-col items-center justify-center text-center overflow-hidden">
+              <p className="text-amber-300/80 text-xs uppercase tracking-[0.2em] mb-6">Category</p>
+              <p className="font-black text-white leading-tight mb-3"
+                style={{ fontSize: 'clamp(1.75rem, 7vw, 3rem)' }}>
+                {categoryName}
+              </p>
+              {pointValue != null && (
+                <p className="text-yellow-400 font-mono font-black text-3xl mb-6">${pointValue}</p>
+              )}
+              {/* No clue text yet: it stays hidden until the host opens the buzzer,
+                  so teams have to listen to the host read it */}
+              <p className="text-amber-100/60 text-sm animate-pulse">Listen up — the buzzer opens when the host finishes reading</p>
             </div>
           )}
 
@@ -3124,13 +3131,13 @@ export default function PlayView() {
           {showWindowBar && (
             <div className="shrink-0 mb-4">
               <div className="flex justify-between items-center mb-1">
-                <p className="text-xs text-gray-500 uppercase tracking-wider">Buzz window</p>
-                <span className={`inline-block font-mono font-black text-lg tabular-nums ${!armed ? 'text-gray-600' : buzzTimerLow ? 'text-red-400' : 'text-white'}`}
+                <p className="text-xs text-amber-100/50 uppercase tracking-wider">Buzz window</p>
+                <span className={`inline-block font-mono font-black text-lg tabular-nums ${!armed ? 'text-amber-100/30' : buzzTimerLow ? 'text-red-400' : 'text-white'}`}
                   style={buzzTimerLow ? { animation: 'timer-pulse 0.8s ease-in-out infinite' } : undefined}>
                   {armed ? buzzWindowRemaining : 25}s
                 </span>
               </div>
-              <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+              <div className="w-full h-2 bg-black/30 rounded-full overflow-hidden">
                 <div
                   className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${!armed ? 'bg-white/20' : buzzTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
                   style={{ transform: `scaleX(${Math.max(0, Math.min(1, (buzzWindowPct) / 100))})` }}
@@ -3153,14 +3160,14 @@ export default function PlayView() {
               )}
             </div>
             {buzzLockedOut ? (
-              <div className="w-full py-8 rounded-2xl font-black text-xl bg-white/5 border border-white/10 text-red-400/80 text-center leading-snug">
+              <div className="w-full py-8 rounded-2xl font-black text-xl bg-black/30 border border-white/10 text-red-400 text-center leading-snug">
                 🔒 Locked out
-                <span className="block text-sm font-medium text-gray-500 mt-1 px-4">
+                <span className="block text-sm font-medium text-amber-100/60 mt-1 px-4">
                   {lockedByTeammate ? 'A teammate tapped too early' : 'You tapped too early'} — wait for another team to answer
                 </span>
               </div>
             ) : buzzWindowClosed ? (
-              <div className="w-full py-8 rounded-2xl font-black text-xl bg-white/5 border border-white/10 text-gray-500 text-center">
+              <div className="w-full py-8 rounded-2xl font-black text-xl bg-black/30 border border-white/10 text-amber-100/50 text-center">
                 Buzz window closed
               </div>
             ) : !armed ? (
@@ -3412,7 +3419,7 @@ export default function PlayView() {
           <div
             className={previewIsDt
               ? 'fixed inset-0 z-50 wood-bg text-white flex flex-col items-center justify-center p-6 text-center'
-              : 'fixed inset-0 z-50 bar-bg text-white flex flex-col p-5 select-none'}
+              : 'fixed inset-0 z-50 wood-bg text-white flex flex-col p-5 select-none'}
             style={tileRect ? (() => {
               const vw = window.innerWidth, vh = window.innerHeight
               const scaleX = tileRect.width  / vw
@@ -3690,7 +3697,7 @@ export default function PlayView() {
   return (
     // Locked to exactly the viewport: no scroll, no rubber-band, no chance for iOS
     // to read a drifting tap as a slide and swallow the buzz.
-    <div className="relative bar-bg text-white flex flex-col p-5 overflow-hidden select-none"
+    <div className="relative wood-bg text-white flex flex-col p-5 overflow-hidden select-none"
       style={{ height: '100dvh', touchAction: 'manipulation', overscrollBehavior: 'none' }}>
       {scoreOverlayEl}
       {renderBuzzStage(

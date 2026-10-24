@@ -9,7 +9,7 @@ import { useLayoutEffect, useRef, type ReactNode } from 'react'
  *
  *  The outer region is `flex-1`, so it must sit in a flex column. */
 export default function FitClue({
-  text, label, min = 16, max = 30, cardClassName = '', regionClassName = '', showLabel = true, footer,
+  text, label, min = 16, max = 30, cardClassName = '', regionClassName = '', showLabel = true, footer, plain = false,
 }: {
   text: string
   label: string
@@ -20,6 +20,8 @@ export default function FitClue({
   showLabel?: boolean
   /** Rendered under the clue inside the card; counted when fitting */
   footer?: ReactNode
+  /** No glass card behind the text (for screens that bring their own background) */
+  plain?: boolean
 }) {
   const regionRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
@@ -55,7 +57,7 @@ export default function FitClue({
 
   return (
     <div ref={regionRef} className={`flex-1 min-h-0 ${regionClassName}`}>
-      <div ref={cardRef} className={`glass-card rounded-2xl max-h-full overflow-y-auto ${cardClassName}`}>
+      <div ref={cardRef} className={`${plain ? '' : 'glass-card rounded-2xl '}max-h-full overflow-y-auto ${cardClassName}`}>
         {showLabel && (
           <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">{label}</p>
         )}
