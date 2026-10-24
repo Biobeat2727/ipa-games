@@ -28,7 +28,9 @@ const RESPONSE_SECONDS = 40
 // Buzzer reveal is scheduled this many ms in the future so every device flips to
 // the buzz screen at the same shared wall-clock instant, instead of "whenever the
 // broadcast happens to arrive." Must comfortably exceed worst-case Ably delivery.
-const REVEAL_BUFFER_MS = 450
+// It's taken before the activation write (so the database can hold the buzzer
+// and the clue text until that instant), hence the extra 100ms for the write.
+const REVEAL_BUFFER_MS = 550
 
 /** Final Tap qualification: every team above 0 plays. If nobody is in the black
  *  (rough night), fall back to the top 3 so the game still gets its finale. */
@@ -766,10 +768,18 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
   }
 
   async function activateQuestion(questionId: string) {
+    // Regular clue: the shared reveal instant, written in the same update that makes
+    // the clue live. claim_buzz and questions_public hold the buzzer and the clue
+    // text until this instant (supabase/phase_a_1_functions.sql). Double Tap has no
+    // buzz window and reveals immediately (null).
+    // serverNow() (Ably server clock) — NOT Date.now() — so devices with skewed OS
+    // clocks still reveal together; each player also computes its delay via serverNow().
+    const revealAt = doubleTapWager === null ? serverNow() + REVEAL_BUFFER_MS : null
+    const revealAtIso = revealAt === null ? null : new Date(revealAt).toISOString()
     const { error } = await supabase
       .from('rooms').update({
         current_question_id: questionId,
-        buzz_opened_at: null,
+        buzz_opened_at: revealAtIso,
         pending_question_id: null,
         pending_selection_team_id: null,
         pending_selection_session_id: null,
@@ -780,7 +790,7 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
       setRoom(prev => ({
         ...prev,
         current_question_id: questionId,
-        buzz_opened_at: null,
+        buzz_opened_at: revealAtIso,
         pending_question_id: null,
         pending_selection_team_id: null,
         pending_selection_session_id: null,
@@ -808,18 +818,9 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
       // For regular questions, record activation time so the answer timer continues
       // from when the buzzer opened (not from when the team buzzed).
       // Also send buzz_opened_at in question_activated so players can show the countdown.
-      if (doubleTapWager === null) {
-        // Schedule the reveal for a shared future instant. buzz_opened_at doubles as the
-        // reveal timestamp AND the start of the 25s buzz window, so both stay in sync.
-        // serverNow() (Ably server clock) — NOT Date.now() — so devices with skewed OS
-        // clocks still reveal together; each player also computes its delay via serverNow().
-        const revealAt = serverNow() + REVEAL_BUFFER_MS
-        const revealAtIso = new Date(revealAt).toISOString()
-        // Persist for reconnect recovery without delaying the timing-critical broadcast.
-        // If this write fails, reconnects fail closed instead of reopening the buzzer.
-        supabase.from('rooms').update({ buzz_opened_at: revealAtIso })
-          .eq('id', roomId).eq('current_question_id', questionId).then(() => {})
-        setRoom(prev => ({ ...prev, buzz_opened_at: revealAtIso }))
+      if (revealAt !== null) {
+        // The reveal is scheduled for a shared future instant. buzz_opened_at doubles as
+        // the reveal timestamp AND the start of the 25s buzz window, so both stay in sync.
         activationStartTsRef.current = revealAt
         setBuzzOpenedAt(revealAt)
         // Timer is now player-side (10s from buzz) — no host judgeStartTime for regular questions

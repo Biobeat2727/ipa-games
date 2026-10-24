@@ -864,9 +864,16 @@ export default function PlayView() {
         // it would put a live buzz button on an answered question (and a tap would
         // land on the wrong clue) — treat it as no active question.
         if (question?.is_answered) return
-        // No clue text = the database doesn't have it live (questions_public hides
-        // unplayed clues), so this snapshot is stale too.
-        if (question && question.answer == null) return
+        // No clue text = the database isn't showing it yet. Before the scheduled
+        // reveal instant that's expected (questions_public holds the text until
+        // buzz_opened_at): try again just after it. Otherwise the snapshot is stale.
+        if (question && question.answer == null) {
+          const revealAt = room!.buzz_opened_at ? new Date(room!.buzz_opened_at).getTime() : null
+          if (revealAt !== null && revealAt > serverNow() - 1000) {
+            setTimeout(() => { if (!cancelled) void loadQuestion() }, Math.max(100, revealAt - serverNow() + 150))
+          }
+          return
+        }
         if (debugTimingRef.current) {
           broadcastRef.current?.publish('buzz_debug_report', {
             team: myTeamRef.current?.name ?? '?',
@@ -2190,10 +2197,11 @@ export default function PlayView() {
     setFjLockedWagerAmount(teamWager.amount)
     setFjSubPhase('wager_locked')
     if (teamWager.accepted) {
+      // No amount: every device on the room channel sees this. Teammates fetch
+      // their own team's amount with get_my_final_wager.
       broadcastRef.current?.publish('fj_wager_locked', {
         team_id: myTeam.id,
         wager_id: teamWager.wager_id,
-        amount: teamWager.amount,
       })
     }
   }

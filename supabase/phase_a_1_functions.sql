@@ -296,6 +296,24 @@ begin
     raise exception using errcode = '55000', message = 'That clue is not live';
   end if;
 
+  -- A regular clue's buzzer opens at the host's shared reveal instant
+  -- (buzz_opened_at, written with current_question_id). 150ms of slack covers
+  -- clock differences; nobody can see the button light and tap that fast.
+  -- Double Tap has no buzz window: the selecting team auto-buzzes at once.
+  if not exists (
+    select 1
+    from public.rooms as r
+    join public.questions as q on q.id = p_question_id
+    where r.id = v_room_id
+      and (
+        coalesce(q.is_double_tap, false)
+        or (r.buzz_opened_at is not null
+            and clock_timestamp() >= r.buzz_opened_at - interval '150 milliseconds')
+      )
+  ) then
+    raise exception using errcode = '55000', message = 'The buzzer is not open yet';
+  end if;
+
   v_team_id := public.device_team_in_room(p_device_id, v_room_id);
   if v_team_id is null then
     raise exception using errcode = '42501', message = 'This phone is not on a team in this game';
@@ -621,7 +639,8 @@ revoke all on function public.submit_final_response(uuid, uuid, text, text, text
 grant execute on function public.submit_final_response(uuid, uuid, text, text, text) to anon, authenticated;
 
 -- ── Clue text stays hidden until it is played ──────────────────────────────
--- Same columns as before; `answer` (the clue) is null until the clue is live,
+-- Same columns as before; `answer` (the clue) is null until the clue is
+-- revealed (a regular clue at its buzz_opened_at instant, a Double Tap once live),
 -- answered, or (Final) revealed by the host. Correct responses were never here.
 create or replace view public.questions_public as
 select
@@ -629,7 +648,10 @@ select
   q.category_id,
   case
     when q.is_answered
-      or r.current_question_id = q.id
+      or (r.current_question_id = q.id
+          and (coalesce(q.is_double_tap, false)
+               or (r.buzz_opened_at is not null
+                   and now() >= r.buzz_opened_at - interval '150 milliseconds')))
       or (r.final_question_id = q.id and r.final_phase in ('question', 'review', 'done'))
       or r.status = 'finished'
     then q.answer
