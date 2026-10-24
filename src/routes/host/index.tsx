@@ -10,6 +10,8 @@ import { FINAL_TAP_LABEL, FIRST_ROUND, roundDefinition, roundLabel, roundToStatu
 import type { Room, Team } from '../../lib/types'
 import Game from './Game'
 import MailingListExport from '../../components/MailingListExport'
+import TeamManagePanel from '../../components/TeamManagePanel'
+import BlockedList from '../../components/BlockedList'
 import { useEmptyTeamSweep } from '../../lib/useEmptyTeamSweep'
 
 type Phase = 'checking' | 'sign_in' | 'access_denied' | 'no_room' | 'creating' | 'lobby' | 'game' | 'error'
@@ -22,6 +24,10 @@ export default function HostView() {
   const [removeConfirmTeamId, setRemoveConfirmTeamId] = useState<string | null>(null)
   const [removingTeamId, setRemovingTeamId] = useState<string | null>(null)
   const [starting, setStarting] = useState(false)
+  // Host moderation (supabase/phase_b_moderation.sql): which team's panel is open,
+  // and a bump that tells the Blocked list to reload after a block
+  const [manageTeamId, setManageTeamId] = useState<string | null>(null)
+  const [blocksVersion, setBlocksVersion] = useState(0)
   const [teamActionError, setTeamActionError] = useState('')
   const [error, setError]        = useState('')
   const [hostUserId, setHostUserId] = useState<string | null>(null)
@@ -277,6 +283,25 @@ export default function HostView() {
     lobbyBroadcastRef.current?.publish('team_kicked', { team_id: team.id, team_name: team.name })
     return true
   }
+
+  // Block team = kick_team plus a block on every phone on it, in one database call
+  async function handleBlockTeam(team: Team) {
+    setRemovingTeamId(team.id)
+    const { data, error: err } = await supabase.rpc('host_block_team', { p_team_id: team.id })
+    setRemovingTeamId(null)
+    if (err) { setTeamActionError(`Couldn't block ${team.name}: ${err.message}`); return }
+    setTeamActionError('')
+    setManageTeamId(null)
+    setTeams(prev => prev.filter(t => t.id !== team.id))
+    setPlayerCounts(prev => { const m = new Map(prev); m.delete(team.id); return m })
+    lobbyBroadcastRef.current?.publish('player_blocked', {
+      device_ids: data?.[0]?.blocked_devices ?? [], team_id: team.id, team_name: team.name,
+    })
+    lobbyBroadcastRef.current?.publish('team_kicked', { team_id: team.id, team_name: team.name })
+    setBlocksVersion(v => v + 1)
+  }
+
+  const publishLobby = (event: string, data: unknown) => { void lobbyBroadcastRef.current?.publish(event, data) }
 
   // Everyone on a team left → drop it (Game.tsx runs the same sweep in-game)
   useEmptyTeamSweep({
@@ -550,9 +575,17 @@ export default function HostView() {
               {teams.map(team => {
                 const count = playerCounts.get(team.id) ?? 0
                 return (
-                  <li key={team.id} className="flex items-center gap-3">
+                  <li key={team.id}>
+                  <div className="flex items-center gap-3">
                     <span className="w-2 h-2 rounded-full bg-green-400 shrink-0" />
-                    <span className="font-medium flex-1 truncate">{team.name}</span>
+                    <button
+                      type="button"
+                      onClick={() => setManageTeamId(id => id === team.id ? null : team.id)}
+                      className="font-medium flex-1 truncate text-left hover:text-yellow-300 transition-colors"
+                      title="Players, rename, remove or block"
+                    >
+                      {team.name} <span className="text-gray-600 text-xs">{manageTeamId === team.id ? '▾' : '▸'}</span>
+                    </button>
                     {removeConfirmTeamId === team.id ? (
                       <div className="flex items-center gap-2 shrink-0">
                         <span className="text-xs text-red-300">Remove?</span>
@@ -580,6 +613,17 @@ export default function HostView() {
                         </button>
                       </>
                     )}
+                  </div>
+                  {manageTeamId === team.id && (
+                    <TeamManagePanel
+                      team={team}
+                      blockedReason={null}
+                      publish={publishLobby}
+                      onRenamed={t => setTeams(prev => prev.map(x => x.id === t.id ? { ...x, name: t.name } : x))}
+                      onBlockTeam={() => handleBlockTeam(team)}
+                      onBlocksChanged={() => setBlocksVersion(v => v + 1)}
+                    />
+                  )}
                   </li>
                 )
               })}
@@ -588,6 +632,7 @@ export default function HostView() {
           {teamActionError && (
             <p className="text-red-400 text-xs mt-3">{teamActionError}</p>
           )}
+          {room && <BlockedList roomId={room.id} refreshKey={blocksVersion} publish={publishLobby} />}
         </div>
 
         <button

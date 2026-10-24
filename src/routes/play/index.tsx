@@ -71,6 +71,12 @@ interface PreviewInfo {
   doubleTapWager?: number
 }
 
+// join_team / create_team refuse a phone the host blocked from this game with
+// this message (supabase/phase_b_moderation.sql assert_device_not_blocked).
+const isBlockedError = (e: unknown) =>
+  typeof e === 'object' && e !== null && 'message' in e &&
+  String((e as { message: unknown }).message).includes('removed from this game')
+
 // This phone's own team Final wager. Phones can't read the wagers table (other
 // teams' wagers stay hidden until the host reveals them), so it comes from the
 // key-checked function, which only ever returns the caller's own team row.
@@ -184,6 +190,9 @@ export default function PlayView() {
   const [allTeamScores, setAllTeamScores]     = useState<Array<{ id: string; name: string; score: number }>>([])
   // Shown on the Team-or-Solo screen after the host removes this phone's team.
   const [kickedNotice, setKickedNotice]       = useState<string | null>(null)
+  // The host blocked this phone from the current game (Phase B). Join screens show
+  // the blocked screen instead; cleared by player_unblocked or a new game.
+  const [blockedHere, setBlockedHere]         = useState(false)
   const [currentTurnTeamId, setCurrentTurnTeamId] = useState<string | null>(null)
   const [boardCategories, setBoardCategories] = useState<BoardCategory[]>([])
   // Round-start category reveal (host-driven): ids revealed so far, in reveal
@@ -811,13 +820,50 @@ export default function PlayView() {
       setKickedNotice(`The host removed ${team_name} from the game.`)
       setPhase('choose_mode')
     }
+    // Host moderation (Phase B): one player removed or blocked, by device id
+    const leaveTeam = (notice: string | null) => {
+      clearPlayerSession()
+      setMyTeam(null); setTeammates([]); setMyScore(0)
+      setKickedNotice(notice)
+      setPhase('choose_mode')
+    }
+    const onPlayerRemoved = ({ data }: { data?: unknown }) => {
+      const { device_id, team_name } = data as { device_id: string; team_name: string }
+      if (device_id !== getSessionId()) return
+      leaveTeam(`The host removed you from ${team_name}.`)
+    }
+    const onPlayerBlocked = ({ data }: { data?: unknown }) => {
+      const { device_ids } = data as { device_ids: string[] }
+      if (!device_ids.includes(getSessionId())) return
+      setBlockedHere(true)
+      leaveTeam(null)
+    }
+    const onPlayerUnblocked = ({ data }: { data?: unknown }) => {
+      if ((data as { device_id: string }).device_id === getSessionId()) setBlockedHere(false)
+    }
+    const onTeamRenamed = ({ data }: { data?: unknown }) => {
+      const { team_id, name } = data as { team_id: string; name: string }
+      setMyTeam(prev => (prev?.id === team_id ? { ...prev, name } : prev))
+      setTeams(prev => prev.map(t => (t.id === team_id ? { ...t, name } : t)))
+    }
     ch.subscribe('lobby_closed', onLobbyClosed)
     ch.subscribe('team_kicked', onTeamKicked)
+    ch.subscribe('player_removed', onPlayerRemoved)
+    ch.subscribe('player_blocked', onPlayerBlocked)
+    ch.subscribe('player_unblocked', onPlayerUnblocked)
+    ch.subscribe('team_renamed', onTeamRenamed)
     return () => {
       ch.unsubscribe('lobby_closed', onLobbyClosed)
       ch.unsubscribe('team_kicked', onTeamKicked)
+      ch.unsubscribe('player_removed', onPlayerRemoved)
+      ch.unsubscribe('player_blocked', onPlayerBlocked)
+      ch.unsubscribe('player_unblocked', onPlayerUnblocked)
+      ch.unsubscribe('team_renamed', onTeamRenamed)
     }
   }, [room?.id, phase])
+
+  // A block is for one game only
+  useEffect(() => { setBlockedHere(false) }, [room?.id])
 
   // Lobby → game promotion, independent of the question/status effect below.
   // That effect only re-runs when the room's status changes, so a phone that
@@ -1389,6 +1435,29 @@ export default function PlayView() {
       setAllTeamScores(prev => prev.filter(t => t.id !== team_id))
       setCurrentTurnTeamId(prev => (prev === team_id ? null : prev))
     })
+    // Host moderation (Phase B): one player removed or blocked, by device id
+    ch.subscribe('player_removed', ({ data }) => {
+      const { device_id, team_name } = data as { device_id: string; team_name: string }
+      if (device_id !== getSessionId()) return
+      setKickedNotice(`The host removed you from ${team_name}.`)
+      leaveGame(true)
+    })
+    ch.subscribe('player_blocked', ({ data }) => {
+      const { device_ids } = data as { device_ids: string[] }
+      if (!device_ids.includes(getSessionId())) return
+      setBlockedHere(true)
+      setKickedNotice(null)
+      leaveGame(true)
+    })
+    ch.subscribe('player_unblocked', ({ data }) => {
+      if ((data as { device_id: string }).device_id === getSessionId()) setBlockedHere(false)
+    })
+    ch.subscribe('team_renamed', ({ data }) => {
+      const { team_id, name } = data as { team_id: string; name: string }
+      setMyTeam(prev => (prev?.id === team_id ? { ...prev, name } : prev))
+      setTeamNames(prev => new Map(prev).set(team_id, name))
+      setAllTeamScores(prev => prev.map(t => (t.id === team_id ? { ...t, name } : t)))
+    })
 
     ch.subscribe('team_answer_submitted', ({ data }) => {
       const p = data as { team_id: string; buzz_id: string; buzzPosition: number | null; response?: string }
@@ -1822,7 +1891,8 @@ export default function PlayView() {
       }
       if (createError || !data) throw createError ?? new Error('Team was not confirmed')
       await joinTeam(data, playerName)
-    } catch {
+    } catch (e) {
+      if (isBlockedError(e)) { pendingCreatedTeamRef.current = null; setBlockedHere(true); setPhase('choose_mode'); return }
       setError('Could not join the game. Check your connection and try again.')
     } finally {
       creatingTeamRef.current = false
@@ -1893,7 +1963,8 @@ export default function PlayView() {
       // timeout and retries, instead of leaving a successful join waiting forever.
       setPhase('checking')
       lobbyChannelRef.current?.publish('team_joined', {})
-    } catch {
+    } catch (e) {
+      if (isBlockedError(e)) { setBlockedHere(true); setPhase('choose_mode'); return }
       setError('Could not join your team. Check your connection and try again.')
     } finally {
       joinInFlightRef.current = false
@@ -2312,6 +2383,24 @@ export default function PlayView() {
   // Team-or-Solo choice. Split out because a single "nickname" box followed by a
   // separate "team name" box read as the same question asked twice, and players
   // regularly filled one in expecting it to be the other.
+  if (blockedHere && room && (phase === 'choose_mode' || phase === 'solo_name' || phase === 'join_lobby' || phase === 'select_team')) {
+    return (
+      <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">
+        <div className="w-full max-w-sm glass-card rounded-2xl p-6">
+          <p className="text-4xl mb-3">🚫</p>
+          <p className="text-2xl font-black text-red-300 mb-2">You've been removed from this game</p>
+          <p className="text-gray-400 text-sm mb-6">If you think this is a mistake, talk to the host.</p>
+          <button
+            onClick={() => { setBlockedHere(false); setError('') }}
+            className="w-full py-3 rounded-xl text-sm font-semibold text-amber-200 border border-amber-500/40 hover:bg-amber-500/10 transition-colors"
+          >
+            The host let me back in
+          </button>
+        </div>
+      </div>
+    )
+  }
+
   if (phase === 'choose_mode' && room) {
     return (
       <div className="min-h-screen bar-bg text-white flex flex-col items-center justify-center p-6 text-center">

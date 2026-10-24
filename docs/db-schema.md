@@ -191,3 +191,20 @@ revealed; clients take live clue text from the `question_activated` payload.
 After step 2, anon can only SELECT `players` and `buzzes` (plus the public `teams`/`rooms`
 reads); no direct writes to players/teams/buzzes and no access to `wagers`.
 Rollback: `phase_a_2_rollback.sql`; read-only check: `phase_a_verify.sql`.
+
+## Host moderation (`supabase/phase_b_moderation.sql`)
+
+`room_blocks` (room_id, device_id, nickname + team_name snapshot, blocked_at; unique per
+room+device): phones blocked from one game. Host-readable only; written only by the host
+functions. `join_team` / `create_team` (redefined here, superseding phase_a_1) refuse a blocked
+device with "You have been removed from this game"; joins and blocks share a per-room+device
+advisory lock so they can't race.
+
+Host functions (authenticated, `host_owns_room`): `host_remove_player`, `host_block_player`
+(clears every seat that phone holds in the room), `host_block_team` (blocks every phone on the
+team, clears their other seats, then `kick_team`), `host_unblock`, `host_rename_team` (1–40
+chars, unique in the room ignoring case). Remove/Block refuse at the same moments as
+`kick_team` (`assert_roster_change_allowed`); Rename and Unblock work any time.
+
+Broadcasts: `player_removed` {device_id, team_id, team_name}, `player_blocked`
+{device_ids, team_id, team_name}, `player_unblocked` {device_id}, `team_renamed` {team_id, name}.

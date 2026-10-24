@@ -8,6 +8,8 @@ import { compareCategoryOrder } from '../../lib/categoryOrder'
 import { useWakeLock } from '../../lib/useWakeLock'
 import { useEmptyTeamSweep } from '../../lib/useEmptyTeamSweep'
 import ConfirmAction from '../../components/ConfirmAction'
+import TeamManagePanel from '../../components/TeamManagePanel'
+import BlockedList from '../../components/BlockedList'
 import MailingListExport from '../../components/MailingListExport'
 import {
   FINAL_TAP_LABEL,
@@ -63,6 +65,10 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
   // and kicked teams drop out without a refresh.
   const [teams, setTeams]           = useState<Team[]>(initialTeams)
   useEffect(() => { setTeams(initialTeams) }, [initialTeams])
+  // Host moderation (supabase/phase_b_moderation.sql): which team's panel is open,
+  // and a bump that tells the Blocked list to reload after a block
+  const [manageTeamId, setManageTeamId] = useState<string | null>(null)
+  const [blocksVersion, setBlocksVersion] = useState(0)
   const [kickConfirmTeamId, setKickConfirmTeamId] = useState<string | null>(null)
   const [kickingTeamId, setKickingTeamId]         = useState<string | null>(null)
   const [categories, setCategories] = useState<CategoryRow[]>([])
@@ -1360,12 +1366,22 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
   // every screen is told so the kicked phones leave and the rest drop the team.
   // `auto` = the empty-team sweep, not the host's ✕: no confirm UI to touch, and a
   // refusal stays quiet (the sweep simply retries once play is idle).
-  async function kickTeam(team: Team, auto = false): Promise<boolean> {
+  // `block` = Block team: the same removal plus a block on every phone on it
+  // (host_block_team), so they can't rejoin this game.
+  async function kickTeam(team: Team, auto = false, block = false): Promise<boolean> {
     if (!auto) {
       setKickConfirmTeamId(null)
       setKickingTeamId(team.id)
     }
-    const { data, error } = await supabase.rpc('kick_team', { p_team_id: team.id })
+    let blockedDevices: string[] = []
+    let result
+    if (block) {
+      result = await supabase.rpc('host_block_team', { p_team_id: team.id })
+      blockedDevices = result.data?.[0]?.blocked_devices ?? []
+    } else {
+      result = await supabase.rpc('kick_team', { p_team_id: team.id })
+    }
+    const { data, error } = result
     if (!auto) setKickingTeamId(null)
     if (error) {
       if (!auto) setActionError(`Couldn't remove ${team.name}: ${error.message}`)
@@ -1384,6 +1400,11 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
     setFjWagers(prev => prev.filter(w => w.team_id !== team.id))
     setFjWagerStatus(prev => { const m = new Map(prev); m.delete(team.id); return m })
 
+    if (block) {
+      broadcastRef.current?.publish('player_blocked', { device_ids: blockedDevices, team_id: team.id, team_name: team.name })
+      setBlocksVersion(v => v + 1)
+    }
+    setManageTeamId(prev => (prev === team.id ? null : prev))
     broadcastRef.current?.publish('team_kicked', { team_id: team.id, team_name: team.name })
 
     // The kicked team held the pick: a null turn blocks every board, so hand it
@@ -1804,13 +1825,19 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
               )}
             </div>
           </div>
-          <div className="space-y-1 overflow-y-auto max-h-48">
+          <div className={`space-y-1 overflow-y-auto ${manageTeamId ? 'max-h-96' : 'max-h-48'}`}>
             {sortedTeams.map((team, i) => (
-              <div key={team.id} className="flex items-center gap-2">
+              <div key={team.id}>
+              <div className="flex items-center gap-2">
                 <span className="text-xs text-gray-700 w-4 text-right shrink-0">{i + 1}</span>
-                <span className={`text-sm flex-1 truncate ${team.id === currentTurnTeamId ? 'text-yellow-400 font-bold' : 'text-gray-300'}`}>
+                <button
+                  type="button"
+                  onClick={() => setManageTeamId(id => id === team.id ? null : team.id)}
+                  title="Players, rename, remove or block"
+                  className={`text-sm flex-1 truncate text-left hover:underline ${team.id === currentTurnTeamId ? 'text-yellow-400 font-bold' : 'text-gray-300'}`}
+                >
                   {team.name}
-                </span>
+                </button>
                 {kickConfirmTeamId === team.id ? (
                   <div className="flex items-center gap-2 shrink-0">
                     <span className="text-xs text-red-300">Remove from game?</span>
@@ -1868,8 +1895,24 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                 </button>
                 </>)}
               </div>
+              {manageTeamId === team.id && (
+                <TeamManagePanel
+                  team={team}
+                  blockedReason={kickBlockedReason}
+                  publish={(event, data) => { void broadcastRef.current?.publish(event, data) }}
+                  onRenamed={t => setTeams(prev => prev.map(x => x.id === t.id ? { ...x, name: t.name } : x))}
+                  onBlockTeam={async () => { await kickTeam(team, false, true) }}
+                  onBlocksChanged={() => setBlocksVersion(v => v + 1)}
+                />
+              )}
+              </div>
             ))}
           </div>
+          <BlockedList
+            roomId={room.id}
+            refreshKey={blocksVersion}
+            publish={(event, data) => { void broadcastRef.current?.publish(event, data) }}
+          />
         </div>
 
         {/* Question list */}

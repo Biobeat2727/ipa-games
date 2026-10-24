@@ -8,6 +8,9 @@
 --
 -- Run after add_round_three_2_game_logic.sql, persist_final_tap_state.sql and
 -- server_authoritative_final_responses.sql. Safe to re-run.
+-- join_team and create_team are superseded by phase_b_moderation.sql (adds the
+-- block check). Re-running this file after Phase B would drop that check, so
+-- re-run phase_b_moderation.sql afterwards if you ever do.
 -- Plan: docs/phase-a-lockdown-plan.md
 
 begin;

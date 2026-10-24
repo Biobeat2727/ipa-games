@@ -155,5 +155,11 @@ The Jeopardy-style category grid (player board + projector board) is themed as a
 - Manual score adjust (edit field per team)
 - Give turn to specific team
 - Remove (kick) a team from the game — lobby list or scoreboard ✕, see above
+- Team moderation panel (`TeamManagePanel`): tap a team name in the lobby list or on the
+  scoreboard. Rename the team (any time); per player **Remove** (off the team, can rejoin) or
+  **Block** (out for the rest of the game); **Block team**. Remove/Block grey out at the same
+  moments as the ✕. Phones: removed → "The host removed you from [team]" on the join screen;
+  blocked → "You've been removed from this game" screen until unblocked
+- **Blocked** list (`BlockedList`, under the teams once anyone is blocked) with **Unblock**
 - Advance rounds: Round 1 → 2 → 3 (**Begin Round N**), Round 3 → Final Tap (**Start Final Tap**); "End Round N early" for a manual advance with clues left
 - New Game (resets everything, kicks all clients)

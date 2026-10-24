@@ -129,6 +129,16 @@ export type Buzz = {
   status: BuzzStatus
 }
 
+/** A phone blocked from one game (supabase/phase_b_moderation.sql). Host-readable only. */
+export type RoomBlock = {
+  id: string
+  room_id: string
+  device_id: string
+  nickname: string | null
+  team_name: string | null
+  blocked_at: string
+}
+
 export type Wager = {
   id: string
   team_id: string
@@ -216,6 +226,13 @@ export type Database = {
       // supabase/add_mailing_list.sql — host-readable only; players write via join_mailing_list
       mailing_list: {
         Row: MailingListEntry
+        Insert: never
+        Update: never
+        Relationships: []
+      }
+      // supabase/phase_b_moderation.sql — host-readable; written only by host functions
+      room_blocks: {
+        Row: RoomBlock
         Insert: never
         Update: never
         Relationships: []
@@ -378,6 +395,27 @@ export type Database = {
           response: string | null
           status: WagerStatus | null
         }>
+      }
+      // ── Host moderation (supabase/phase_b_moderation.sql) ──
+      host_remove_player: {
+        Args: { p_player_id: string }
+        Returns: Array<{ team_id: string; device_id: string }>
+      }
+      host_block_player: {
+        Args: { p_player_id: string }
+        Returns: Array<{ team_id: string; device_id: string }>
+      }
+      host_block_team: {
+        Args: { p_team_id: string }
+        Returns: Array<{ room_id: string; turn_cleared: boolean; blocked_devices: string[] }>
+      }
+      host_unblock: {
+        Args: { p_block_id: string }
+        Returns: string
+      }
+      host_rename_team: {
+        Args: { p_team_id: string; p_name: string }
+        Returns: Team[]
       }
       submit_final_response: {
         Args: {
