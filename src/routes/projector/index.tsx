@@ -734,13 +734,51 @@ export default function ProjectorView() {
     // (the projector may be driven from localhost or a preview deploy).
     // If the domain ever changes, regenerate the QR — see public/README-qr.md.
     const joinUrl = JOIN_URL
+    // Teams file in alternately left and right of the QR (join order), so a
+    // full room fills the screen's sides instead of spilling off the bottom.
+    // Chip size is in em and scales down with the taller side's row count: a
+    // chip row is ~2.5em tall (1.25 line + 0.8 padding + 0.45 gap) and the
+    // columns get roughly 66vh under the title.
+    const joinOrder  = [...teams].sort((a, b) => a.created_at.localeCompare(b.created_at))
+    const leftTeams  = joinOrder.filter((_, i) => i % 2 === 0)
+    const rightTeams = joinOrder.filter((_, i) => i % 2 === 1)
+    const rowsPerSide = Math.max(leftTeams.length, 5)
+    const chipFontSize = `clamp(0.65rem, min(2.2vw, ${(66 / (rowsPerSide * 2.6)).toFixed(2)}vh), 2rem)`
+    const teamColumn = (side: 'left' | 'right', list: typeof teams) => (
+      <div className={`flex-1 min-w-0 h-full flex flex-col justify-center overflow-hidden ${side === 'left' ? 'items-end' : 'items-start'}`}
+        style={{ fontSize: chipFontSize, gap: '0.45em' }}>
+        {list.map(team => (
+          <div key={team.id} className="glass-card rounded-2xl flex items-center max-w-full"
+            style={{
+              padding: '0.4em 0.8em', gap: '0.6em',
+              flexDirection: side === 'left' ? 'row-reverse' : 'row',
+              animation: `${side === 'left' ? 'slide-in-left' : 'slide-in-right'} 0.4s ease-out both`,
+            }}>
+            <span
+              className="rounded-full shrink-0 flex items-center justify-center font-black text-amber-950"
+              style={{
+                width: '1.6em',
+                height: '1.6em',
+                fontSize: '0.8em',
+                background: 'linear-gradient(145deg, #fcd34d 0%, #f59e0b 60%, #c2650a 100%)',
+                boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4)',
+              }}
+            >
+              {team.name.charAt(0).toUpperCase()}
+            </span>
+            <p className="font-bold leading-tight truncate min-w-0">{team.name}</p>
+            <span className="rounded-full bg-green-400 animate-pulse shrink-0" style={{ width: '0.35em', height: '0.35em' }} />
+          </div>
+        ))}
+      </div>
+    )
     return (
       <div className="h-screen bar-bg text-white flex flex-col items-center justify-center text-center relative overflow-hidden px-8"
         style={{ paddingTop: 'clamp(0.75rem, 2.5vh, 2rem)', paddingBottom: 'clamp(0.75rem, 2.5vh, 2rem)' }}>
         <Bubbles count={20} />
         {/* Every vertical size is vh-aware so the whole stack compresses to fit
             the screen — the projector must never scroll or clip */}
-        <div className="relative z-10 flex flex-col items-center w-full min-h-0"
+        <div className="relative z-10 flex flex-col items-center w-full h-full min-h-0"
           style={{ gap: 'clamp(0.5rem, 1.8vh, 1.5rem)' }}>
           <h1 className="neon-title font-black tracking-tight"
             style={{ fontSize: 'clamp(2.25rem, min(8vw, 10vh), 7rem)', animation: 'slide-up-in 0.5s ease-out both' }}>
@@ -750,6 +788,11 @@ export default function ProjectorView() {
             style={{ fontSize: 'clamp(0.9rem, min(2vw, 2.6vh), 1.5rem)', animation: 'slide-up-in 0.5s ease-out 0.12s both' }}>
             {qrState === 'failed' ? 'Grab your phone — type the address below' : 'Grab your phone — scan to join'}
           </p>
+          <div className="flex-1 min-h-0 w-full flex items-center justify-center"
+            style={{ gap: 'clamp(1rem, 2.5vw, 2.5rem)' }}>
+          {teamColumn('left', leftTeams)}
+          <div className="shrink-0 flex flex-col items-center"
+            style={{ gap: 'clamp(0.5rem, 1.8vh, 1.5rem)' }}>
           <div className="glass-card rounded-3xl p-4"
             style={{ animation: 'slide-up-in 0.5s ease-out 0.24s both' }}>
             {qrState === 'failed' ? (
@@ -784,29 +827,7 @@ export default function ProjectorView() {
               {joinUrl}
             </p>
           )}
-          {sortedTeams.length > 0 ? (
-            <div className="flex flex-wrap justify-center gap-3 max-w-5xl min-h-0 overflow-hidden">
-              {sortedTeams.map((team, i) => (
-                <div key={team.id} className="glass-card rounded-2xl px-7 py-4 flex items-center gap-4"
-                  style={{ animation: `slide-up-in 0.4s ease-out ${0.4 + i * 0.08}s both` }}>
-                  <span
-                    className="rounded-full shrink-0 flex items-center justify-center font-black text-amber-950"
-                    style={{
-                      width: 'clamp(2.25rem, 3vw, 3rem)',
-                      height: 'clamp(2.25rem, 3vw, 3rem)',
-                      fontSize: 'clamp(1rem, 1.8vw, 1.5rem)',
-                      background: 'linear-gradient(145deg, #fcd34d 0%, #f59e0b 60%, #c2650a 100%)',
-                      boxShadow: 'inset 0 1px 0 rgba(255,255,255,0.4)',
-                    }}
-                  >
-                    {team.name.charAt(0).toUpperCase()}
-                  </span>
-                  <p className="font-bold" style={{ fontSize: 'clamp(1rem, 2.5vw, 2rem)' }}>{team.name}</p>
-                  <span className="w-2.5 h-2.5 rounded-full bg-green-400 animate-pulse shrink-0" />
-                </div>
-              ))}
-            </div>
-          ) : (
+          {teams.length === 0 && (
             <div className="flex flex-col items-center" style={{ animation: 'slide-up-in 0.5s ease-out 0.45s both' }}>
               <PintHero className="w-14 h-22 mb-4 opacity-80" />
               <p className="text-amber-100/60" style={{ fontSize: 'clamp(1rem, 2.5vw, 1.75rem)' }}>
@@ -814,6 +835,9 @@ export default function ProjectorView() {
               </p>
             </div>
           )}
+          </div>
+          {teamColumn('right', rightTeams)}
+          </div>
         </div>
       </div>
     )
