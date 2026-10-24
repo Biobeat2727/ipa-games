@@ -1,4 +1,4 @@
-import { useLayoutEffect, useRef } from 'react'
+import { useLayoutEffect, useRef, type ReactNode } from 'react'
 
 /** Clue card that sets its own font size: as large as fits the space it's given
  *  (up to `max`), never smaller than `min`. The answer screens hand it whatever
@@ -9,7 +9,7 @@ import { useLayoutEffect, useRef } from 'react'
  *
  *  The outer region is `flex-1`, so it must sit in a flex column. */
 export default function FitClue({
-  text, label, min = 16, max = 30, cardClassName = '', regionClassName = '', showLabel = true,
+  text, label, min = 16, max = 30, cardClassName = '', regionClassName = '', showLabel = true, footer,
 }: {
   text: string
   label: string
@@ -18,6 +18,8 @@ export default function FitClue({
   cardClassName?: string
   regionClassName?: string
   showLabel?: boolean
+  /** Rendered under the clue inside the card; counted when fitting */
+  footer?: ReactNode
 }) {
   const regionRef = useRef<HTMLDivElement>(null)
   const cardRef = useRef<HTMLDivElement>(null)
@@ -58,6 +60,7 @@ export default function FitClue({
           <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">{label}</p>
         )}
         <p ref={textRef} className="font-bold leading-snug" style={{ fontSize: `${max}px` }}>{text}</p>
+        {footer}
       </div>
     </div>
   )

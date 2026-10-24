@@ -3079,7 +3079,199 @@ export default function PlayView() {
 
   // ── No active question — show board ───────────────────────
 
+  // ── Buzz stage ─────────────────────────────────────────────
+  // One layout for both halves of a regular question. While the host reads, the
+  // card shows category + value and the buzzer sits greyed out in place; when the
+  // host opens it, the card flips to the clue and the same buzzer lights up.
+  // Nothing moves, so thumbs wait on the button instead of sniping a screen change.
+  // clue === null → pre-armed (preview overlay); otherwise armed (buzz phase).
+  function renderBuzzStage(clue: string | null, categoryName: string | null, pointValue: number | null) {
+    const armed = clue !== null
+    const buzzWindowClosed = armed && buzzWindowRemaining === 0
+    const buzzTimerLow = armed && (buzzWindowRemaining ?? 25) <= 10
+    const buzzWindowPct = armed ? ((buzzWindowRemaining ?? 25) / 25) * 100 : 100
+    const showWindowBar = !armed || buzzWindowRemaining !== null
+
+    return (
+      <>
+        {scoreChip}
+        <div className="max-w-sm mx-auto w-full flex-1 min-h-0 flex flex-col">
+          {/* The card takes whatever room is above the bar + button group, which is
+              pinned to the bottom: the clue replacing the value (and a long clue on a
+              small phone) shrinks the clue's type, never moves the button. */}
+          {armed ? (
+            <FitClue text={clue} label={categoryName ?? 'The answer'} max={26}
+              cardClassName="p-5 pt-14" regionClassName="mb-4"
+              footer={pointValue != null && (
+                <p className="text-yellow-400 font-mono text-sm mt-3 font-semibold">{pointValue} pts</p>
+              )} />
+          ) : (
+            <div className="flex-1 min-h-0 mb-4">
+              <div className="glass-card rounded-2xl p-5 pt-14 max-h-full overflow-hidden">
+                <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">{categoryName}</p>
+                {/* No clue text yet: it stays hidden until the host opens the buzzer,
+                    so teams have to listen to the host read it */}
+                {pointValue != null && (
+                  <p className="text-yellow-400 font-mono font-black text-4xl leading-snug">${pointValue}</p>
+                )}
+                <p className="text-amber-100/60 text-sm mt-3 animate-pulse">Listen up — the buzzer opens when the host finishes reading</p>
+              </div>
+            </div>
+          )}
+
+          {/* Buzz window countdown bar — shown full and grey while pre-armed so the
+              layout doesn't shift when the buzzer opens */}
+          {showWindowBar && (
+            <div className="shrink-0 mb-4">
+              <div className="flex justify-between items-center mb-1">
+                <p className="text-xs text-gray-500 uppercase tracking-wider">Buzz window</p>
+                <span className={`inline-block font-mono font-black text-lg tabular-nums ${!armed ? 'text-gray-600' : buzzTimerLow ? 'text-red-400' : 'text-white'}`}
+                  style={buzzTimerLow ? { animation: 'timer-pulse 0.8s ease-in-out infinite' } : undefined}>
+                  {armed ? buzzWindowRemaining : 25}s
+                </span>
+              </div>
+              <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
+                <div
+                  className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${!armed ? 'bg-white/20' : buzzTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
+                  style={{ transform: `scaleX(${Math.max(0, Math.min(1, (buzzWindowPct) / 100))})` }}
+                />
+              </div>
+            </div>
+          )}
+
+          <div className="shrink-0 pb-4">
+            {/* Fixed-height message slot, so a warning appearing never nudges the button */}
+            <div className="min-h-[1.25rem] mb-3 text-center">
+              {armed && buzzFailed && !buzzLockedOut && !buzzWindowClosed && (
+                <p role="alert" className="text-red-400 font-black text-sm"
+                  style={{ animation: 'shake-x 0.5s ease-out' }}>
+                  ⚠️ Buzz didn't go through — tap again!
+                </p>
+              )}
+              {!armed && !buzzLockedOut && preBuzzTaps > 0 && (
+                <p className="text-amber-400 text-sm font-semibold">Easy — early taps lock your team out</p>
+              )}
+            </div>
+            {buzzLockedOut ? (
+              <div className="w-full py-8 rounded-2xl font-black text-xl bg-white/5 border border-white/10 text-red-400/80 text-center leading-snug">
+                🔒 Locked out
+                <span className="block text-sm font-medium text-gray-500 mt-1 px-4">
+                  {lockedByTeammate ? 'A teammate tapped too early' : 'You tapped too early'} — wait for another team to answer
+                </span>
+              </div>
+            ) : buzzWindowClosed ? (
+              <div className="w-full py-8 rounded-2xl font-black text-xl bg-white/5 border border-white/10 text-gray-500 text-center">
+                Buzz window closed
+              </div>
+            ) : !armed ? (
+              // Pre-armed: same tap + button, unlit. Taps here feed the anti-spam
+              // counter (3 in 1.5s locks the team out) instead of buzzing.
+              <div className="flex flex-col items-center" style={{ filter: 'grayscale(1)', opacity: 0.45 }}>
+                <div aria-hidden className="w-10 h-10 rounded-full z-10 mb-[-4px]"
+                  style={{
+                    background: 'radial-gradient(circle at 35% 30%, #f5e6c8, #b8863b 55%, #6b4a1f 100%)',
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.55), inset 0 -2px 4px rgba(0,0,0,0.25)',
+                  }}
+                />
+                <div aria-hidden className="w-3.5 h-6 rounded-sm"
+                  style={{
+                    background: 'linear-gradient(180deg, #a3a3a3 0%, #525252 100%)',
+                    boxShadow: 'inset 0 0 2px rgba(255,255,255,0.35)',
+                  }}
+                />
+                <button
+                  type="button"
+                  aria-disabled
+                  onPointerDown={handlePreBuzzTap}
+                  className="relative w-full rounded-3xl font-black text-5xl tracking-wide text-white/70 select-none"
+                  style={{
+                    minHeight: 'clamp(150px, 26vh, 250px)',
+                    touchAction: 'none',
+                    WebkitTapHighlightColor: 'transparent',
+                    WebkitUserSelect: 'none',
+                    background: 'linear-gradient(180deg, #f87171 0%, #dc2626 45%, #991b1b 100%)',
+                    boxShadow: 'inset 0 2px 0 rgba(255,255,255,0.25), inset 0 -4px 8px rgba(0,0,0,0.35)',
+                  }}
+                >
+                  TAP IN!
+                </button>
+              </div>
+            ) : (
+              // Armed. Mounting lit fades up from the pre-armed grey, so the open reads
+              // as the buzzer switching on rather than a new screen.
+              <div className="flex flex-col items-center transition-transform active:translate-y-[3px] active:scale-[0.98]"
+                style={{ animation: 'buzzer-ignite 0.35s ease-out' }}>
+                {/* Tap handle — same brass knob + steel neck as the board's tap wall,
+                    so pulling the tap IS the buzz. Decorative; the button below is the target. */}
+                <div
+                  aria-hidden
+                  className="w-10 h-10 rounded-full z-10 mb-[-4px]"
+                  style={{
+                    background: 'radial-gradient(circle at 35% 30%, #f5e6c8, #b8863b 55%, #6b4a1f 100%)',
+                    boxShadow: '0 2px 5px rgba(0,0,0,0.55), inset 0 -2px 4px rgba(0,0,0,0.25)',
+                  }}
+                />
+                <div
+                  aria-hidden
+                  className="w-3.5 h-6 rounded-sm"
+                  style={{
+                    background: 'linear-gradient(180deg, #a3a3a3 0%, #525252 100%)',
+                    boxShadow: 'inset 0 0 2px rgba(255,255,255,0.35)',
+                  }}
+                />
+                <div className="relative w-full">
+                  {/* Glow lives on its own layer animating opacity (composited) — the old
+                      box-shadow keyframe animation repainted the big button every frame,
+                      a suspect in the iOS "bar hangs" reports */}
+                  <span
+                    aria-hidden
+                    className="absolute inset-0 rounded-3xl pointer-events-none"
+                    style={{
+                      boxShadow: '0 0 55px 10px rgba(220, 38, 38, 0.7)',
+                      animation: 'glow-pulse 1.6s ease-in-out infinite',
+                    }}
+                  />
+                  <button
+                    onPointerDown={handleBuzzPointerDown}
+                    onClick={handleBuzzClick}
+                    disabled={buzzing}
+                    className="relative overflow-hidden w-full rounded-3xl font-black text-5xl tracking-wide text-white disabled:opacity-60 select-none"
+                    style={{
+                      minHeight: 'clamp(150px, 26vh, 250px)',
+                      touchAction: 'none',
+                      WebkitTapHighlightColor: 'transparent',
+                      WebkitUserSelect: 'none',
+                      background: 'linear-gradient(180deg, #f87171 0%, #dc2626 45%, #991b1b 100%)',
+                      boxShadow: 'inset 0 2px 0 rgba(255,255,255,0.25), inset 0 -4px 8px rgba(0,0,0,0.35)',
+                      textShadow: '0 2px 4px rgba(0,0,0,0.4)',
+                    }}
+                  >
+                    {ripples.map(r => (
+                      <span
+                        key={r.id}
+                        className="absolute rounded-full bg-white pointer-events-none"
+                        style={{
+                          left: r.x - 24,
+                          top: r.y - 24,
+                          width: 48,
+                          height: 48,
+                          animation: 'buzz-ripple 0.9s ease-out forwards',
+                        }}
+                      />
+                    ))}
+                    {buzzing ? '…' : 'TAP IN!'}
+                  </button>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+      </>
+    )
+  }
+
   if (!activeQuestion) {
+    const previewIsDt = previewInfo?.doubleTapWager !== undefined
     const pointValues = [...new Set(
       boardCategories.flatMap(c => c.questions.map(q => q.point_value ?? 0)).filter(Boolean)
     )].sort((a, b) => a - b)
@@ -3213,11 +3405,14 @@ export default function PlayView() {
         </button>
         {error && <p className="shrink-0 text-red-400 text-sm text-center">{error}</p>}
 
-        {/* Preview overlay — pointerdown so eager pre-buzz taps register the same
-            way the real buzzer does (and count toward the anti-spam lockout) */}
+        {/* Preview overlay. Regular questions show the pre-armed buzz stage (greyed
+            buzzer in place, clue hidden); a Double Tap keeps the category card, since
+            its team auto-buzzes and everyone else is locked out. */}
         {previewInfo && (
           <div
-            className="fixed inset-0 z-50 wood-bg text-white flex flex-col items-center justify-center p-6 text-center"
+            className={previewIsDt
+              ? 'fixed inset-0 z-50 wood-bg text-white flex flex-col items-center justify-center p-6 text-center'
+              : 'fixed inset-0 z-50 bar-bg text-white flex flex-col p-5 select-none'}
             style={tileRect ? (() => {
               const vw = window.innerWidth, vh = window.innerHeight
               const scaleX = tileRect.width  / vw
@@ -3242,48 +3437,50 @@ export default function PlayView() {
                 overflow: 'hidden',
               }
             })() : undefined}>
-            {scoreChip}
-            {previewInfo.doubleTapWager !== undefined && (
-              <div className="mb-4 px-4 py-2 bg-amber-500/20 border border-amber-500/40 rounded-xl">
-                <p className="text-amber-400 font-black text-sm">🍺 DOUBLE TAP! — {previewInfo.doubleTapWager} pts wagered</p>
-              </div>
-            )}
-            <p className="text-amber-300/80 text-xs uppercase tracking-[0.2em] mb-6">Category</p>
-            <p className="font-black text-white leading-tight mb-3"
-              style={{ fontSize: 'clamp(1.75rem, 7vw, 3rem)' }}>
-              {previewInfo.categoryName}
-            </p>
-            {previewInfo.pointValue != null && !previewInfo.doubleTapWager && (
-              <p className="text-yellow-400 font-mono font-black text-3xl mb-6">
-                ${previewInfo.pointValue}
+            {!previewIsDt ? renderBuzzStage(null, previewInfo.categoryName, previewInfo.pointValue) : (<>
+              {scoreChip}
+              {previewInfo.doubleTapWager !== undefined && (
+                <div className="mb-4 px-4 py-2 bg-amber-500/20 border border-amber-500/40 rounded-xl">
+                  <p className="text-amber-400 font-black text-sm">🍺 DOUBLE TAP! — {previewInfo.doubleTapWager} pts wagered</p>
+                </div>
+              )}
+              <p className="text-amber-300/80 text-xs uppercase tracking-[0.2em] mb-6">Category</p>
+              <p className="font-black text-white leading-tight mb-3"
+                style={{ fontSize: 'clamp(1.75rem, 7vw, 3rem)' }}>
+                {previewInfo.categoryName}
               </p>
-            )}
-            {/* No clue text here: it stays hidden until the host opens the buzzer,
-                so teams have to listen to the host read it */}
-            <p className="text-amber-100/60 text-sm animate-pulse">Waiting for host…</p>
-            {buzzLockedOut ? (
-              <p className="text-red-400 text-sm font-bold mt-3">
-                {lockedByTeammate
-                  ? '🔒 A teammate tapped too early — your team is locked out of this one'
-                  : "🔒 Too many early taps — your team is locked out of this one"}
-              </p>
-            ) : preBuzzTaps > 0 ? (
-              <p className="text-amber-400 text-xs font-semibold mt-3">Easy — tapping before the buzzer opens will lock your team out</p>
-            ) : null}
-            <QuipCycler />
-            {/* Anti-spam catcher. Only taps landing where the buzz button WILL be
-                count toward the lockout: pre-loading a tap means parking a thumb on
-                the button's spot, whereas a tap up near the category is just a
-                fidget. On the buzz screen the answer card and buzz-window bar take
-                the top of the viewport and the button fills the centered flex-1
-                below, so that band is roughly the bottom 60%. Transparent, and
-                clear of the score chip (top-4 right-4). */}
-            <div
-              aria-hidden
-              onPointerDown={handlePreBuzzTap}
-              className="absolute inset-x-0 bottom-0"
-              style={{ height: '60%' }}
-            />
+              {previewInfo.pointValue != null && !previewInfo.doubleTapWager && (
+                <p className="text-yellow-400 font-mono font-black text-3xl mb-6">
+                  ${previewInfo.pointValue}
+                </p>
+              )}
+              {/* No clue text here: it stays hidden until the host opens the buzzer,
+                  so teams have to listen to the host read it */}
+              <p className="text-amber-100/60 text-sm animate-pulse">Waiting for host…</p>
+              {buzzLockedOut ? (
+                <p className="text-red-400 text-sm font-bold mt-3">
+                  {lockedByTeammate
+                    ? '🔒 A teammate tapped too early — your team is locked out of this one'
+                    : "🔒 Too many early taps — your team is locked out of this one"}
+                </p>
+              ) : preBuzzTaps > 0 ? (
+                <p className="text-amber-400 text-xs font-semibold mt-3">Easy — tapping before the buzzer opens will lock your team out</p>
+              ) : null}
+              <QuipCycler />
+              {/* Anti-spam catcher. Only taps landing where the buzz button WILL be
+                  count toward the lockout: pre-loading a tap means parking a thumb on
+                  the button's spot, whereas a tap up near the category is just a
+                  fidget. On the buzz screen the answer card and buzz-window bar take
+                  the top of the viewport and the button fills the centered flex-1
+                  below, so that band is roughly the bottom 60%. Transparent, and
+                  clear of the score chip (top-4 right-4). */}
+              <div
+                aria-hidden
+                onPointerDown={handlePreBuzzTap}
+                className="absolute inset-x-0 bottom-0"
+                style={{ height: '60%' }}
+              />
+            </>)}
           </div>
         )}
       </div>
@@ -3490,131 +3687,17 @@ export default function PlayView() {
   }
 
   // Active question — buzz phase (question visible, waiting for buzz)
-  const buzzWindowClosed = buzzWindowRemaining === 0
-  const buzzTimerLow = (buzzWindowRemaining ?? 25) <= 10
-  const buzzWindowPct = ((buzzWindowRemaining ?? 25) / 25) * 100
-
   return (
     // Locked to exactly the viewport: no scroll, no rubber-band, no chance for iOS
     // to read a drifting tap as a slide and swallow the buzz.
     <div className="relative bar-bg text-white flex flex-col p-5 overflow-hidden select-none"
       style={{ height: '100dvh', touchAction: 'manipulation', overscrollBehavior: 'none' }}>
       {scoreOverlayEl}
-      {scoreChip}
-      <div className="max-w-sm mx-auto w-full flex-1 min-h-0 flex flex-col">
-        <div className="glass-card rounded-2xl p-5 mb-4 pt-14">
-          <p className="text-xs text-amber-400/70 uppercase tracking-[0.2em] mb-2">The answer</p>
-          <p className="text-2xl font-bold leading-snug">{activeQuestion.answer}</p>
-          {activeQuestion.point_value && (
-            <p className="text-yellow-400 font-mono text-sm mt-3 font-semibold">{activeQuestion.point_value} pts</p>
-          )}
-        </div>
-
-        {/* Buzz window countdown bar */}
-        {buzzWindowRemaining !== null && (
-          <div className="mb-4">
-            <div className="flex justify-between items-center mb-1">
-              <p className="text-xs text-gray-500 uppercase tracking-wider">Buzz window</p>
-              <span className={`inline-block font-mono font-black text-lg tabular-nums ${buzzTimerLow ? 'text-red-400' : 'text-white'}`}
-                style={buzzTimerLow ? { animation: 'timer-pulse 0.8s ease-in-out infinite' } : undefined}>
-                {buzzWindowRemaining}s
-              </span>
-            </div>
-            <div className="w-full h-2 bg-white/10 rounded-full overflow-hidden">
-              <div
-                className={`h-full w-full origin-left transition-[transform,background-color] duration-1000 ease-linear ${buzzTimerLow ? 'bg-red-500' : 'bg-yellow-400'}`}
-                style={{ transform: `scaleX(${Math.max(0, Math.min(1, (buzzWindowPct) / 100))})` }}
-              />
-            </div>
-          </div>
-        )}
-
-        {/* Centered in the remaining space — the bar is the star of this screen */}
-        <div className="flex-1 min-h-0 flex flex-col justify-center pb-4">
-          {buzzFailed && !buzzLockedOut && !buzzWindowClosed && (
-            <p role="alert" className="text-red-400 text-center font-black text-sm mb-3"
-              style={{ animation: 'shake-x 0.5s ease-out' }}>
-              ⚠️ Buzz didn't go through — tap again!
-            </p>
-          )}
-          {buzzLockedOut ? (
-            <div className="w-full py-8 rounded-2xl font-black text-xl bg-white/5 border border-white/10 text-red-400/80 text-center leading-snug">
-              🔒 Locked out
-              <span className="block text-sm font-medium text-gray-500 mt-1 px-4">
-                {lockedByTeammate ? 'A teammate tapped too early' : 'You tapped too early'} — wait for another team to answer
-              </span>
-            </div>
-          ) : buzzWindowClosed ? (
-            <div className="w-full py-8 rounded-2xl font-black text-xl bg-white/5 border border-white/10 text-gray-500 text-center">
-              Buzz window closed
-            </div>
-          ) : (
-            <div className="flex flex-col items-center transition-transform active:translate-y-[3px] active:scale-[0.98]">
-              {/* Tap handle — same brass knob + steel neck as the board's tap wall,
-                  so pulling the tap IS the buzz. Decorative; the button below is the target. */}
-              <div
-                aria-hidden
-                className="w-10 h-10 rounded-full z-10 mb-[-4px]"
-                style={{
-                  background: 'radial-gradient(circle at 35% 30%, #f5e6c8, #b8863b 55%, #6b4a1f 100%)',
-                  boxShadow: '0 2px 5px rgba(0,0,0,0.55), inset 0 -2px 4px rgba(0,0,0,0.25)',
-                }}
-              />
-              <div
-                aria-hidden
-                className="w-3.5 h-6 rounded-sm"
-                style={{
-                  background: 'linear-gradient(180deg, #a3a3a3 0%, #525252 100%)',
-                  boxShadow: 'inset 0 0 2px rgba(255,255,255,0.35)',
-                }}
-              />
-              <div className="relative w-full">
-                {/* Glow lives on its own layer animating opacity (composited) — the old
-                    box-shadow keyframe animation repainted the big button every frame,
-                    a suspect in the iOS "bar hangs" reports */}
-                <span
-                  aria-hidden
-                  className="absolute inset-0 rounded-3xl pointer-events-none"
-                  style={{
-                    boxShadow: '0 0 55px 10px rgba(220, 38, 38, 0.7)',
-                    animation: 'glow-pulse 1.6s ease-in-out infinite',
-                  }}
-                />
-                <button
-                  onPointerDown={handleBuzzPointerDown}
-                  onClick={handleBuzzClick}
-                  disabled={buzzing}
-                  className="relative overflow-hidden w-full rounded-3xl font-black text-5xl tracking-wide text-white disabled:opacity-60 select-none"
-                  style={{
-                    minHeight: 'clamp(150px, 26vh, 250px)',
-                    touchAction: 'none',
-                    WebkitTapHighlightColor: 'transparent',
-                    WebkitUserSelect: 'none',
-                    background: 'linear-gradient(180deg, #f87171 0%, #dc2626 45%, #991b1b 100%)',
-                    boxShadow: 'inset 0 2px 0 rgba(255,255,255,0.25), inset 0 -4px 8px rgba(0,0,0,0.35)',
-                    textShadow: '0 2px 4px rgba(0,0,0,0.4)',
-                  }}
-                >
-                  {ripples.map(r => (
-                    <span
-                      key={r.id}
-                      className="absolute rounded-full bg-white pointer-events-none"
-                      style={{
-                        left: r.x - 24,
-                        top: r.y - 24,
-                        width: 48,
-                        height: 48,
-                        animation: 'buzz-ripple 0.9s ease-out forwards',
-                      }}
-                    />
-                  ))}
-                  {buzzing ? '…' : 'TAP IN!'}
-                </button>
-              </div>
-            </div>
-          )}
-        </div>
-      </div>
+      {renderBuzzStage(
+        activeQuestion.answer,
+        boardCategories.find(c => c.id === activeQuestion.category_id)?.name ?? null,
+        activeQuestion.point_value,
+      )}
     </div>
   )
 }

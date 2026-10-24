@@ -80,6 +80,12 @@ html, body {
   50%      { opacity: 1; }
 }
 
+/* Buzzer switching on when the host opens it — fades up from the pre-armed grey */
+@keyframes buzzer-ignite {
+  0%   { filter: grayscale(1); opacity: 0.45; }
+  100% { filter: grayscale(0); opacity: 1; }
+}
+
 /* Phones: no 350ms double-tap-zoom delay on any control, no gray tap flash */
 button {
   touch-action: manipulation;
