@@ -37,6 +37,11 @@
 
 ## 🟢 Improvements / Not Yet Built
 
+- **Before scaling to other bars: Ably token auth (Phase A2).** The Ably key ships in the public
+  bundle, so anyone can fake host messages on screens (not scores). Fully planned in
+  `docs/phase-a2-ably-plan.md`, including the 5-minute interim key restriction.
+- **If team-hopping trolls become a pattern: team captains / "Lock team".** Designed and shelved
+  in `docs/future-team-captains.md`.
 - Projector setup screen
 - Format changes / content editor
 
