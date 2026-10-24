@@ -3,6 +3,8 @@ import { supabase } from '../../lib/supabase'
 import { ablyClient, serverNow, getClockOffsetMs } from '../../lib/ably'
 import {
   clearPlayerSession,
+  deviceAuth,
+  getDeviceSecret,
   getSessionId,
   getTeamId,
   setTeamId,
@@ -67,6 +69,16 @@ interface PreviewInfo {
   pointValue: number | null
   startTs: number
   doubleTapWager?: number
+}
+
+// This phone's own team Final wager. Phones can't read the wagers table (other
+// teams' wagers stay hidden until the host reveals them), so it comes from the
+// key-checked function, which only ever returns the caller's own team row.
+async function fetchMyFinalWager(roomId: string) {
+  const { data } = await supabase.rpc('get_my_final_wager', { p_room_id: roomId, ...deviceAuth() }).maybeSingle()
+  return data
+    ? { id: data.wager_id, amount: data.amount, response: data.response, submitted_at: data.submitted_at }
+    : null
 }
 
 // How long the DB-driven reveal path waits for the Ably broadcast to claim a reveal
@@ -297,6 +309,7 @@ export default function PlayView() {
         p_team_id: team.id,
         p_session_id: getSessionId(),
         p_response: response.trim(),
+        p_device_secret: getDeviceSecret(),
       })
 
       if (error) {
@@ -851,6 +864,9 @@ export default function PlayView() {
         // it would put a live buzz button on an answered question (and a tap would
         // land on the wrong clue) — treat it as no active question.
         if (question?.is_answered) return
+        // No clue text = the database doesn't have it live (questions_public hides
+        // unplayed clues), so this snapshot is stale too.
+        if (question && question.answer == null) return
         if (debugTimingRef.current) {
           broadcastRef.current?.publish('buzz_debug_report', {
             team: myTeamRef.current?.name ?? '?',
@@ -1281,7 +1297,7 @@ export default function PlayView() {
         duration: number
       }
       const { data: q } = await supabase.from('questions_public').select().eq('id', question_id).single()
-      setFjQuestion(q ?? null)
+      setFjQuestion(q?.answer != null ? q : null)
       setFjResponseError('')
       fjAutoSubmitStartedRef.current = false
       setFjResponseDeadline(response_deadline_at ?? start_ts + duration * 1000)
@@ -1304,14 +1320,15 @@ export default function PlayView() {
         if (amount !== undefined) {
           setFjLockedWagerAmount(amount)
         } else {
-          const { data: w } = await supabase.from('wagers').select('amount').eq('id', wager_id).single()
+          const roomId = roomRef.current?.id
+          const w = roomId ? await fetchMyFinalWager(roomId) : null
           if (w) setFjLockedWagerAmount(w.amount)
         }
       } else if (!fjWagerIdRef.current) {
         // Fallback: fetch from DB if wager_id wasn't in the broadcast
         const roomId = roomRef.current?.id
         if (roomId) {
-          const { data: w } = await supabase.from('wagers').select('id, amount').eq('team_id', team_id).eq('room_id', roomId).maybeSingle()
+          const w = await fetchMyFinalWager(roomId)
           if (w) {
             setFjWagerId(w.id)
             setFjLockedWagerAmount(w.amount)
@@ -1415,10 +1432,10 @@ export default function PlayView() {
     ;(async () => {
       // Category NAME only — the clue is fetched by id further down, and only once
       // the persisted final_phase says the host has revealed it.
-      const [{ data: team }, category, { data: wager }] = await Promise.all([
+      const [{ data: team }, category, wager] = await Promise.all([
         supabase.from('teams').select().eq('id', myId).single(),
         findFinalTapCategory(room.id, 'public'),
-        supabase.from('wagers').select().eq('room_id', room.id).eq('team_id', myId).maybeSingle(),
+        fetchMyFinalWager(room.id),
       ])
       if (cancelled || !team) return
 
@@ -1453,7 +1470,7 @@ export default function PlayView() {
           .single()
         if (cancelled) return
         const deadline = new Date(room.final_response_deadline_at).getTime()
-        setFjQuestion(question ?? null)
+        setFjQuestion(question?.answer != null ? question : null)
         setFjResponseError('')
         fjAutoSubmitStartedRef.current = false
         setFjResponseDeadline(deadline)
@@ -1593,7 +1610,7 @@ export default function PlayView() {
     const team = myTeamRef.current
     if (!team) return
     ;(async () => {
-      const claim = await claimTeamBuzz(qId, team.id)
+      const claim = await claimTeamBuzz(qId)
       if (!claim) return
       const { buzz, created } = claim
       setMyBuzzId(buzz.id)
@@ -1717,24 +1734,20 @@ export default function PlayView() {
 
   // ── Actions ───────────────────────────────────────────────
 
-  async function claimTeamBuzz(questionId: string, teamId: string): Promise<{ buzz: Buzz; created: boolean } | null> {
-    const { data: createdBuzz, error: insertError } = await supabase
-      .from('buzzes')
-      .insert({ question_id: questionId, team_id: teamId, status: 'pending' })
-      .select()
-      .single()
-
-    if (createdBuzz) return { buzz: createdBuzz, created: true }
-    if (insertError?.code !== '23505') return null
-
-    const { data: existingBuzz } = await supabase
-      .from('buzzes')
-      .select()
-      .eq('question_id', questionId)
-      .eq('team_id', teamId)
-      .single()
-
-    return existingBuzz ? { buzz: existingBuzz, created: false } : null
+  // One round trip: the database derives the team from this phone's seat, claims
+  // (or finds) the team's buzz on the live clue, and returns its queue position.
+  async function claimTeamBuzz(questionId: string): Promise<{
+    buzz: Pick<Buzz, 'id' | 'buzzed_at' | 'response_deadline_at'>; created: boolean; position: number
+  } | null> {
+    const { data } = await supabase
+      .rpc('claim_buzz', { p_question_id: questionId, ...deviceAuth() })
+      .maybeSingle()
+    if (!data) return null
+    return {
+      buzz: { id: data.buzz_id, buzzed_at: data.buzzed_at, response_deadline_at: data.response_deadline_at },
+      created: data.created,
+      position: data.queue_position,
+    }
   }
 
   async function handleJoinLobby() {
@@ -1780,13 +1793,28 @@ export default function PlayView() {
           setError(`"${name}" is already taken — pick another name.`)
           return
         }
-        const { data, error: createError } = await playerRequest(signal => supabase.from('teams')
-          .insert({ room_id: room.id, name }).select().abortSignal(signal).single())
-        if (createError || !data) throw createError ?? new Error('Team was not confirmed')
-        team = data
+        // The team id is ours, so a retry after a lost response reuses this team
+        // instead of making a second one. create_team also takes our seat.
+        team = { id: crypto.randomUUID(), room_id: room.id, name, score: 0, is_active: true, created_at: new Date().toISOString() }
         pendingCreatedTeamRef.current = team
       }
-      await joinTeam(team, playerName)
+      const pending = team
+      const { data, error: createError } = await playerRequest(signal => supabase
+        .rpc('create_team', {
+          p_room_id: pending.room_id,
+          p_team_id: pending.id,
+          p_name: pending.name,
+          p_nickname: (playerName ?? nickname).trim() || null,
+          ...deviceAuth(),
+        })
+        .abortSignal(signal).single())
+      if (createError?.code === '23505') {
+        pendingCreatedTeamRef.current = null
+        setError(`"${name}" is already taken — pick another name.`)
+        return
+      }
+      if (createError || !data) throw createError ?? new Error('Team was not confirmed')
+      await joinTeam(data, playerName)
     } catch {
       setError('Could not join the game. Check your connection and try again.')
     } finally {
@@ -1805,10 +1833,9 @@ export default function PlayView() {
     setLoading(true)
     setError('')
     const leavingTeamId = myTeam?.id ?? null
+    // Null team = every seat this phone holds, as before.
     const { error: leaveError } = await supabase
-      .from('players')
-      .delete({ count: 'exact' })
-      .eq('session_id', getSessionId())
+      .rpc('leave_team', { p_team_id: null, ...deviceAuth() })
     setLoading(false)
 
     if (leaveError) {
@@ -1841,26 +1868,17 @@ export default function PlayView() {
     joinInFlightRef.current = true
     setLoading(true); setError('')
     try {
-      const sessionId = getSessionId()
-      // Rejoin and a retry after a lost insert response reuse the existing seat.
-      const { data: existing, error: lookupError } = await playerRequest(signal => supabase.from('players')
-        .select('id').eq('team_id', team.id).eq('session_id', sessionId).limit(1).abortSignal(signal).maybeSingle())
-      if (lookupError) throw lookupError
-      if (!existing) {
-        const { data: player, error: joinError } = await playerRequest(signal => supabase.from('players')
-          .insert({ team_id: team.id, session_id: sessionId, nickname: (nicknameOverride ?? nickname).trim() || null })
-          .select().abortSignal(signal).single())
-        if (joinError || !player) throw joinError ?? new Error('Join was not confirmed')
-      }
-      // Confirm the destination first, then retire only this session's other
-      // memberships in this room. Preserve attendance from previous games.
-      // If cleanup fails, retry the same join; do not claim success.
-      const otherTeamIds = teams.filter(t => t.room_id === team.room_id && t.id !== team.id).map(t => t.id)
-      if (otherTeamIds.length > 0) {
-        const { error: cleanupError } = await playerRequest(signal => supabase.from('players')
-          .delete().eq('session_id', sessionId).in('team_id', otherTeamIds).abortSignal(signal))
-        if (cleanupError) throw cleanupError
-      }
+      // One step on the server: take the seat (a rejoin or retry reuses it) and
+      // retire this phone's other seats in this room. Attendance from previous
+      // games is preserved. A failure retries the same join; never claim success.
+      const { data: player, error: joinError } = await playerRequest(signal => supabase
+        .rpc('join_team', {
+          p_team_id: team.id,
+          p_nickname: (nicknameOverride ?? nickname).trim() || null,
+          ...deviceAuth(),
+        })
+        .abortSignal(signal).single())
+      if (joinError || !player) throw joinError ?? new Error('Join was not confirmed')
       pendingCreatedTeamRef.current = null
       setTeamId(team.id); setMyTeam(team); setMyScore(team.score)
       setKickedNotice(null)
@@ -1886,7 +1904,7 @@ export default function PlayView() {
     if (buzzLockedOut) return // spam-tapped the preview screen — sit this question out
     setBuzzing(true)
     const qId = room.current_question_id
-    const claim = await claimTeamBuzz(qId, myTeam.id)
+    const claim = await claimTeamBuzz(qId)
     if (!claim) {
       // The single worst silent failure at a live event: player thinks they're in
       // the queue but the insert never landed. Tell them, buzz-able immediately.
@@ -1895,18 +1913,12 @@ export default function PlayView() {
       navigator.vibrate?.([60, 40, 60])
       return
     }
-    const { buzz, created } = claim
+    const { buzz, created, position } = claim
     setBuzzFailed(false)
-    // Count buzzes at or before ours to get queue position
-    const { count } = await supabase
-      .from('buzzes')
-      .select('*', { count: 'exact', head: true })
-      .eq('question_id', qId)
-      .lte('buzzed_at', buzz.buzzed_at)
     setMyBuzzId(buzz.id)
     setHasBuzzed(true)
     setBuzzWasMine(created)
-    setBuzzPosition(count)
+    setBuzzPosition(position)
     setBuzzing(false)
 
     if (!created) {
@@ -1986,23 +1998,21 @@ export default function PlayView() {
     const response = text.trim()
     if (!buzzId || !response || responseSubmittedRef.current) return false
     responseSubmittedRef.current = true // guard before await to prevent duplicate taps on this phone
-    const { data: submitted, error: submitError } = await supabase.from('buzzes').update({
-      response,
-      response_submitted_at: new Date().toISOString(),
-    }).eq('id', buzzId).is('response_submitted_at', null).select().maybeSingle()
+    const { data: submitted, error: submitError } = await supabase
+      .rpc('submit_buzz_response', { p_buzz_id: buzzId, p_response: response, ...deviceAuth() })
+      .maybeSingle()
 
-    if (submitError) {
+    if (submitError || !submitted) {
       responseSubmittedRef.current = false
-      if (submitError.message.includes('Response window has closed')) {
+      if (submitError?.message.includes('Response window has closed')) {
         setTimeRemaining(0)
       }
       return false
     }
 
-    if (!submitted) {
-      const { data: existing } = await supabase
-        .from('buzzes').select('response').eq('id', buzzId).single()
-      if (existing?.response) setResponseText(existing.response)
+    if (!submitted.accepted) {
+      // A teammate's answer got there first — show theirs
+      if (submitted.saved_response) setResponseText(submitted.saved_response)
       setResponseSubmitted(true)
       return true
     }
@@ -2043,6 +2053,7 @@ export default function PlayView() {
       p_team_id: myTeam.id,
       p_question_id: questionId,
       p_session_id: getSessionId(),
+      p_device_secret: getDeviceSecret(),
     })
     selectionClaimingRef.current = false
     setSelectionClaiming(false)
@@ -2142,6 +2153,7 @@ export default function PlayView() {
       p_question_id: questionId,
       p_session_id: getSessionId(),
       p_wager: wager,
+      p_device_secret: getDeviceSecret(),
     })
     if (!confirmed) {
       setDoubleTapStep(null)
@@ -2167,26 +2179,20 @@ export default function PlayView() {
   async function handleSubmitWager() {
     if (!myTeam || !room) return
     const amount = Math.max(0, Math.min(Math.max(0, myScore), parseInt(fjWagerInput) || 0))
-    const { data: wager, error: insertError } = await supabase
-      .from('wagers').insert({ team_id: myTeam.id, room_id: room.id, amount, status: 'pending' })
-      .select().single()
-
-    let teamWager = wager
-    if (!teamWager && insertError?.code === '23505') {
-      const { data: existing } = await supabase
-        .from('wagers').select().eq('team_id', myTeam.id).eq('room_id', room.id).single()
-      teamWager = existing
-    }
+    // Locks once per team; a teammate's earlier wager comes back unchanged
+    const { data: teamWager } = await supabase
+      .rpc('submit_final_wager', { p_room_id: room.id, p_amount: amount, ...deviceAuth() })
+      .maybeSingle()
     if (!teamWager) return
 
-    setFjWagerId(teamWager.id)
+    setFjWagerId(teamWager.wager_id)
     setFjWagerInput(String(teamWager.amount))
     setFjLockedWagerAmount(teamWager.amount)
     setFjSubPhase('wager_locked')
-    if (wager) {
+    if (teamWager.accepted) {
       broadcastRef.current?.publish('fj_wager_locked', {
         team_id: myTeam.id,
-        wager_id: teamWager.id,
+        wager_id: teamWager.wager_id,
         amount: teamWager.amount,
       })
     }
@@ -2659,7 +2665,7 @@ export default function PlayView() {
               {remaining}
             </span>
           </div>
-          <FitClue text={fjQuestion.answer} label="The Answer" showLabel={!answerCompact}
+          <FitClue text={fjQuestion.answer ?? ''} label="The Answer" showLabel={!answerCompact}
             cardClassName={answerCompact ? ac.card : 'p-5'} regionClassName={ac.cardGap} />
           {fjResponseSubmitted ? (
             <div className="flex-1 flex flex-col items-center justify-center text-center gap-3">
@@ -3084,9 +3090,9 @@ export default function PlayView() {
   // card shows category + value and the buzzer sits greyed out in place; when the
   // host opens it, the card flips to the clue and the same buzzer lights up.
   // Nothing moves, so thumbs wait on the button instead of sniping a screen change.
-  // clue === null → pre-armed (preview overlay); otherwise armed (buzz phase).
-  function renderBuzzStage(clue: string | null, categoryName: string | null, pointValue: number | null) {
-    const armed = clue !== null
+  // armed = false → pre-armed (preview overlay); true → buzz phase. Passed
+  // explicitly: a clue missing its text must never grey out a live buzzer.
+  function renderBuzzStage(armed: boolean, clue: string, categoryName: string | null, pointValue: number | null) {
     const buzzWindowClosed = armed && buzzWindowRemaining === 0
     const buzzTimerLow = armed && (buzzWindowRemaining ?? 25) <= 10
     const buzzWindowPct = armed ? ((buzzWindowRemaining ?? 25) / 25) * 100 : 100
@@ -3444,7 +3450,7 @@ export default function PlayView() {
                 overflow: 'hidden',
               }
             })() : undefined}>
-            {!previewIsDt ? renderBuzzStage(null, previewInfo.categoryName, previewInfo.pointValue) : (<>
+            {!previewIsDt ? renderBuzzStage(false, '', previewInfo.categoryName, previewInfo.pointValue) : (<>
               {scoreChip}
               {previewInfo.doubleTapWager !== undefined && (
                 <div className="mb-4 px-4 py-2 bg-amber-500/20 border border-amber-500/40 rounded-xl">
@@ -3524,7 +3530,7 @@ export default function PlayView() {
             />
           </div>
 
-          <FitClue text={activeQuestion.answer} label="The answer" showLabel={!answerCompact}
+          <FitClue text={activeQuestion.answer ?? ''} label="The answer" showLabel={!answerCompact}
             cardClassName={ac.card} regionClassName={ac.cardGap} />
 
           {dtTimer === 0 ? (
@@ -3586,7 +3592,7 @@ export default function PlayView() {
             />
           </div>
 
-          <FitClue text={activeQuestion.answer} label="The answer" showLabel={!answerCompact}
+          <FitClue text={activeQuestion.answer ?? ''} label="The answer" showLabel={!answerCompact}
             cardClassName={ac.card} regionClassName={ac.cardGap} />
 
           {ansTimer === 0 ? (
@@ -3701,7 +3707,8 @@ export default function PlayView() {
       style={{ height: '100dvh', touchAction: 'manipulation', overscrollBehavior: 'none' }}>
       {scoreOverlayEl}
       {renderBuzzStage(
-        activeQuestion.answer,
+        true,
+        activeQuestion.answer ?? '',
         boardCategories.find(c => c.id === activeQuestion.category_id)?.name ?? null,
         activeQuestion.point_value,
       )}

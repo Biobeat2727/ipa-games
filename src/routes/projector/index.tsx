@@ -186,10 +186,11 @@ export default function ProjectorView() {
       await loadCategories(roomId, freshRoom.status)
     } else if (freshRoom.status === 'final_jeopardy') {
       // Category name only (public lookup) — the clue is read by id below, and
-      // only once final_phase === 'question'
+      // only once final_phase === 'question'. Wagers come from the public Final
+      // board: who has wagered, plus answers/amounts only once the host reveals them.
       const [category, { data: wagers }] = await Promise.all([
         findFinalTapCategory(roomId, 'public'),
-        supabase.from('wagers').select().eq('room_id', roomId),
+        supabase.rpc('final_board', { p_room_id: roomId }),
       ])
       setFjCategoryName(category?.name ?? FINAL_TAP_LABEL)
       setFjWagerStatus(new Set((wagers ?? []).map(w => w.team_id)))
@@ -204,7 +205,7 @@ export default function ProjectorView() {
           .single()
         const deadline = new Date(freshRoom.final_response_deadline_at).getTime()
         setFjReveal(null)
-        setFjQuestion(question ?? null)
+        setFjQuestion(question?.answer ? { answer: question.answer } : null)
         setFjResponseDeadline(deadline)
         setFjTimeRemaining(Math.max(0, Math.floor((deadline - serverNow()) / 1000)))
       } else if (freshRoom.final_phase === 'review' && freshRoom.final_review_team_id) {
@@ -219,7 +220,7 @@ export default function ProjectorView() {
           ...(reviewWager?.status === 'correct' || reviewWager?.status === 'wrong'
             ? {
                 result: reviewWager.status,
-                wager: reviewWager.amount,
+                wager: reviewWager.amount ?? undefined,
                 newScore: reviewTeam.score,
               }
             : {}),
@@ -360,7 +361,15 @@ export default function ProjectorView() {
       }
     })
     ch.subscribe('question_activated', ({ data }) => {
-      const { question_id } = data as { question_id: string }
+      const { question_id, question } = data as { question_id: string; question?: QuestionPublic }
+      // The board was loaded with unplayed clue text hidden; the broadcast carries it
+      const clue = question?.answer
+      if (clue) {
+        setCategories(prev => prev.map(c => ({
+          ...c,
+          questions: c.questions.map(q => q.id === question_id ? { ...q, answer: clue } : q),
+        })))
+      }
       settleRevealVerdict(null) // intros are over once a question is live
       if (doubleTapPreviewTimerRef.current) clearTimeout(doubleTapPreviewTimerRef.current)
       setPreviewInfo(null)
@@ -504,7 +513,7 @@ export default function ProjectorView() {
         response_deadline_at?: number
       }
       const { data: q } = await supabase.from('questions_public').select().eq('id', question_id).single()
-      if (q) setFjQuestion({ answer: q.answer })
+      if (q?.answer) setFjQuestion({ answer: q.answer })
       setFjResponseDeadline(response_deadline_at ?? start_ts + 90_000)
       setFjTimeRemaining(90)
     })
@@ -643,8 +652,31 @@ export default function ProjectorView() {
 
   // Guard against stale room.current_question_id: if the question is already marked
   // answered in local state, treat it as inactive even if the room row hasn't caught up.
-  const activeQuestion = categories.flatMap(c => c.questions)
+  const liveQuestion = categories.flatMap(c => c.questions)
     .find(q => q.id === room?.current_question_id && !q.is_answered) ?? null
+  // Its text may still be hidden in the loaded board (reload, missed broadcast);
+  // show the board until the fetch below fills it in, never a blank clue.
+  const activeQuestion = liveQuestion?.answer != null
+    ? liveQuestion as QuestionPublic & { answer: string }
+    : null
+
+  const missingClueId = liveQuestion && liveQuestion.answer == null ? liveQuestion.id : null
+  useEffect(() => {
+    if (!missingClueId) return
+    let cancelled = false
+    const fill = async () => {
+      const { data: q } = await supabase.from('questions_public').select('id, answer').eq('id', missingClueId).single()
+      if (cancelled) return
+      const clue = q?.answer
+      if (!clue) { setTimeout(() => { if (!cancelled) void fill() }, 1000); return }
+      setCategories(prev => prev.map(c => ({
+        ...c,
+        questions: c.questions.map(x => x.id === missingClueId ? { ...x, answer: clue } : x),
+      })))
+    }
+    void fill()
+    return () => { cancelled = true }
+  }, [missingClueId])
 
   const sortedTeams   = [...teams].sort((a, b) => (scores.get(b.id) ?? 0) - (scores.get(a.id) ?? 0))
   const pendingBuzzes = buzzes.filter(b => b.status === 'pending')

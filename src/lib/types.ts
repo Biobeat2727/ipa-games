@@ -108,7 +108,10 @@ export type Question = {
 export type QuestionPublic = {
   id: string
   category_id: string
-  answer: string
+  /** The clue. Null from questions_public until the clue is live, answered, or
+   *  (Final) revealed — see supabase/phase_a_1_functions.sql. The inline
+   *  question_activated payload always carries it. */
+  answer: string | null
   point_value: number | null
   is_answered: boolean
   answered_by_team_id: string | null
@@ -231,6 +234,7 @@ export type Database = {
           p_team_id: string
           p_question_id: string
           p_session_id: string
+          p_device_secret: string
         }
         Returns: Array<{
           accepted: boolean
@@ -247,6 +251,7 @@ export type Database = {
           p_question_id: string
           p_session_id: string
           p_wager: number
+          p_device_secret: string
         }
         Returns: boolean
       }
@@ -319,12 +324,68 @@ export type Database = {
           response_deadline_at: string
         }>
       }
+      // ── Key-checked player functions (supabase/phase_a_1_functions.sql) ──
+      // Every one takes the phone's device id + secret (lib/session deviceAuth()).
+      join_team: {
+        Args: { p_team_id: string; p_nickname: string | null; p_device_id: string; p_device_secret: string }
+        Returns: Player[]
+      }
+      create_team: {
+        Args: { p_room_id: string; p_team_id: string; p_name: string; p_nickname: string | null; p_device_id: string; p_device_secret: string }
+        Returns: Team[]
+      }
+      leave_team: {
+        Args: { p_team_id: string | null; p_device_id: string; p_device_secret: string }
+        Returns: number
+      }
+      claim_buzz: {
+        Args: { p_question_id: string; p_device_id: string; p_device_secret: string }
+        Returns: Array<{
+          buzz_id: string
+          team_id: string
+          buzzed_at: string
+          response_deadline_at: string
+          created: boolean
+          queue_position: number
+        }>
+      }
+      submit_buzz_response: {
+        Args: { p_buzz_id: string; p_response: string; p_device_id: string; p_device_secret: string }
+        Returns: Array<{ accepted: boolean; saved_response: string | null; response_submitted_at: string | null }>
+      }
+      submit_final_wager: {
+        Args: { p_room_id: string; p_amount: number; p_device_id: string; p_device_secret: string }
+        Returns: Array<{ accepted: boolean; wager_id: string; team_id: string; amount: number }>
+      }
+      get_my_final_wager: {
+        Args: { p_room_id: string; p_device_id: string; p_device_secret: string }
+        Returns: Array<{
+          wager_id: string
+          team_id: string
+          amount: number
+          response: string | null
+          status: WagerStatus
+          submitted_at: string | null
+        }>
+      }
+      final_board: {
+        Args: { p_room_id: string }
+        Returns: Array<{
+          team_id: string
+          has_wagered: boolean
+          submitted: boolean
+          amount: number | null
+          response: string | null
+          status: WagerStatus | null
+        }>
+      }
       submit_final_response: {
         Args: {
           p_room_id: string
           p_team_id: string
           p_session_id: string
           p_response: string
+          p_device_secret: string
         }
         Returns: Array<{
           accepted: boolean

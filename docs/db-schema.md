@@ -39,7 +39,7 @@
 | id | uuid, pk | |
 | team_id | uuid → teams | |
 | nickname | varchar, nullable | Optional display name |
-| session_id | varchar | Browser session ID — no auth required |
+| session_id | varchar | The phone's public device id (`lib/session.ts`); acting as it needs the device secret — see Phone access below |
 | created_at | timestamp | |
 
 ## `categories`
@@ -170,3 +170,24 @@ Players never touch the table: they call `public.join_mailing_list(p_email, p_ro
 (security definer; validates the address, ignores duplicates silently). RLS: no anon access;
 SELECT only for an authorized host (`is_authorized_host()`), which powers the host's
 "Download CSV" button. Apply the SQL before deploying the sign-up form.
+
+## Phone access (`supabase/phase_a_1_functions.sql`, `phase_a_2_lockdown.sql`)
+
+Phones (anon key, no login) hold a device id + 256-bit secret in localStorage. `player_devices`
+(no anon access) stores `device_id` and a SHA-256 of the secret; the first call from a new id
+registers it, and an id that was already public before keys existed is refused.
+
+Every phone write goes through a key-checked function that derives the caller's team from its
+own seat: `join_team`, `create_team` (client-chosen team id for safe retries), `leave_team`,
+`claim_buzz` (one round trip; returns queue position), `submit_buzz_response`,
+`submit_final_wager` (only while `final_phase` is starting/wager, 0..score), `get_my_final_wager`,
+and key-checked overloads of `claim_question_selection`, `confirm_question_selection`,
+`submit_final_response` (trailing `p_device_secret`). `final_board(room)` is the public Final
+view: who has wagered; answers/amounts only once the host reviews or judges them.
+
+`questions_public.answer` (the clue) is null until the clue is live, answered, or (Final)
+revealed; clients take live clue text from the `question_activated` payload.
+
+After step 2, anon can only SELECT `players` and `buzzes` (plus the public `teams`/`rooms`
+reads); no direct writes to players/teams/buzzes and no access to `wagers`.
+Rollback: `phase_a_2_rollback.sql`; read-only check: `phase_a_verify.sql`.
