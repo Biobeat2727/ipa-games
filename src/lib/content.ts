@@ -14,6 +14,9 @@ interface ImportQuestion {
   point_value: number
   answer: string
   correct_question: string
+  /** Optional: host-picked Double Tap. A round with any flagged question skips
+   *  the random pick and uses exactly the flagged ones. */
+  double_tap?: boolean
 }
 interface ImportCategory {
   name: string
@@ -107,6 +110,8 @@ export function validateContent(content: ContentJSON): void {
           throw new Error(`All questions in "${cat.name}" must have answer and correct_question.`)
         if (typeof q.point_value !== 'number' || !Number.isFinite(q.point_value))
           throw new Error(`All questions in "${cat.name}" must have a numeric point_value.`)
+        if (q.double_tap !== undefined && typeof q.double_tap !== 'boolean')
+          throw new Error(`Questions in "${cat.name}": double_tap must be true or false.`)
       }
     }
   }
@@ -209,6 +214,7 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
           answer: q.answer,
           correct_question: q.correct_question,
           point_value: q.point_value,
+          is_double_tap: q.double_tap === true,
         }))
       ).select('id')
       if (qErr) throw new Error(`Questions for "${cat.name}": ${qErr.message}`)
@@ -217,9 +223,13 @@ export async function importContent(roomId: string, content: ContentJSON): Promi
     insertedByRound.set(round.round, roundIds)
   }
 
-  // Randomly pick 2 questions in EVERY regular round and mark them as Double
-  // Taps — in different categories when the round has more than one category.
+  // Randomly pick 2 questions in every regular round the file didn't hand-pick
+  // and mark them as Double Taps — in different categories when the round has
+  // more than one category.
   for (const roundNum of REGULAR_ROUND_NUMBERS) {
+    const handPicked = content.rounds.some(r => r.round === roundNum &&
+      r.categories.some(c => c.questions.some(q => q.double_tap === true)))
+    if (handPicked) continue
     const pool = insertedByRound.get(roundNum)
     if (!pool || pool.length === 0) continue
     const first = pool[Math.floor(Math.random() * pool.length)]
