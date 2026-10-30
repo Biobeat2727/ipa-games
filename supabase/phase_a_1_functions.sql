@@ -254,8 +254,8 @@ grant execute on function public.leave_team(uuid, text, text) to anon, authentic
 -- ── Buzzing and answering ───────────────────────────────────────────────────
 
 -- One round trip: claim (or find) this device's team buzz on the live clue and
--- return its queue position. buzzed_at stays the database default and the
--- deadline trigger still stamps response_deadline_at, exactly as a direct insert.
+-- return its exact queue position. The deadline trigger still stamps
+-- response_deadline_at, exactly as a direct insert.
 create or replace function public.claim_buzz(
   p_question_id uuid,
   p_device_id text,
@@ -322,8 +322,15 @@ begin
     raise exception using errcode = '42501', message = 'This phone is not on a team in this game';
   end if;
 
-  insert into public.buzzes (question_id, team_id, status)
-  values (p_question_id, v_team_id, 'pending')
+  -- One buzz at a time per clue (serialize_buzz_queue.sql). Released at commit,
+  -- after which the next waiting buzz's count includes this one.
+  perform pg_catalog.pg_advisory_xact_lock(
+    pg_catalog.hashtextextended('claim_buzz:' || p_question_id::text, 0)
+  );
+
+  -- Stamped under the lock, so buzzed_at order is the order positions were assigned.
+  insert into public.buzzes (question_id, team_id, status, buzzed_at)
+  values (p_question_id, v_team_id, 'pending', clock_timestamp())
   on conflict (question_id, team_id) do nothing
   returning * into v_buzz;
 
