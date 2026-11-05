@@ -305,6 +305,33 @@ export default function ProjectorView() {
     return () => clearInterval(id)
   }, [phase, room?.status, room?.id, connectToRoom])
 
+  // Roster backup: a late team must reach the screen even if both the database
+  // INSERT event and the team_joined broadcast were missed. Only refetches when
+  // the roster itself changed, so scores are never overwritten by a stale read.
+  useEffect(() => {
+    if (phase !== 'connected' || !room?.id || room.status === 'finished') return
+    const roomId = room.id
+    const id = setInterval(async () => {
+      const { data } = await supabase.from('teams').select('id, name').eq('room_id', roomId)
+      if (!data) return
+      const known = teamsRef.current
+      if (data.length !== known.length || data.some(t => known.find(k => k.id === t.id)?.name !== t.name)) {
+        void refetchTeams()
+      }
+    }, 5000)
+    return () => clearInterval(id)
+  }, [phase, room?.id, room?.status, refetchTeams])
+
+  // A buzz or turn from a team we don't know: fetch the roster now (once per id).
+  const unknownTriedRef = useRef<Set<string>>(new Set())
+  useEffect(() => {
+    const unknown = [...buzzes.map(b => b.team_id), currentTurnTeamId]
+      .filter((id): id is string => !!id && !teams.some(t => t.id === id) && !unknownTriedRef.current.has(id))
+    if (unknown.length === 0) return
+    unknown.forEach(id => unknownTriedRef.current.add(id))
+    void refetchTeams()
+  }, [buzzes, currentTurnTeamId, teams, refetchTeams])
+
   // ── DB Subscriptions ─────────────────────────────────────
 
   useEffect(() => {

@@ -65,6 +65,10 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
   // and kicked teams drop out without a refresh.
   const [teams, setTeams]           = useState<Team[]>(initialTeams)
   useEffect(() => { setTeams(initialTeams) }, [initialTeams])
+  const teamsRef          = useRef<Team[]>(initialTeams)
+  teamsRef.current        = teams
+  const rosterRefreshRef  = useRef<(() => void) | null>(null)
+  const unknownTriedRef   = useRef<Set<string>>(new Set())
   // Host moderation (supabase/phase_b_moderation.sql): which team's panel is open,
   // and a bump that tells the Blocked list to reload after a block
   const [manageTeamId, setManageTeamId] = useState<string | null>(null)
@@ -289,6 +293,26 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
       setTeams(data)
       setScores(new Map(data.map(t => [t.id, t.score])))
     }
+    rosterRefreshRef.current = () => { void refreshRoster() }
+    // Backups for a late join. The database INSERT event alone is not enough: a
+    // dropped or expired Supabase realtime channel silently stops delivering it,
+    // which left late teams off the host list (their buzzes read "Unknown").
+    // 1. phones broadcast team_joined over Ably after creating/joining a team;
+    const onTeamJoined = () => { void refreshRoster() }
+    const ablyCh = ablyClient.channels.get(`room:${roomId}`)
+    ablyCh.subscribe('team_joined', onTeamJoined)
+    // 2. a light poll that only touches state when the roster itself changed
+    //    (scores stay owned by judge results + UPDATE events, so no flicker).
+    const pollRoster = async () => {
+      const { data } = await supabase
+        .from('teams').select('id, name').eq('room_id', roomId)
+      if (!data) return
+      const known = teamsRef.current
+      const changed = data.length !== known.length ||
+        data.some(t => known.find(k => k.id === t.id)?.name !== t.name)
+      if (changed) void refreshRoster()
+    }
+    const rosterPoll = setInterval(() => { void pollRoster() }, 5000)
     const ch = supabase.channel(`host-game-${roomId}`)
       .on('postgres_changes',
         { event: 'UPDATE', schema: 'public', table: 'rooms', filter: `id=eq.${roomId}` },
@@ -311,8 +335,24 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
       .subscribe(status => {
         if (status === 'SUBSCRIBED') void refreshRoster()
       })
-    return () => { supabase.removeChannel(ch) }
+    return () => {
+      supabase.removeChannel(ch)
+      ablyCh.unsubscribe('team_joined', onTeamJoined)
+      clearInterval(rosterPoll)
+      rosterRefreshRef.current = null
+    }
   }, [roomId])
+
+  // 3. a buzz (or turn) from a team we have never heard of means the roster is
+  //    stale — fetch it right away instead of waiting for the poll.
+  useEffect(() => {
+    // Once per unknown id: a kicked team's leftover buzz must not loop fetches.
+    const unknown = [...buzzes.map(b => b.team_id), currentTurnTeamId]
+      .filter((id): id is string => !!id && !teams.some(t => t.id === id) && !unknownTriedRef.current.has(id))
+    if (unknown.length === 0) return
+    unknown.forEach(id => unknownTriedRef.current.add(id))
+    rosterRefreshRef.current?.()
+  }, [buzzes, currentTurnTeamId, teams])
 
   // Restore an accepted preview from the database after a host refresh or a
   // missed broadcast. Double Tap waits here until its winning device saves a wager.

@@ -1962,7 +1962,11 @@ export default function PlayView() {
       // Let the normal startup recovery hydrate the room and roster, with its
       // timeout and retries, instead of leaving a successful join waiting forever.
       setPhase('checking')
-      lobbyChannelRef.current?.publish('team_joined', {})
+      // Announce on the room channel directly: lobbyChannelRef only exists on the
+      // pick-a-team screen, so solo players and newly created teams (most late
+      // arrivals) used to send nothing and the host never heard about them.
+      ablyClient.channels.get(`room:${team.room_id}`).publish('team_joined', { team_id: team.id })
+        .catch(() => { /* host/projector also poll the roster */ })
     } catch (e) {
       if (isBlockedError(e)) { setBlockedHere(true); setPhase('choose_mode'); return }
       setError('Could not join your team. Check your connection and try again.')
