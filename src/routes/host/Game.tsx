@@ -813,6 +813,33 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
     setHostWagerInput('')
   }
 
+  // Open Buzzer from the keyboard or a presentation clicker, so the host can open
+  // on the last word of the read. Acts only while the Open Buzzer button is on
+  // screen (the ref is set only then) and never while typing in a field.
+  const openBuzzerBtnRef = useRef<HTMLButtonElement | null>(null)
+  // A second press before the first update lands would rewrite buzz_opened_at
+  // with a later instant and move the reveal under everyone's thumbs.
+  const openingBuzzerRef = useRef(false)
+  async function openBuzzer(questionId: string) {
+    if (openingBuzzerRef.current) return
+    openingBuzzerRef.current = true
+    try { await activateQuestion(questionId) } finally { openingBuzzerRef.current = false }
+  }
+  useEffect(() => {
+    const OPEN_KEYS = new Set([' ', 'Enter', 'PageDown', 'ArrowRight'])
+    function onKey(e: KeyboardEvent) {
+      if (!OPEN_KEYS.has(e.key) || e.repeat || e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return
+      const el = e.target as HTMLElement | null
+      if (el && (el.isContentEditable || ['INPUT', 'TEXTAREA', 'SELECT'].includes(el.tagName))) return
+      const btn = openBuzzerBtnRef.current
+      if (!btn) return
+      e.preventDefault() // don't also activate whatever button has focus
+      btn.click()
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [])
+
   async function activateQuestion(questionId: string) {
     // Regular clue: the shared reveal instant, written in the same update that makes
     // the clue live. claim_buzz and questions_public hold the buzzer and the clue
@@ -2615,10 +2642,11 @@ export default function Game({ roomId, initialRoom, teams: initialTeams, onTeamR
                   </div>
                 ) : null
               })()}
-              <p className="text-gray-600 text-xs">Read the clue aloud, then open the buzzer</p>
+              <p className="text-gray-600 text-xs">Read the clue aloud, then open the buzzer: Space, Enter or a clicker works too</p>
               <div className="flex items-center gap-3">
                 <button
-                  onClick={() => activateQuestion(previewInfo.questionId)}
+                  ref={openBuzzerBtnRef}
+                  onClick={() => openBuzzer(previewInfo.questionId)}
                   className="px-8 py-3 rounded-xl font-bold bg-yellow-400 text-gray-950 hover:bg-yellow-300 transition-colors"
                 >
                   Open Buzzer
