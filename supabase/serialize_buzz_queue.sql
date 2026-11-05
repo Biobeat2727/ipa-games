@@ -5,7 +5,7 @@
 -- "1st" while the host (which reads after commit) showed the real order.
 --
 -- Fix: take a per-clue lock before inserting, and stamp buzzed_at only once the
--- lock is held. Buzzes on one clue are now recorded one at a time, so each
+-- lock is held (in claim_buzz and in the server-time trigger at the bottom). Buzzes on one clue are now recorded one at a time, so each
 -- phone's count sees every earlier buzz, and buzzed_at order (which the host
 -- and projector sort by) matches the order the positions were handed out.
 -- The lock is held for a single insert + count — a few milliseconds.
@@ -117,5 +117,18 @@ $$;
 
 revoke all on function public.claim_buzz(uuid, text, text) from public;
 grant execute on function public.claim_buzz(uuid, text, text) to anon, authenticated;
+
+-- The live database also has trg_buzzes_server_time (BEFORE INSERT on buzzes,
+-- created in the dashboard, not in this repo), which overwrote buzzed_at with
+-- now() — the transaction START time. A buzz whose transaction started earlier
+-- could take the lock later, and both phones would count themselves 1st.
+-- clock_timestamp() is the moment of the insert, i.e. after the lock is held.
+-- The trigger itself is unchanged; only its function body.
+create or replace function public.enforce_server_buzz_time()
+returns trigger
+language plpgsql
+as $function$
+BEGIN NEW.buzzed_at := clock_timestamp(); RETURN NEW; END;
+$function$;
 
 commit;
