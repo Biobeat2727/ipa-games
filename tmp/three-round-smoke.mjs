@@ -139,9 +139,9 @@ async function hostClickClue(host, roundLabel, { doubleTap = false } = {}) {
   }, { label: roundLabel, dt: doubleTap })
 }
 async function tapBuzz(p) {
-  await waitFor(p, () => [...document.querySelectorAll('button')].some(x => x.innerText.trim() === 'TAP IN!') && !document.body.innerText.includes('Buzz window closed'), null, 25000, 'buzz button')
+  await waitFor(p, () => [...document.querySelectorAll('button')].some(x => x.innerText.trim() === 'TAP IN!' && !x.hasAttribute('aria-disabled')) && !document.body.innerText.includes('Buzz window closed'), null, 25000, 'buzz button')
   await p.evaluate(() => {
-    const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!')
+    const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!' && !x.hasAttribute('aria-disabled'))
     b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 190, clientY: 600 }))
   })
 }
@@ -150,15 +150,18 @@ async function answer(p, text) {
   await setInput(p, ANSWER_BOX, text)
   await click(p, 'Submit Response')
 }
+let hostJudgeShot = false, hostPreviewShot = false
 async function judge(host, outcome) {
   await click(host, 'Judge', 30000)
   await waitFor(host, () => document.body.innerText.includes('\u2713 Correct') && !document.body.innerText.includes('Waiting for response\u2026'), null, 12000).catch(() => {})
+  if (!hostJudgeShot) { hostJudgeShot = true; await shot(host, 'host-judging') }
   await click(host, outcome === 'correct' ? '\u2713 Correct' : '\u2717 Wrong')
   await sleep(900)
 }
 /** One regular clue: host picks from `roundLabel`'s list, `player` buzzes and is judged correct. */
 async function playRegularClue(host, player, roundLabel) {
   const clue = await hostClickClue(host, roundLabel)
+  if (!hostPreviewShot) { hostPreviewShot = true; await hasText(host, 'Open Buzzer', 10000); await shot(host, 'host-clue-preview') }
   await click(host, 'Open Buzzer')
   await tapBuzz(player)
   const answered = answer(player, 'What is the right answer?')
@@ -234,6 +237,9 @@ try {
 
   // ── Projector + 3 phones ──
   const projector = await browser.newPage()
+  // Surface crashes behind the projector's error screen in the log
+  projector.on('pageerror', e => log('PROJECTOR pageerror: ' + e.message))
+  projector.on('console', m => { if (m.type() === 'error') log('PROJECTOR console.error: ' + m.text().slice(0, 300)) })
   await projector.setViewport({ width: 1600, height: 900 })
   await projector.goto(`${BASE}/projector`, { waitUntil: 'domcontentloaded' })
 
@@ -255,13 +261,13 @@ try {
   await click(host, 'Start Game')
   await hasText(host, 'Scoreboard', 20000, 'host game screen')
   await sleep(2500)
-  if (await pageHas(host, 'Category Intros')) { await click(host, 'Skip intros'); await sleep(1500) }
+  if (await pageHas(host, 'Category Intros')) { await click(host, 'Skip intros'); await click(host, 'Skip'); await sleep(1500) }
   record('Round 1: host list marks Round 1 as now playing', await softWait(host, 'Round 1 \u2014 now playing', 10000), await snap(host))
   record('Round 1: projector board labelled Round 1', await softWait(projector, 'Round 1', 15000), await snap(projector))
 
   // ── ROUND 1: one clue to Alpha, then end the round early ──
   await playRegularClue(host, A, 'Round 1')
-  await click(host, 'End Round 1 early')
+  await click(host, 'End Round 1 early'); await click(host, 'End round')
   await hasText(host, 'Ready for Round 2?', 10000)
   await click(host, 'Show Scores & Start Round 2')
   record('R1 intermission: phone announces Round 2', await softWait(A, 'Round 2 is coming', 15000), await snap(A))
@@ -272,7 +278,7 @@ try {
   record('Round 2: projector board labelled Round 2', await softWait(projector, 'Round 2', 15000), await snap(projector))
   record('Round 2: host list marks Round 2 as now playing', await softWait(host, 'Round 2 \u2014 now playing', 10000), await snap(host))
   await sleep(3000)
-  if (await pageHas(host, 'Category Intros')) { await click(host, 'Skip intros'); await sleep(1500) }
+  if (await pageHas(host, 'Category Intros')) { await click(host, 'Skip intros'); await click(host, 'Skip'); await sleep(1500) }
   {
     const room = await activeRoom()
     record('Round 2: rooms.status = round_2', room?.status === 'round_2', room?.status)
@@ -280,7 +286,7 @@ try {
 
   // ── ROUND 2: one clue to Bravo, MANUAL early advance, refresh during intermission, rapid clicks ──
   await playRegularClue(host, B, 'Round 2')
-  await click(host, 'End Round 2 early')
+  await click(host, 'End Round 2 early'); await click(host, 'End round')
   record('Round 2: manual early advance offers Round 3 (not Final Tap)', await softWait(host, 'Ready for Round 3?', 10000), await snap(host))
   await click(host, 'Show Scores & Start Round 3')
   record('R2 intermission: phone announces Round 3', await softWait(B, 'Round 3 is coming', 15000), await snap(B))
@@ -305,7 +311,7 @@ try {
   record('Round 3: projector board labelled Round 3', await softWait(projector, 'Round 3', 15000), await snap(projector))
   record('Round 3: host list marks Round 3 as now playing', await softWait(host, 'Round 3 \u2014 now playing', 10000), await snap(host))
   await sleep(3000)
-  if (await pageHas(host, 'Category Intros')) { await click(host, 'Skip intros'); await sleep(1500) }
+  if (await pageHas(host, 'Category Intros')) { await click(host, 'Skip intros'); await click(host, 'Skip'); await sleep(1500) }
   await shot(projector, 'projector-round3-board'); await shot(A, 'phone-round3-board')
 
   // ── ROUND 3: regular clue claim + judgment (Charlie) ──
@@ -343,18 +349,21 @@ try {
 
     await hostClickClue(host, 'Round 3', { doubleTap: true })
     await hasText(host, 'Pick the team taking this Double Tap', 10000)
-    await click(host, NAMES[0])
+    // The Double Tap pick list, not the scoreboard's team-name button (which opens
+    // the host moderation panel and shares the label)
+    await host.evaluate(n => [...document.querySelectorAll('button')]
+      .find(b => !b.disabled && b.innerText.trim().startsWith(n) && b.title !== 'Players, rename, remove or block').click(), NAMES[0])
     record(`Round 3 DT: host panel shows max ${expectedMax} pts`, await softWait(host, `max ${expectedMax} pts`, 10000), await snap(host))
     record(`Round 3 DT: phone shows Max: $${expectedMax.toLocaleString()}`, await softWait(A, `Max: $${expectedMax.toLocaleString()}`, 15000), await snap(A))
     await shot(A, 'phone-round3-double-tap-wager')
 
     // Database limit, hit directly: an over-max wager must be refused, a legal one accepted.
-    // src/lib/session.ts stores the player identity under this key
-    const sessionId = await A.evaluate(() => localStorage.getItem('trivia_session_id'))
+    // src/lib/session.ts stores the player identity (device id + secret) under these keys
+    const [sessionId, deviceSecret] = await A.evaluate(() => [localStorage.getItem('trivia_device_id'), localStorage.getItem('trivia_device_secret')])
     if (sessionId) {
-      const over = await rpc('confirm_question_selection', { p_room_id: room.id, p_team_id: alpha.id, p_question_id: room.pending_question_id, p_session_id: sessionId, p_wager: expectedMax + 1 })
+      const over = await rpc('confirm_question_selection', { p_room_id: room.id, p_team_id: alpha.id, p_question_id: room.pending_question_id, p_session_id: sessionId, p_wager: expectedMax + 1, p_device_secret: deviceSecret })
       record(`Round 3 DT: database refuses wager ${expectedMax + 1} (> max)`, over.body === false, JSON.stringify(over))
-      const under = await rpc('confirm_question_selection', { p_room_id: room.id, p_team_id: alpha.id, p_question_id: room.pending_question_id, p_session_id: sessionId, p_wager: 4 })
+      const under = await rpc('confirm_question_selection', { p_room_id: room.id, p_team_id: alpha.id, p_question_id: room.pending_question_id, p_session_id: sessionId, p_wager: 4, p_device_secret: deviceSecret })
       record('Round 3 DT: database refuses wager 4 (< 5)', under.body === false, JSON.stringify(under))
     } else {
       record('Round 3 DT: database limit probe (session id not found in localStorage — skipped)', false, 'adjust the localStorage key lookup')
@@ -377,7 +386,7 @@ try {
   }
 
   // ── ROUND 3 → FINAL TAP ──
-  await click(host, 'End Round 3 early')
+  await click(host, 'End Round 3 early'); await click(host, 'End round')
   record('Round 3 complete: host offers Final Tap', await softWait(host, 'Ready for Final Tap?', 10000), await snap(host))
   await click(host, 'Show Scores & Start Final Tap')
   record('R3 intermission: phone announces Final Tap', await softWait(A, 'Final Tap is next', 15000), await snap(A))

@@ -297,7 +297,7 @@ try {
   // Real round transitions — the same buttons the host presses on the night.
   async function advanceRound(from) {
     const next = from === 3 ? 'Final Tap' : `Round ${from + 1}`
-    await clickButton(host, `End Round ${from} early`)
+    await clickButton(host, `End Round ${from} early`); await clickButton(host, 'End round')
     await clickButton(host, `Show Scores & Start ${next}`)
     await hasText(players[0], from === 1 ? 'Round One Down' : from === 2 ? 'Round Two Down' : 'Last Call', 15000, 'player score map')
     await sleep(3500) // draw-on animation
@@ -320,11 +320,11 @@ try {
     // A live buzz button for THIS clue: the window must be open (a stale screen from
     // the previous clue can still show the button with "Buzz window closed").
     await waitFor(p, () => {
-      const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!')
+      const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!' && !x.hasAttribute('aria-disabled'))
       return !!b && !document.body.innerText.includes('Buzz window closed')
     }, null, 25000, 'buzz button')
     await p.evaluate(() => {
-      const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!')
+      const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!' && !x.hasAttribute('aria-disabled'))
       b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 187, clientY: 600 }))
     })
   }

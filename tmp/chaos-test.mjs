@@ -208,7 +208,7 @@ try {
   await click(host, 'Start Game')
   await hasText(host, 'Scoreboard', 20000, 'host game')
   await sleep(2500)
-  if (await pageHas(host, 'Category Intros')) { await click(host, 'Skip intros'); await sleep(2000) }
+  if (await pageHas(host, 'Category Intros')) { await click(host, 'Skip intros'); await click(host, 'Skip'); await sleep(2000) }
 
   // ── DISRUPTION 2: network drop during the board phase ──
   await networkDrop(players[1], 6000)
@@ -233,13 +233,13 @@ try {
     await players[2].reload({ waitUntil: 'domcontentloaded' })
     await sleep(3500)
     const canBuzz = await players[2].evaluate(() =>
-      [...document.querySelectorAll('button')].some(b => b.innerText.trim() === 'TAP IN!'))
+      [...document.querySelectorAll('button')].some(b => b.innerText.trim() === 'TAP IN!' && !b.hasAttribute('aria-disabled')))
     record('Buzzer open: refresh restores the live buzz button', canBuzz, await snap(players[2]))
   })
   // someone still answers so the game advances
-  await waitFor(players[0], () => [...document.querySelectorAll('button')].some(b => b.innerText.trim() === 'TAP IN!'), null, 25000, 'buzz p0')
+  await waitFor(players[0], () => [...document.querySelectorAll('button')].some(b => b.innerText.trim() === 'TAP IN!' && !b.hasAttribute('aria-disabled')), null, 25000, 'buzz p0')
   await players[0].evaluate(() => {
-    const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!')
+    const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!' && !x.hasAttribute('aria-disabled'))
     b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 190, clientY: 600 }))
   })
   await waitFor(players[0], s => !!document.querySelector(s), ANSWER_BOX, 25000, 'answer p0')
@@ -250,9 +250,9 @@ try {
 
   // ── DISRUPTION 4: refresh WHILE typing an answer ──
   await playClue('q2', async () => {
-    await waitFor(players[3], () => [...document.querySelectorAll('button')].some(b => b.innerText.trim() === 'TAP IN!'), null, 25000, 'buzz p3')
+    await waitFor(players[3], () => [...document.querySelectorAll('button')].some(b => b.innerText.trim() === 'TAP IN!' && !b.hasAttribute('aria-disabled')), null, 25000, 'buzz p3')
     await players[3].evaluate(() => {
-      const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!')
+      const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!' && !x.hasAttribute('aria-disabled'))
       b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 190, clientY: 600 }))
     })
     await waitFor(players[3], s => !!document.querySelector(s), ANSWER_BOX, 25000, 'answer p3')
@@ -281,12 +281,12 @@ try {
     await backgroundApp(players[5], 5000)
     await sleep(2500)
     const canBuzz = await players[5].evaluate(() =>
-      [...document.querySelectorAll('button')].some(b => b.innerText.trim() === 'TAP IN!'))
+      [...document.querySelectorAll('button')].some(b => b.innerText.trim() === 'TAP IN!' && !b.hasAttribute('aria-disabled')))
     record('Buzzer open: app backgrounded then reopened can still buzz', canBuzz, await snap(players[5]))
   })
-  await waitFor(players[6], () => [...document.querySelectorAll('button')].some(b => b.innerText.trim() === 'TAP IN!'), null, 25000, 'buzz p6')
+  await waitFor(players[6], () => [...document.querySelectorAll('button')].some(b => b.innerText.trim() === 'TAP IN!' && !b.hasAttribute('aria-disabled')), null, 25000, 'buzz p6')
   await players[6].evaluate(() => {
-    const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!')
+    const b = [...document.querySelectorAll('button')].find(x => x.innerText.trim() === 'TAP IN!' && !x.hasAttribute('aria-disabled'))
     b.dispatchEvent(new PointerEvent('pointerdown', { bubbles: true, clientX: 190, clientY: 600 }))
   })
   await waitFor(players[6], s => !!document.querySelector(s), ANSWER_BOX, 25000, 'answer p6')
@@ -337,8 +337,28 @@ try {
   record('Final Tap: eliminated (0-point) phone refresh shows the eliminated screen, not a wager',
     await softWait(players[8], 'night ends here', 20000) && !(await pageHas(players[8], 'Lock In Wager')), await snap(players[8]))
 
-  // everyone wagers
-  for (let i = 0; i < players.length; i++) {
+  // Which phones are still in Final Tap? Eliminated phones show "night ends here";
+  // skip them instead of burning a 15s input timeout on each (12 phones ≈ 6 min).
+  async function inFinalTap(p) {
+    const t0 = Date.now()
+    while (Date.now() - t0 < 8000) {
+      const s = await p.evaluate(() => {
+        const t = document.body.innerText.toLowerCase()
+        if (t.includes('night ends here')) return 'out'
+        if (document.querySelector('input[type="number"]') || t.includes('wager locked') || t.includes('locked in')) return 'in'
+        return null
+      }).catch(() => null)
+      if (s) return s === 'in'
+      await sleep(250)
+    }
+    return true // unknown — fall through to the normal (slow) attempt
+  }
+  const fjActive = []
+  for (let i = 0; i < players.length; i++) if (await inFinalTap(players[i])) fjActive.push(i)
+  log('  Final Tap active phones: ' + fjActive.join(', '))
+
+  // every active team wagers
+  for (const i of fjActive) {
     try {
       await setInput(players[i], 'input[type="number"]', '50')
       await click(players[i], 'Lock In Wager', 12000)
@@ -363,8 +383,8 @@ try {
   record('Final Tap: refresh during the question restores the clue + timer',
     backOnFj, await snap(players[3]))
 
-  // everyone answers
-  for (let i = 0; i < players.length; i++) {
+  // every active team answers
+  for (const i of fjActive) {
     try {
       await setInput(players[i], ANSWER_BOX, 'What is a final answer?')
       await click(players[i], 'Submit Response', 8000)
